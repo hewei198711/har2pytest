@@ -14,6 +14,7 @@ from .har_parser import HARParser
 from .api_generator import APIGenerator
 from .testcase_generator import TestCaseGenerator
 from .swagger_updater import SwaggerDocUpdater
+from .logger import get_logger, logger
 from .utils import (
     extract_url_from_file,
     format_single_parameter_value,
@@ -27,6 +28,8 @@ __all__ = [
     'APIGenerator',
     'TestCaseGenerator',
     'SwaggerDocUpdater',
+    'get_logger',
+    'logger',
     'extract_url_from_file',
     'format_single_parameter_value',
     'format_list_for_python',

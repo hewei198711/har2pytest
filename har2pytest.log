@@ -1,0 +1,30 @@
+2026-04-16 15:55:55,434 - har2pytest - INFO - 配置文件路径: D:\ligeit_github\har2pytest\har2pytest_config.json
+2026-04-16 15:55:55,435 - har2pytest - INFO - 配置文件是否存在: True
+2026-04-16 15:55:55,436 - har2pytest - INFO - 成功加载配置文件，DEFAULT_SERVICE_PACKAGE: custom_api
+2026-04-16 15:55:55,437 - har2pytest - INFO - har2pytest - API生成和更新工具
+2026-04-16 15:55:55,438 - har2pytest - INFO - ==================================================
+2026-04-16 15:55:55,438 - har2pytest - INFO - 
+2026-04-16 15:55:55,438 - har2pytest - INFO - 基本用法:
+2026-04-16 15:55:55,439 - har2pytest - INFO -   har2pytest <command> [arguments]
+2026-04-16 15:55:55,439 - har2pytest - INFO - 
+2026-04-16 15:55:55,440 - har2pytest - INFO - 支持的命令:
+2026-04-16 15:55:55,440 - har2pytest - INFO -   generate [har_file] [output_dir]                  从HAR文件生成API接口
+2026-04-16 15:55:55,440 - har2pytest - INFO -   testcase [har_file] [output_dir]                  从HAR文件生成步骤化pytest用例
+2026-04-16 15:55:55,441 - har2pytest - INFO -   testcase list_query [task_id] [har_file]           生成查询类参数化测试用例
+2026-04-16 15:55:55,441 - har2pytest - INFO -   testcase complex_scenario [task_id] [url] [har]  生成复杂场景流程测试用例
+2026-04-16 15:55:55,441 - har2pytest - INFO -   update [api_dir]                                  更新API文档信息
+2026-04-16 15:55:55,441 - har2pytest - INFO -   summary [har_file]                                显示HAR文件摘要
+2026-04-16 15:55:55,442 - har2pytest - INFO -   help                                             显示此帮助信息
+2026-04-16 15:55:55,442 - har2pytest - INFO -   --help                                          显示此帮助信息
+2026-04-16 15:55:55,442 - har2pytest - INFO - 
+2026-04-16 15:55:55,442 - har2pytest - INFO - 示例:
+2026-04-16 15:55:55,443 - har2pytest - INFO -   har2pytest generate api_request.har api
+2026-04-16 15:55:55,443 - har2pytest - INFO -   har2pytest testcase api_request.har testcases
+2026-04-16 15:55:55,443 - har2pytest - INFO -   har2pytest testcase list_query test_4291 兑换单代客售后.har
+2026-04-16 15:55:55,444 - har2pytest - INFO -   har2pytest testcase complex_scenario test_4291 /user/mgmt/order/return/submit 代客售后.har
+2026-04-16 15:55:55,444 - har2pytest - INFO -   har2pytest update api
+2026-04-16 15:55:55,445 - har2pytest - INFO -   har2pytest summary api_request.har
+2026-04-16 15:55:55,445 - har2pytest - INFO - 
+2026-04-16 15:55:55,445 - har2pytest - INFO - 默认值:
+2026-04-16 15:55:55,446 - har2pytest - INFO -   HAR文件: api_request.har
+2026-04-16 15:55:55,446 - har2pytest - INFO -   输出目录: api

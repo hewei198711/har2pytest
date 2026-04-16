@@ -1,0 +1,55 @@
+{
+  "BASE_URLS": [
+    "https://uc-test.perfect99.com/api",
+    "https://uc-uat.perfect99.com/api"
+  ],
+  "KILL_URLS": [
+    "aliyuncs.com"
+  ],
+  "PATH_URLS": [
+    "/mobile/msg/manage/letter/dashbord/{usrId}",
+    "/mobile/msg/manage/letter/dashbord/{usrId}/{systemId}",
+    "/mobile/order/carts/getRecommendProduct/{serialNo}",
+    "/mobile/order/before/by/store/{cardNo}",
+    "/mobile/order/before/by/{cardNo}"
+  ],
+  "SERVICE_MAPPING": {
+    "appstore": "mall_store_application",
+    "store": "mall_center_store",
+    "mobile": "mall_mobile_application",
+    "member": "mall_center_member",
+    "invt": "mall_center_inventory",
+    "mgmt": "mall_mgmt_application",
+    "seckill": "mall_center_seckill",
+    "user": "mall_center_user",
+    "xxl": "basic_services",
+    "storage": "basic_services",
+    "oss": "oss_json"
+  },
+  "DEFAULT_SERVICE_PACKAGE": "custom_api",
+  "SWAGGER_DOC_URLS": {
+    "mall_mgmt_application": "https://uc-test.perfect99.com/sw/mall-mgmt-application",
+    "mall_center_inventory": "https://uc-dev.perfect99.com/sw/mall-center-inventory",
+    "mall_center_store": "https://uc-dev.perfect99.com/sw/mall-center-store",
+    "mall_store_application": "https://uc-dev.perfect99.com/sw/mall-store-application/appStore",
+    "mall_mobile_application": "https://uc-test.perfect99.com/sw/mall-mobile-application",
+    "mall-center-seckill": "https://uc-dev.perfect99.com/sw/mall-center-seckill",
+    "settle_job": "https://uc-dev.perfect99.com/sw/settle-job",
+    "mall_center_user": "https://uc-dev.perfect99.com/sw/mall-center-user",
+    "mall_center_member": "https://uc-test.perfect99.com/sw/mall-center-member"
+  },
+  "INVALID_PARAMS": [
+    "nonce",
+    "sign",
+    "timestamp",
+    "partnerKey"
+  ],
+  "PAGINATION_PARAMS": [
+    "pageNum",
+    "pageSize",
+    "commitEndTime",
+    "commitStartTime",
+    "header"
+  ],
+  "TESTCASE_DIR": "testcases"
+}

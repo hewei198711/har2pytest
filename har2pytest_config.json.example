@@ -1,0 +1,29 @@
+{
+  "BASE_URLS": [
+    "https://your-api-base-url.com/api"
+  ],
+  "KILL_URLS": [
+    "aliyuncs.com",
+    "example.com"
+  ],
+  "SERVICE_MAPPING": {
+    "api": "your_api_service",
+    "user": "user_service",
+    "order": "order_service"
+  },
+  "DEFAULT_SERVICE_PACKAGE": "api",
+  "SWAGGER_DOC_URLS": {
+    "your_api_service": "https://your-api-docs.com/swagger"
+  },
+  "INVALID_PARAMS": [
+    "rnd",
+    "timestamp",
+    "_t",
+    "version"
+  ],
+  "PAGINATION_PARAMS": [
+    "pageNum",
+    "pageSize"
+  ],
+  "TESTCASE_DIR": "testcases"
+}

@@ -2,18 +2,18 @@
 
 
 import os
-import re
 from typing import Dict, Any, List, Optional
 
 from .config import APIConfig
 from .har_parser import HARParser
 from .utils import format_single_parameter_value
+from .logger import logger
 
 
 class APIGenerator:
     """API文件生成器类"""
 
-    def __init__(self, output_dir: str = APIConfig.DEFAULT_SERVICE_PACKAGE):
+    def __init__(self, output_dir: str = None):
         """
         初始化API生成器
 
@@ -23,6 +23,8 @@ class APIGenerator:
         Example:
             generator = APIGenerator(output_dir="api")
         """
+        if output_dir is None:
+            output_dir = APIConfig.DEFAULT_SERVICE_PACKAGE()
         self.output_dir = output_dir
         self.har_parser = HARParser()
 
@@ -50,7 +52,7 @@ class APIGenerator:
         clean_url = url.lstrip('/')
         url_parts = clean_url.split('/')
 
-        for path_pattern in APIConfig.PATH_URLS:
+        for path_pattern in APIConfig.PATH_URLS():
             pattern_parts = path_pattern.lstrip('/').split('/')
 
             if len(url_parts) != len(pattern_parts):
@@ -561,7 +563,7 @@ class APIGenerator:
         service_package = self.determine_service_package(url)
 
         if self.check_api_exists(url, service_package):
-            print(f"接口已存在，跳过生成: {method} {url} (服务包: {service_package})")
+            logger.info(f"接口已存在，跳过生成: {method} {url} (服务包: {service_package})")
             return None
 
         function_name = self.extract_function_name(url)
@@ -581,7 +583,7 @@ class APIGenerator:
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content)
 
-        print(f"生成API文件: {filepath} (服务包: {service_package})")
+        logger.info(f"生成API文件: {filepath} (服务包: {service_package})")
         return filepath
 
     def generate_api_files_from_har(self, har_file_path: str) -> List[str]:
@@ -603,10 +605,10 @@ class APIGenerator:
         requests = self.har_parser.extract_requests_from_har(har_file_path)
 
         if not requests:
-            print(f"HAR文件 {har_file_path} 中没有找到有效的API请求")
+            logger.info(f"HAR文件 {har_file_path} 中没有找到有效的API请求")
             return []
 
-        print(f"发现 {len(requests)} 个API请求")
+        logger.info(f"发现 {len(requests)} 个API请求")
 
         generated_files = []
         for request_info in requests:
@@ -615,9 +617,9 @@ class APIGenerator:
                 if filepath:
                     generated_files.append(filepath)
             except Exception as e:
-                print(f"生成API文件失败: {str(e)}")
+                logger.error(f"生成API文件失败: {str(e)}")
                 import traceback
-                traceback.print_exc()
+                logger.error(traceback.format_exc())
 
         return generated_files
 
@@ -659,4 +661,4 @@ class APIGenerator:
         with open(index_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(content))
 
-        print(f"生成索引文件: {index_path}")
+        logger.info(f"生成索引文件: {index_path}")

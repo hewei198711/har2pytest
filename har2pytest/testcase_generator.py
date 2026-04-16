@@ -6,16 +6,21 @@ from typing import Dict, Any, List, Optional
 from .config import APIConfig
 from .har_parser import HARParser
 from .utils import extract_url_from_file, format_single_parameter_value
+from .logger import logger
 
 
 
 class TestCaseGenerator:
     """pytest用例生成器类"""
 
-    def __init__(self, api_dir: str = APIConfig.DEFAULT_SERVICE_PACKAGE, output_dir: str = APIConfig.TESTCASE_DIR, filter_duplicate_url=False):
+    def __init__(self, api_dir: str = None, output_dir: str = None, filter_duplicate_url=False):
         """
         初始化用例生成器
         """
+        if api_dir is None:
+            api_dir = APIConfig.DEFAULT_SERVICE_PACKAGE()
+        if output_dir is None:
+            output_dir = APIConfig.TESTCASE_DIR()
         self.api_dir = api_dir
         self.output_dir = output_dir
         self.filter_duplicate_url = filter_duplicate_url
@@ -33,7 +38,7 @@ class TestCaseGenerator:
             if func_match:
                 return func_match.group(1)
         except Exception as e:
-            print(f"读取文件 {filepath} 失败: {str(e)}")
+            logger.error(f"读取文件 {filepath} 失败: {str(e)}")
 
         return None
 
@@ -111,7 +116,7 @@ class TestCaseGenerator:
 
             for param_name, param_value in req.items():
                 # 只处理非分页参数
-                if param_name not in APIConfig.PAGINATION_PARAMS:
+                if param_name not in APIConfig.PAGINATION_PARAMS():
                     # 非 None 且非空字符串的值视为有效参数
                     if param_value is not None and param_value != "":
                         valid_params[param_name] = param_value
@@ -425,20 +430,20 @@ class TestCaseGenerator:
         从HAR文件生成pytest用例文件
         """
         if not os.path.exists(har_file_path):
-            print(f"HAR文件不存在: {har_file_path}")
+            logger.info(f"HAR文件不存在: {har_file_path}")
             return None
 
         api_files = self.find_api_files_for_har(har_file_path)
 
         if not api_files:
-            print(f"未找到HAR文件 {har_file_path} 对应的API文件")
+            logger.info(f"未找到HAR文件 {har_file_path} 对应的API文件")
             return None
 
-        print(f"找到 {len(api_files)} 个对应的API文件")
+        logger.info(f"找到 {len(api_files)} 个对应的API文件")
 
         if output_subdir:
             output_dir = os.path.join(self.output_dir, output_subdir)
-            print(output_dir)
+            logger.info(output_dir)
         else:
             output_dir = self.output_dir
 
@@ -452,7 +457,7 @@ class TestCaseGenerator:
         with open(test_filepath, 'w', encoding='utf-8') as f:
             f.write(test_content)
 
-        print(f"生成测试用例文件: {test_filepath}")
+        logger.info(f"生成测试用例文件: {test_filepath}")
         return test_filepath
 
     def generate_list_query_testcases(self, har_file_path: str, task_id: str) -> List[str]:
@@ -460,16 +465,16 @@ class TestCaseGenerator:
         生成查询类参数化测试用例
         """
         if not os.path.exists(har_file_path):
-            print(f"HAR文件不存在: {har_file_path}")
+            logger.info(f"HAR文件不存在: {har_file_path}")
             return []
 
         api_files = self.find_api_files_for_har(har_file_path)
 
         if not api_files:
-            print(f"未找到HAR文件 {har_file_path} 对应的API文件")
+            logger.info(f"未找到HAR文件 {har_file_path} 对应的API文件")
             return []
 
-        print(f"找到 {len(api_files)} 个对应的API文件")
+        logger.info(f"找到 {len(api_files)} 个对应的API文件")
 
         # 处理task_id，去掉test_前缀
         if task_id and task_id.startswith('test_'):
@@ -498,17 +503,17 @@ class TestCaseGenerator:
                 test_content = self.generate_parametrized_test_content(har_file_path, api_file, task_id)
 
                 if not test_content:
-                    print(f"跳过文件（无法生成内容）: {api_file}")
+                    logger.info(f"跳过文件（无法生成内容）: {api_file}")
                     continue
 
                 with open(test_filepath, 'w', encoding='utf-8') as f:
                     f.write(test_content)
 
                 generated_files.append(test_filepath)
-                print(f"生成测试用例文件: {test_filepath}")
+                logger.info(f"生成测试用例文件: {test_filepath}")
 
             except Exception as e:
-                print(f"生成测试用例文件失败 {api_file}: {str(e)}")
+                logger.error(f"生成测试用例文件失败 {api_file}: {str(e)}")
 
         return generated_files
 
@@ -652,7 +657,7 @@ class TestCaseGenerator:
         ]
         
         # 添加参数说明
-        print(param_remarks)
+        logger.debug(f"参数备注: {param_remarks}")
         for param_name in all_params:
             # 使用参数备注，如果没有备注则显示"可选"
             remark = param_remarks.get(param_name, "# TODO 请填写参数备注")
@@ -787,7 +792,7 @@ class TestCaseGenerator:
                     # 例如："兑换流水号" 或 "顾客手机号"
                     param_remarks[param_name] = remark.strip()
         except Exception as e:
-            print(f"读取API文件 {api_file} 失败: {str(e)}")
+            logger.error(f"读取API文件 {api_file} 失败: {str(e)}")
         
         return param_remarks
 
@@ -796,16 +801,16 @@ class TestCaseGenerator:
         生成复杂场景流程测试用例
         """
         if not os.path.exists(har_file_path):
-            print(f"HAR文件不存在: {har_file_path}")
+            logger.info(f"HAR文件不存在: {har_file_path}")
             return None
 
         api_files = self.find_api_files_for_har(har_file_path)
 
         if not api_files:
-            print(f"未找到HAR文件 {har_file_path} 对应的API文件")
+            logger.info(f"未找到HAR文件 {har_file_path} 对应的API文件")
             return None
 
-        print(f"找到 {len(api_files)} 个对应的API文件")
+        logger.info(f"找到 {len(api_files)} 个对应的API文件")
 
         # 处理task_id，去掉test_前缀
         if task_id and task_id.startswith('test_'):
@@ -821,7 +826,7 @@ class TestCaseGenerator:
                     break
 
             if not target_api_file:
-                print(f"未找到指定URL对应的API文件: {target_url}")
+                logger.info(f"未找到指定URL对应的API文件: {target_url}")
                 return None
         else:
             # 没有指定目标接口，退出
@@ -847,11 +852,11 @@ class TestCaseGenerator:
         test_content = self.generate_test_case_content(har_file_path, api_files, task_id, target_api_file, target_url)
 
         if not test_content:
-            print("无法生成测试用例内容")
+            logger.info("无法生成测试用例内容")
             return None
 
         with open(test_filepath, 'w', encoding='utf-8') as f:
             f.write(test_content)
 
-        print(f"生成测试用例文件: {test_filepath}")
+        logger.info(f"生成测试用例文件: {test_filepath}")
         return test_filepath

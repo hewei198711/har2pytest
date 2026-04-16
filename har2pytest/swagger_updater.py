@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 
 from .config import APIConfig
 from .utils import extract_url_from_file
+from .logger import logger
 
 
 class SwaggerDocUpdater:
@@ -40,7 +41,7 @@ class SwaggerDocUpdater:
 
         for doc_path in doc_paths:
             try:
-                print(f"正在获取Swagger文档: {service_base_url}{doc_path}")
+                logger.info(f"正在获取Swagger文档: {service_base_url}{doc_path}")
 
                 headers = {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -54,17 +55,17 @@ class SwaggerDocUpdater:
 
                     if 'paths' in data:
                         self.swagger_cache[service_base_url] = data
-                        print(f"✓ 成功获取 {len(data['paths'])} 个API路径 (使用 {doc_path})")
+                        logger.info(f"✓ 成功获取 {len(data['paths'])} 个API路径 (使用 {doc_path})")
                         return data
                     else:
-                        print(f"❌ 文档格式不正确，缺少paths字段")
+                        logger.warning(f"❌ 文档格式不正确，缺少paths字段")
                         continue
 
             except Exception as e:
-                print(f"❌ 获取Swagger文档失败 {service_base_url}{doc_path}: {str(e)}")
+                logger.error(f"❌ 获取Swagger文档失败 {service_base_url}{doc_path}: {str(e)}")
                 continue
 
-        print(f"❌ 尝试所有路径后仍然无法获取文档: {service_base_url}")
+        logger.error(f"❌ 尝试所有路径后仍然无法获取文档: {service_base_url}")
         return None
 
     def find_api_info_in_swagger(self, swagger_data: Dict[str, Any], api_path: str, method: str = 'GET') -> Dict[str, Any]:
@@ -93,22 +94,22 @@ class SwaggerDocUpdater:
             if stripped_path in paths:
                 path_data = paths[stripped_path]
                 matched_path = stripped_path
-                print(f"去掉appStore前缀匹配: {stripped_path}")
+                logger.debug(f"去掉appStore前缀匹配: {stripped_path}")
         else:
             for path_key in paths.keys():
                 if (api_path in path_key or path_key in api_path or
                     api_path in path_key or path_key in api_path):
                     path_data = paths[path_key]
                     matched_path = path_key
-                    print(f"模糊匹配: {matched_path}")
+                    logger.debug(f"模糊匹配: {matched_path}")
                     break
 
         if not path_data:
-            print(f"未找到路径: {api_path}")
+            logger.info(f"未找到路径: {api_path}")
             return api_info
 
         if matched_path != api_path:
-            print(f"找到匹配路径: {matched_path}")
+            logger.debug(f"找到匹配路径: {matched_path}")
 
         method_lower = method.lower()
 
@@ -164,7 +165,7 @@ class SwaggerDocUpdater:
                 desc_pattern = r'TODO:\s*添加接口描述'
                 if re.search(desc_pattern, updated_content):
                     updated_content = re.sub(desc_pattern, description, updated_content)
-                    print(f"✓ 更新接口描述: {description[:50]}...")
+                    logger.info(f"✓ 更新接口描述: {description[:50]}...")
 
             if api_info['parameters']:
                 param_patterns = [
@@ -190,7 +191,7 @@ class SwaggerDocUpdater:
                         old_line = match.group(0)
                         new_line = old_line.replace(f'# TODO: 添加参数说明', f'# {matched_desc}')
                         updated_content = updated_content.replace(old_line, new_line)
-                        print(f"✓ 更新参数 {param_name}: {matched_desc[:30]}...")
+                        logger.info(f"✓ 更新参数 {param_name}: {matched_desc[:30]}...")
 
             if updated_content != content:
                 with open(filepath, 'w', encoding='utf-8') as f:
@@ -198,7 +199,7 @@ class SwaggerDocUpdater:
                 return True
 
         except Exception as e:
-            print(f"❌ 更新文件 {filepath} 失败: {str(e)}")
+            logger.error(f"❌ 更新文件 {filepath} 失败: {str(e)}")
 
         return False
 
@@ -218,22 +219,22 @@ class SwaggerDocUpdater:
                     try:
                         _, api_path = extract_url_from_file(filepath)
                         if not api_path:
-                            print(f"- 跳过文件（无法提取URL）: {filepath}")
+                            logger.info(f"- 跳过文件（无法提取URL）: {filepath}")
                             skipped_files.append(filepath)
                             continue
 
                         service_package = self.determine_service_package(api_path)
 
-                        if service_package not in APIConfig.SWAGGER_DOC_URLS:
-                            print(f"- 跳过文件（无对应文档）: {filepath} -> {service_package}")
+                        if service_package not in APIConfig.SWAGGER_DOC_URLS():
+                            logger.info(f"- 跳过文件（无对应文档）: {filepath} -> {service_package}")
                             skipped_files.append(filepath)
                             continue
 
-                        doc_base_url = APIConfig.SWAGGER_DOC_URLS[service_package]
+                        doc_base_url = APIConfig.SWAGGER_DOC_URLS()[service_package]
 
                         swagger_data = self.get_swagger_doc(doc_base_url)
                         if not swagger_data:
-                            print(f"- 跳过文件（无法获取文档）: {filepath}")
+                            logger.info(f"- 跳过文件（无法获取文档）: {filepath}")
                             failed_files.append(filepath)
                             continue
 
@@ -241,26 +242,26 @@ class SwaggerDocUpdater:
 
                         if self.update_api_file(filepath, api_info):
                             updated_files.append(filepath)
-                            print(f"✓ 更新成功: {filepath}")
+                            logger.info(f"✓ 更新成功: {filepath}")
                         else:
-                            print(f"- 无需更新: {filepath}")
+                            logger.info(f"- 无需更新: {filepath}")
 
                     except Exception as e:
-                        print(f"❌ 处理文件失败 {filepath}: {str(e)}")
+                        logger.error(f"❌ 处理文件失败 {filepath}: {str(e)}")
                         failed_files.append(filepath)
 
-        print(f"\n{'='*60}")
-        print(f"处理完成:")
-        print(f"✓ 成功更新: {len(updated_files)} 个文件")
-        print(f"- 无需更新: {len(skipped_files)} 个文件")
-        print(f"❌ 失败文件: {len(failed_files)} 个文件")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"处理完成:")
+        logger.info(f"✓ 成功更新: {len(updated_files)} 个文件")
+        logger.info(f"- 无需更新: {len(skipped_files)} 个文件")
+        logger.info(f"❌ 失败文件: {len(failed_files)} 个文件")
 
         if updated_files:
-            print(f"\n成功更新的文件:")
+            logger.info(f"\n成功更新的文件:")
             for file in updated_files:
-                print(f"  ✓ {file}")
+                logger.info(f"  - {file}")
 
         if failed_files:
-            print(f"\n失败的文件:")
+            logger.error(f"\n失败的文件:")
             for file in failed_files:
-                print(f"  ❌ {file}")
+                logger.error(f"  - {file}")

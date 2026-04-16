@@ -4,18 +4,19 @@ import json
 from typing import Dict, Any, List
 
 from .config import APIConfig
+from .logger import logger
 
 
 class HARParser:
     """HAR文件解析器类"""
 
-    def __init__(self, base_urls: str = APIConfig.BASE_URLS,
-                 kill_urls: str = APIConfig.KILL_URLS):
+    def __init__(self, base_urls: str = None,
+                 kill_urls: str = None):
         """
         初始化HAR解析器
         """
-        self.base_urls = base_urls
-        self.kill_urls = kill_urls
+        self.base_urls = base_urls if base_urls is not None else APIConfig.BASE_URLS()
+        self.kill_urls = kill_urls if kill_urls is not None else APIConfig.KILL_URLS()
 
     def extract_requests_from_har(self, har_file_path: str,
                                  filter_duplicate_url: bool = True) -> List[Dict[str, Any]]:
@@ -26,13 +27,13 @@ class HARParser:
             with open(har_file_path, 'r', encoding='utf-8') as f:
                 har_data = json.load(f)
         except FileNotFoundError:
-            print(f"HAR文件不存在: {har_file_path}")
+            logger.info(f"HAR文件不存在: {har_file_path}")
             return []
         except json.JSONDecodeError as e:
-            print(f"HAR文件JSON格式错误: {str(e)}")
+            logger.error(f"HAR文件JSON格式错误: {str(e)}")
             return []
         except Exception as e:
-            print(f"读取HAR文件失败: {str(e)}")
+            logger.error(f"读取HAR文件失败: {str(e)}")
             return []
 
         requests = []
@@ -40,10 +41,10 @@ class HARParser:
         entries = har_data.get('log', {}).get('entries', [])
 
         if not entries:
-            print("HAR文件中没有找到请求记录")
+            logger.info("HAR文件中没有找到请求记录")
             return []
 
-        print(f"开始解析HAR文件，共 {len(entries)} 个请求记录")
+        logger.info(f"开始解析HAR文件，共 {len(entries)} 个请求记录")
 
         for i, entry in enumerate(entries):
             if entry.get('_resourceType') != 'xhr':
@@ -57,7 +58,7 @@ class HARParser:
             for kill_url in self.kill_urls:
                 if kill_url in full_url:
                     should_skip = True
-                    print(f"过滤URL: {full_url} (包含关键字: {kill_url})")
+                    logger.debug(f"过滤URL: {full_url} (包含关键字: {kill_url})")
                     break
 
             if should_skip:
@@ -138,7 +139,7 @@ class HARParser:
 
             requests.append(request_info)
 
-        print(f"解析完成，提取到 {len(requests)} 个有效的API请求")
+        logger.info(f"解析完成，提取到 {len(requests)} 个有效的API请求")
         return requests
 
     def _convert_bool_strings(self, data: Any) -> Any:
@@ -168,10 +169,10 @@ class HARParser:
 
         filtered_data = {}
         for key, value in data.items():
-            if key not in APIConfig.INVALID_PARAMS:
+            if key not in APIConfig.INVALID_PARAMS():
                 filtered_data[key] = value
             else:
-                print(f"过滤无效参数: {key} = {value}")
+                logger.debug(f"过滤无效参数: {key} = {value}")
 
         return filtered_data
 
@@ -181,12 +182,12 @@ class HARParser:
         """
         requests = self.extract_requests_from_har(har_file_path)
 
-        print(f"\nHAR文件: {har_file_path}")
-        print(f"共发现 {len(requests)} 个API请求")
-        print("-" * 80)
+        logger.info(f"\nHAR文件: {har_file_path}")
+        logger.info(f"共发现 {len(requests)} 个API请求")
+        logger.info("-" * 80)
 
         if not requests:
-            print("没有找到有效的API请求")
+            logger.info("没有找到有效的API请求")
             return
 
         success_count = sum(1 for req in requests if 200 <= req['response_status'] < 300)
@@ -199,7 +200,7 @@ class HARParser:
             url = req['url'][:80]
             method = req['method']
 
-            print(f"{i:2d}. {method:6s} {status:3d} {time:8.2f}ms {url}")
+            logger.info(f"{i:2d}. {method:6s} {status:3d} {time:8.2f}ms {url}")
 
-        print("-" * 80)
-        print(f"统计: 成功 {success_count} 个, 失败 {error_count} 个, 平均响应时间 {avg_time:.2f}ms")
+        logger.info("-" * 80)
+        logger.info(f"统计: 成功 {success_count} 个, 失败 {error_count} 个, 平均响应时间 {avg_time:.2f}ms")

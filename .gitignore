@@ -12,6 +12,6 @@ __pycache__
 .venv
 .idea
 *.vscode
-allure-report/*
+allure-results/*
 reports
 logs/
