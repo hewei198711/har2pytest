@@ -5,9 +5,8 @@ from typing import Dict, Any, List, Optional
 
 from .config import APIConfig
 from .har_parser import HARParser
-from .utils import extract_url_from_file, format_single_parameter_value
+from .utils import extract_url_from_file, format_parameter_value
 from .logger import logger
-
 
 
 class TestCaseGenerator:
@@ -31,10 +30,10 @@ class TestCaseGenerator:
         从API文件中提取函数名
         """
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            func_match = re.search(r'def\s+(\w+)\s*\(', content)
+            func_match = re.search(r"def\s+(\w+)\s*\(", content)
             if func_match:
                 return func_match.group(1)
         except Exception as e:
@@ -46,18 +45,18 @@ class TestCaseGenerator:
         """
         从HAR请求信息中提取参数字典
         """
-        method = request_info['method'].upper()
-        post_data = request_info.get('post_data')
-        query_params = request_info.get('query_params', {})
+        method = request_info["method"].upper()
+        post_data = request_info.get("post_data")
+        query_params = request_info.get("query_params", {})
 
-        if method == 'POST' and post_data:
+        if method == "POST" and post_data:
             if isinstance(post_data, dict):
                 return post_data or None
             else:
                 return None
-        elif method == 'POST' and query_params:
+        elif method == "POST" and query_params:
             return query_params or None
-        elif method == 'GET' and query_params:
+        elif method == "GET" and query_params:
             return query_params
 
         return None
@@ -69,27 +68,12 @@ class TestCaseGenerator:
         if not params_dict:
             return "{}"
 
-        lines = [" {"]
-        for i, (key, value) in enumerate(params_dict.items()):
-            formatted_value = format_single_parameter_value(value)
+        items = []
+        for key, value in params_dict.items():
+            formatted_value = format_parameter_value(value)
+            items.append(f'"{key}": {formatted_value}')
 
-            if '\n' in formatted_value:
-                value_lines = formatted_value.split('\n')
-                lines.append(f'            "{key}": {value_lines[0]}')
-                for line in value_lines[1:]:
-                    if line.strip():
-                        lines.append(f'            {line}')
-                    else:
-                        lines.append('')
-                if i < len(params_dict) - 1:
-                    lines[-1] = lines[-1].rstrip() + ','
-            else:
-                lines.append(f'            "{key}": {formatted_value}' +
-                            (',' if i < len(params_dict) - 1 else ''))
-
-        lines.append("        }")
-
-        return '\n'.join(lines)
+        return "{" + ", ".join(items) + "}"
 
     def process_params_to_map(self, requests_params: List[Dict[str, Any]]):
         """
@@ -137,10 +121,7 @@ class TestCaseGenerator:
 
                 # 添加到 param_value_map
                 if combination_key not in param_value_map:
-                    param_value_map[combination_key] = {
-                        "values": [],
-                        "other_params": other_params
-                    }
+                    param_value_map[combination_key] = {"values": [], "other_params": other_params}
                 param_value_map[combination_key]["values"].append(combination_value)
 
             elif len(valid_params) == 1:
@@ -149,10 +130,7 @@ class TestCaseGenerator:
 
                 # 添加到 param_value_map
                 if param_name not in param_value_map:
-                    param_value_map[param_name] = {
-                        "values": [],
-                        "other_params": other_params
-                    }
+                    param_value_map[param_name] = {"values": [], "other_params": other_params}
                 param_value_map[param_name]["values"].append(param_value)
 
         # 构建最终结果
@@ -183,15 +161,19 @@ class TestCaseGenerator:
                 # 需要去重并保留所有不同的值
                 unique_values = list(set(data["values"]))
 
-            merged_item = {
-                param_name: unique_values,
-                "other_params": data["other_params"]
-            }
+            merged_item = {param_name: unique_values, "other_params": data["other_params"]}
             merged_result.append(merged_item)
 
         return merged_result
 
-    def generate_test_case_content(self, har_file_path: str, api_files: List[str], task_id: str = None, target_api_file: str = None, target_url: str = None) -> str:
+    def generate_test_case_content(
+        self,
+        har_file_path: str,
+        api_files: List[str],
+        task_id: str = None,
+        target_api_file: str = None,
+        target_url: str = None,
+    ) -> str:
         """
         生成pytest用例文件内容
         """
@@ -211,12 +193,12 @@ class TestCaseGenerator:
             "import pytest",
             "import allure",
             "from setting import P1, P2, P3",
-            ""
+            "",
         ]
 
         imports = []
         for api_file in api_files:
-            module_path = api_file.replace('.py', '').replace('\\', '.').replace('/', '.')
+            module_path = api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
             function_name = self.extract_function_name_from_file(api_file)
             if function_name:
                 imports.append(f"from {module_path} import {function_name}")
@@ -232,10 +214,10 @@ class TestCaseGenerator:
 
         if target_api_file:
             # 提取服务名称
-            module_path = target_api_file.replace('.py', '').replace('\\', '.').replace('/', '.')
-            if len(module_path.split('.')) > 1:
-                feature_name = module_path.split('.')[1]
-            
+            module_path = target_api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
+            if len(module_path.split(".")) > 1:
+                feature_name = module_path.split(".")[1]
+
             # 提取接口描述和URL
             api_description, api_url = extract_url_from_file(target_api_file)
             if api_description:
@@ -246,19 +228,21 @@ class TestCaseGenerator:
         # 添加测试标记和接口说明
         if task_id:
             content.append(f"@pytest.mark.test_{task_id}")
-        
-        content.extend([
-            "@allure.severity(P1)",
-            f"@allure.feature('{feature_name}')",
-            f"@allure.story('{story_name}')",
-            f"@allure.title('{title_name}')",
-        ])
+
+        content.extend(
+            [
+                "@allure.severity(P1)",
+                f"@allure.feature('{feature_name}')",
+                f"@allure.story('{story_name}')",
+                f"@allure.title('{title_name}')",
+            ]
+        )
 
         # 生成测试函数名称
         if target_api_file:
             function_name = self.extract_function_name_from_file(target_api_file)
             if function_name:
-                clean_function_name = function_name.lstrip('_').strip()
+                clean_function_name = function_name.lstrip("_").strip()
                 test_function_name = f"def test_{clean_function_name}():"
             else:
                 test_function_name = "def test_har_api_flow():"
@@ -266,24 +250,26 @@ class TestCaseGenerator:
             test_function_name = "def test_har_api_flow():"
         content.append(test_function_name)
 
-        content.extend([
-            '    """',
-            f"    基于HAR文件 {har_filename} 的API流程测试",
-            "    每个API请求作为一个测试步骤",
-            '    """',
-            "",
-            "    # 初始化测试数据字典，用于在步骤间传递数据",
-            "    test_data = {",
-            '        "access_token": os.environ["token_icbc_mall"],',
-            "    }",
-            ""
-        ])
+        content.extend(
+            [
+                '    """',
+                f"    基于HAR文件 {har_filename} 的API流程测试",
+                "    每个API请求作为一个测试步骤",
+                '    """',
+                "",
+                "    # 初始化测试数据字典，用于在步骤间传递数据",
+                "    test_data = {",
+                '        "access_token": os.environ["token_icbc_mall"],',
+                "    }",
+                "",
+            ]
+        )
 
         step_functions = []
         name_counters = {}
         for i, request_info in enumerate(requests):
-            url = request_info['url']
-            method = request_info['method']
+            url = request_info["url"]
+            method = request_info["method"]
 
             api_function = None
             for api_file in api_files:
@@ -295,7 +281,7 @@ class TestCaseGenerator:
             if api_function:
                 api_description, _ = extract_url_from_file(api_file)
 
-                clean_function_name = api_function.lstrip('_')
+                clean_function_name = api_function.lstrip("_")
 
                 if clean_function_name not in name_counters:
                     name_counters[clean_function_name] = 0
@@ -311,9 +297,9 @@ class TestCaseGenerator:
 
                 step_functions.append(step_name)
 
-                function_parts = clean_function_name.split('_')
+                function_parts = clean_function_name.split("_")
                 if len(function_parts) >= 2:
-                    data_key = '_'.join(function_parts[-2:])
+                    data_key = "_".join(function_parts[-2:])
                 else:
                     data_key = function_parts[0] if function_parts else f"response_{i+1}"
 
@@ -321,72 +307,73 @@ class TestCaseGenerator:
                 if api_params:
                     api_params = self.format_params_for_test_case(api_params)
 
-                content.extend([
-                    f"    @allure.step(\"{api_description}\")",
-                    f"    def {step_name}():",
-                    ""
-                ])
+                content.extend([f'    @allure.step("{api_description}")', f"    def {step_name}():", ""])
 
                 if api_params:
-                    content_type = request_info.get('content_type', '')
-                    is_file_upload = method == 'POST' and content_type.startswith('multipart/form-data')
+                    content_type = request_info.get("content_type", "")
+                    is_file_upload = method == "POST" and content_type.startswith("multipart/form-data")
 
                     if is_file_upload:
                         # 处理文件上传请求
-                        content.extend([
-                            f"        files = {{",
-                        ])
-                        
+                        content.extend(
+                            [
+                                f"        files = {{",
+                            ]
+                        )
+
                         # 添加原始参数
                         if api_params:
-                            params_lines = api_params.strip().split('\n')
+                            params_lines = api_params.strip().split("\n")
                             # 跳过第一行（" {"）和最后一行（"        }"）
                             for line in params_lines[1:-1]:
                                 if line.strip():
                                     content.append(f"            {line}")
-                        
+
                         # 添加文件参数
-                        content.extend([
-                            f'            "file": "data/示例文件.png"',
-                            f"        }}"
-                        ])
-                        content.extend([
-                            f"        with {api_function}(access_token=test_data['access_token'], files=files) as r:"
-                        ])
-                    elif method == 'POST':
-                        content.extend([
-                            f"        data = {api_params}",
-                            f"        with {api_function}(access_token=test_data['access_token'], data=data) as r:"
-                        ])
+                        content.extend([f'            "file": "data/示例文件.png"', f"        }}"])
+                        content.extend(
+                            [f"        with {api_function}(access_token=test_data['access_token'], files=files) as r:"]
+                        )
+                    elif method == "POST":
+                        content.extend(
+                            [
+                                f"        data = {api_params}",
+                                f"        with {api_function}(access_token=test_data['access_token'], data=data) as r:",
+                            ]
+                        )
                     else:
-                        content.extend([
-                            f"        params = {api_params}",
-                            f"        with {api_function}(access_token=test_data['access_token'], params=params) as r:"
-                        ])
+                        content.extend(
+                            [
+                                f"        params = {api_params}",
+                                f"        with {api_function}(access_token=test_data['access_token'], params=params) as r:",
+                            ]
+                        )
                 else:
-                    content_type = request_info.get('content_type', '')
-                    is_file_upload = method == 'POST' and content_type.startswith('multipart/form-data')
+                    content_type = request_info.get("content_type", "")
+                    is_file_upload = method == "POST" and content_type.startswith("multipart/form-data")
 
                     if is_file_upload:
-                        content.extend([
-                            f"        files = {{",
-                            f'            "storageType": "PublicCloud",',
-                            f'            "clientKey": "mall-center-product",',
-                            f'            "file": "data/示例文件.png"',
-                            f"        }}",
-                            f"        with {api_function}(access_token=test_data['access_token'], files=files) as r:"
-                        ])
+                        content.extend(
+                            [
+                                f"        files = {{",
+                                f'            "storageType": "PublicCloud",',
+                                f'            "clientKey": "mall-center-product",',
+                                f'            "file": "data/示例文件.png"',
+                                f"        }}",
+                                f"        with {api_function}(access_token=test_data['access_token'], files=files) as r:",
+                            ]
+                        )
                     else:
-                        content.extend([
-                            f"        with {api_function}(access_token=test_data['access_token']) as r:"
-                        ])
+                        content.extend([f"        with {api_function}(access_token=test_data['access_token']) as r:"])
 
-                content.extend([
-                    f"            assert r.status_code == 200",
-                    f"            assert r.json()['code'] == 200",
-                    f"            test_data['{data_key}'] = r.json()",
-                    ""
-                ])
+                content.extend(
+                    [
+                        f"            assert r.status_code == 200",
+                        f"            assert r.json()['code'] == 200",
+                        f"            test_data['{data_key}'] = r.json()",
+                        "",
+                    ]
+                )
 
         if step_functions:
             content.append("    # 执行所有测试步骤")
@@ -394,7 +381,7 @@ class TestCaseGenerator:
                 content.append(f"    {step_func}()")
             content.append("")
 
-        return '\n'.join(content)
+        return "\n".join(content)
 
     def extract_service_package_from_url(self, url: str) -> str:
         """
@@ -412,14 +399,14 @@ class TestCaseGenerator:
 
         for root, dirs, files in os.walk(self.api_dir):
             for file in files:
-                if file.endswith('.py') and file != '__init__.py':
+                if file.endswith(".py") and file != "__init__.py":
                     filepath = os.path.join(root, file)
 
                     result = extract_url_from_file(filepath)
                     if result:
                         _, file_url = result
                         for request in requests:
-                            if request['url'] == file_url:
+                            if request["url"] == file_url:
                                 api_files.append(filepath)
                                 break
 
@@ -454,8 +441,17 @@ class TestCaseGenerator:
 
         test_content = self.generate_test_case_content(har_file_path, api_files)
 
-        with open(test_filepath, 'w', encoding='utf-8') as f:
+        with open(test_filepath, "w", encoding="utf-8") as f:
             f.write(test_content)
+
+        # 使用black格式化生成的文件
+        try:
+            import subprocess
+
+            subprocess.run(["black", test_filepath], capture_output=True, text=True)
+            logger.info(f"使用black格式化测试用例文件: {test_filepath}")
+        except Exception as e:
+            logger.warning(f"格式化文件失败: {str(e)}")
 
         logger.info(f"生成测试用例文件: {test_filepath}")
         return test_filepath
@@ -477,7 +473,7 @@ class TestCaseGenerator:
         logger.info(f"找到 {len(api_files)} 个对应的API文件")
 
         # 处理task_id，去掉test_前缀
-        if task_id and task_id.startswith('test_'):
+        if task_id and task_id.startswith("test_"):
             task_id = task_id[5:]
 
         # 创建输出目录
@@ -490,11 +486,11 @@ class TestCaseGenerator:
             try:
                 function_name = self.extract_function_name_from_file(api_file)
                 if function_name:
-                    clean_function_name = function_name.lstrip('_').strip()
+                    clean_function_name = function_name.lstrip("_").strip()
                     test_filename = f"test_{clean_function_name}.py"
                 else:
                     api_basename = os.path.splitext(os.path.basename(api_file))[0]
-                    clean_basename = api_basename.lstrip('_').strip()
+                    clean_basename = api_basename.lstrip("_").strip()
                     test_filename = f"test_{clean_basename}.py"
 
                 test_filepath = os.path.join(output_dir, test_filename)
@@ -506,8 +502,17 @@ class TestCaseGenerator:
                     logger.info(f"跳过文件（无法生成内容）: {api_file}")
                     continue
 
-                with open(test_filepath, 'w', encoding='utf-8') as f:
+                with open(test_filepath, "w", encoding="utf-8") as f:
                     f.write(test_content)
+
+                # 使用black格式化生成的文件
+                try:
+                    import subprocess
+
+                    subprocess.run(["black", test_filepath], capture_output=True, text=True)
+                    logger.info(f"使用black格式化测试用例文件: {test_filepath}")
+                except Exception as e:
+                    logger.warning(f"格式化文件失败: {str(e)}")
 
                 generated_files.append(test_filepath)
                 logger.info(f"生成测试用例文件: {test_filepath}")
@@ -555,35 +560,39 @@ class TestCaseGenerator:
         if is_combination:
             param_names = param_name.split(",")
             for key in param_names:
-                content.append(f"            \"{key}\": {key},")
+                content.append(f'            "{key}": {key},')
         else:
-            content.append(f"            \"{param_name}\": {param_name},")
-        
+            content.append(f'            "{param_name}": {param_name},')
+
         for key, value in other_params.items():
             if isinstance(value, str):
-                content.append(f"            \"{key}\": \"{value}\",")
+                content.append(f'            "{key}": "{value}",')
             else:
-                content.append(f"            \"{key}\": {value},")
+                content.append(f'            "{key}": {value},')
 
     def _generate_assertions(self, content, function_name, param_name, is_combination, param_var_name):
         """
         生成断言
         """
-        content.extend([
-            "        }",
-            f"        with {function_name}(access_token=self.access_token, {param_var_name}={param_var_name}) as r:",
-            "            assert r.status_code == 200",
-            "            assert r.json()['code'] == 200",
-            "            data_list = r.json()[\"data\"][\"list\"]",
-            "            assert len(data_list) > 0, \"返回数据列表为空\"",
-        ])
-        
+        content.extend(
+            [
+                "        }",
+                f"        with {function_name}(access_token=self.access_token, {param_var_name}={param_var_name}) as r:",
+                "            assert r.status_code == 200",
+                "            assert r.json()['code'] == 200",
+                '            data_list = r.json()["data"]["list"]',
+                '            assert len(data_list) > 0, "返回数据列表为空"',
+            ]
+        )
+
         if not is_combination:
-            content.extend([
-                f"            if any(i.get(\"{param_name}\") is not None for i in data_list):",
-                f"                assert any(i.get(\"{param_name}\") == {param_name} for i in data_list)",
-            ])
-        
+            content.extend(
+                [
+                    f'            if any(i.get("{param_name}") is not None for i in data_list):',
+                    f'                assert any(i.get("{param_name}") == {param_name} for i in data_list)',
+                ]
+            )
+
         content.append("")
 
     def generate_parametrized_test_content(self, har_file_path: str, api_file: str, task_id: str) -> Optional[str]:
@@ -594,12 +603,12 @@ class TestCaseGenerator:
         function_name = self.extract_function_name_from_file(api_file)
         if not function_name:
             return None
-        
-        clean_function_name = function_name.lstrip('_').strip()
+
+        clean_function_name = function_name.lstrip("_").strip()
 
         # 提取API信息
         api_description, api_url = extract_url_from_file(api_file)
-        module_path = api_file.replace('.py', '').replace('\\', '.').replace('/', '.')
+        module_path = api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
 
         # 解析HAR文件获取请求信息
         requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
@@ -609,16 +618,16 @@ class TestCaseGenerator:
         # 从HAR文件中提取所有参数和请求方法
         all_params = set()
         all_requests_params = []
-        request_method = 'GET'  # 默认GET方法
+        request_method = "GET"  # 默认GET方法
         for req in requests:
-            if req['url'] == api_url:
+            if req["url"] == api_url:
                 # 提取API参数
                 api_params = self.extract_api_params_dict_from_har(req)
                 if isinstance(api_params, dict):
                     all_requests_params.append(api_params)
                     all_params.update(api_params.keys())
                 # 记录请求方法
-                request_method = req.get('method', 'GET')
+                request_method = req.get("method", "GET")
                 break  # 只使用第一个匹配的请求
 
         if not all_requests_params:
@@ -630,7 +639,7 @@ class TestCaseGenerator:
             param_remarks = {}
 
         # 提取服务包名称
-        service_package = module_path.split('.')[1] if len(module_path.split('.')) > 1 else 'default'
+        service_package = module_path.split(".")[1] if len(module_path.split(".")) > 1 else "default"
 
         # 生成测试用例内容
         content = [
@@ -649,13 +658,12 @@ class TestCaseGenerator:
             "",
             f"@allure.feature('{service_package}')",
             f"@allure.story('{api_url}')",
-            "@allure.description(\"\"\"接口说明：\n"
-            f"- 接口名称：{api_description}",
+            '@allure.description("""接口说明：\n' f"- 接口名称：{api_description}",
             f"- 接口地址：{api_url}",
             "",
             "主要参数说明：",
         ]
-        
+
         # 添加参数说明
         logger.debug(f"参数备注: {param_remarks}")
         for param_name in all_params:
@@ -665,7 +673,7 @@ class TestCaseGenerator:
             if "TODO" in remark:
                 remark = "# TODO 请填写参数备注"
             content.append(f"- {param_name}：{remark}")
-        
+
         content.append("")
         content.append("业务场景：")
         content.append("1. 成功路径：使用各种条件查询订单列表")
@@ -701,29 +709,33 @@ class TestCaseGenerator:
 
             # 生成参数化测试方法
             is_combination = "," in param_name
-            
+
             # 准备参数化值
             parametrize_values = self._generate_parametrize_values(param_values, is_combination)
 
             # 生成参数化装饰器
             if is_combination:
                 param_names = param_name.split(",")
-                content.extend([
-                    f"    @pytest.mark.test_{task_id}",
-                    f"    @pytest.mark.parametrize(\"{', '.join(param_names)}, p\", [",
-                ])
+                content.extend(
+                    [
+                        f"    @pytest.mark.test_{task_id}",
+                        f"    @pytest.mark.parametrize(\"{', '.join(param_names)}, p\", [",
+                    ]
+                )
             else:
-                content.extend([
-                    f"    @pytest.mark.test_{task_id}",
-                    f"    @pytest.mark.parametrize(\"{param_name}, p\", [",
-                ])
-            
+                content.extend(
+                    [
+                        f"    @pytest.mark.test_{task_id}",
+                        f'    @pytest.mark.parametrize("{param_name}, p", [',
+                    ]
+                )
+
             for i, value in enumerate(parametrize_values):
                 if i == len(parametrize_values) - 1:
                     content.append(f"        {value}")
                 else:
                     content.append(f"        {value},")
-            
+
             # 获取参数的备注信息
             if is_combination:
                 param_names = param_name.split(",")
@@ -735,32 +747,38 @@ class TestCaseGenerator:
                         desc = desc.split("-")[0]
                     param_descriptions.add(desc)
                 param_description_str = "-".join(param_descriptions)
-                content.extend([
-                    f"    ])",
-                    f"    @allure.title(\"{api_description}-成功路径: {param_description_str} 查询\")",
-                    f"    def test_{param_count}_{clean_function_name}(self, {', '.join(param_names)}, p):",
-                ])
+                content.extend(
+                    [
+                        f"    ])",
+                        f'    @allure.title("{api_description}-成功路径: {param_description_str} 查询")',
+                        f"    def test_{param_count}_{clean_function_name}(self, {', '.join(param_names)}, p):",
+                    ]
+                )
             else:
                 param_description = param_remarks.get(param_name, param_name)
                 # 只取空格前的部分作为参数描述
-                if ' ' in param_description:
-                    param_description = param_description.split(' ')[0]
-                content.extend([
-                    f"    ])",
-                    f"    @allure.title(\"{api_description}-成功路径: {param_description} 查询\")",
-                    f"    def test_{param_count}_{clean_function_name}(self, {param_name}, p):",
-                ])
-            
+                if " " in param_description:
+                    param_description = param_description.split(" ")[0]
+                content.extend(
+                    [
+                        f"    ])",
+                        f'    @allure.title("{api_description}-成功路径: {param_description} 查询")',
+                        f"    def test_{param_count}_{clean_function_name}(self, {param_name}, p):",
+                    ]
+                )
+
             # 根据请求方法类型决定使用 data 还是 params
-            param_var_name = 'params' if request_method == 'GET' else 'data'
-            
-            content.extend([
-                "",
-                "        # 用例级别",
-                "        allure.dynamic.severity(p)",
-                "",
-                f"        {param_var_name} =   {{",
-            ])
+            param_var_name = "params" if request_method == "GET" else "data"
+
+            content.extend(
+                [
+                    "",
+                    "        # 用例级别",
+                    "        allure.dynamic.severity(p)",
+                    "",
+                    f"        {param_var_name} =   {{",
+                ]
+            )
 
             # 生成数据字典
             self._generate_data_dict(content, param_name, other_params, is_combination, param_var_name)
@@ -770,7 +788,7 @@ class TestCaseGenerator:
 
             param_count += 1
 
-        return '\n'.join(content)
+        return "\n".join(content)
 
     def extract_param_remarks_from_api_file(self, api_file: str) -> Dict[str, str]:
         """
@@ -778,11 +796,11 @@ class TestCaseGenerator:
         """
         param_remarks = {}
         try:
-            with open(api_file, 'r', encoding='utf-8') as f:
+            with open(api_file, "r", encoding="utf-8") as f:
                 content = f.read()
-            
+
             # 查找data字典定义
-            data_match = re.search(r'data\s*=\s*\{[^}]*\}', content, re.DOTALL)
+            data_match = re.search(r"data\s*=\s*\{[^}]*\}", content, re.DOTALL)
             if data_match:
                 data_block = data_match.group(0)
                 # 提取每个参数和备注
@@ -793,7 +811,7 @@ class TestCaseGenerator:
                     param_remarks[param_name] = remark.strip()
         except Exception as e:
             logger.error(f"读取API文件 {api_file} 失败: {str(e)}")
-        
+
         return param_remarks
 
     def generate_complex_scenario_testcase(self, har_file_path: str, target_url: str, task_id: str) -> Optional[str]:
@@ -813,7 +831,7 @@ class TestCaseGenerator:
         logger.info(f"找到 {len(api_files)} 个对应的API文件")
 
         # 处理task_id，去掉test_前缀
-        if task_id and task_id.startswith('test_'):
+        if task_id and task_id.startswith("test_"):
             task_id = task_id[5:]
 
         # 查找目标接口文件，用于生成文件名
@@ -830,7 +848,7 @@ class TestCaseGenerator:
                 return None
         else:
             # 没有指定目标接口，退出
-             return None
+            return None
 
         # 创建输出目录
         output_dir = os.path.join(self.output_dir, "版本接口测试", task_id)
@@ -839,11 +857,11 @@ class TestCaseGenerator:
         # 生成测试用例文件
         function_name = self.extract_function_name_from_file(target_api_file)
         if function_name:
-            clean_function_name = function_name.lstrip('_').strip()
+            clean_function_name = function_name.lstrip("_").strip()
             test_filename = f"test_{clean_function_name}.py"
         else:
             api_basename = os.path.splitext(os.path.basename(target_api_file))[0]
-            clean_basename = api_basename.lstrip('_').strip()
+            clean_basename = api_basename.lstrip("_").strip()
             test_filename = f"test_{clean_basename}.py"
 
         test_filepath = os.path.join(output_dir, test_filename)
@@ -855,7 +873,7 @@ class TestCaseGenerator:
             logger.info("无法生成测试用例内容")
             return None
 
-        with open(test_filepath, 'w', encoding='utf-8') as f:
+        with open(test_filepath, "w", encoding="utf-8") as f:
             f.write(test_content)
 
         logger.info(f"生成测试用例文件: {test_filepath}")

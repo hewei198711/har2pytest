@@ -55,3 +55,24 @@ exclude = [".git", "__pycache__", "venv", ".venv"]
 quote-style = "double"
 # 缩进宽度
 indent-width = 4
+
+[tool.black]
+# 行长度限制
+line-length = 120
+# 目标Python版本
+target-version = ["py312"]
+# 排除的目录
+exclude = '''(
+    /(\n        \.git
+        | \__pycache__
+        | venv
+        | \.venv
+        | build
+        | dist
+    )/
+)'''
+
+# 跳过字符串规范化
+skip-string-normalization = false
+# 跳过魔术尾随逗号
+skip-magic-trailing-comma = false

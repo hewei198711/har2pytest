@@ -22,11 +22,12 @@
     "mgmt": "mall_mgmt_application",
     "seckill": "mall_center_seckill",
     "user": "mall_center_user",
+    "months": "settle_job",
     "xxl": "basic_services",
     "storage": "basic_services",
     "oss": "oss_json"
   },
-  "DEFAULT_SERVICE_PACKAGE": "custom_api",
+  "DEFAULT_SERVICE_PACKAGE": "apis",
   "SWAGGER_DOC_URLS": {
     "mall_mgmt_application": "https://uc-test.perfect99.com/sw/mall-mgmt-application",
     "mall_center_inventory": "https://uc-dev.perfect99.com/sw/mall-center-inventory",
@@ -39,11 +40,21 @@
     "mall_center_member": "https://uc-test.perfect99.com/sw/mall-center-member"
   },
   "INVALID_PARAMS": [
+    "rnd",
     "nonce",
     "sign",
     "timestamp",
     "partnerKey"
   ],
+  "HEADERS_TO_INCLUDE": [
+    "authorization",
+    "content-type",
+    "channel",
+    "client"
+  ],
+  "REQUIRED_HEADERS": {
+      "authorization": "请输入认证令牌"
+  },
   "PAGINATION_PARAMS": [
     "pageNum",
     "pageSize",

@@ -17,9 +17,11 @@ def test_default_config():
     # 测试默认配置值
     assert APIConfig.BASE_URLS() == ["https://uc-test.perfect99.com/api", "https://uc-uat.perfect99.com/api"]
     assert APIConfig.KILL_URLS() == ["aliyuncs.com"]
-    assert APIConfig.DEFAULT_SERVICE_PACKAGE() == "custom_api"
+    assert APIConfig.DEFAULT_SERVICE_PACKAGE() == "apis"
     assert APIConfig.DEFAULT_TESTCASE_DIR() == "testcases"
-    assert APIConfig.INVALID_PARAMS() == {"partnerKey", "sign", "timestamp", "nonce"}
+    assert APIConfig.INVALID_PARAMS() == {"partnerKey", "sign", "timestamp", "nonce", "rnd"}
+    assert APIConfig.HEADERS_TO_INCLUDE() == {"authorization", "content-type", "channel", "client"}
+    assert APIConfig.REQUIRED_HEADERS() == {"authorization": "请输入认证令牌"}
     assert APIConfig.SWAGGER_FILE() == "swagger.json"
     assert APIConfig.SWAGGER_HOST() == "https://api.example.com"
     assert APIConfig.SWAGGER_BASE_PATH() == "/api"
@@ -67,13 +69,13 @@ def test_config_file_loading():
 def test_determine_service_package():
     """测试根据URL判断服务包"""
     # 测试正常URL
-    assert APIConfig.determine_service_package("https://example.com/api/user/login") == "custom_api"
+    assert APIConfig.determine_service_package("https://example.com/api/user/login") == "apis"
     
     # 测试带路径的URL
-    assert APIConfig.determine_service_package("https://example.com/api/v1/user/login") == "custom_api"
+    assert APIConfig.determine_service_package("https://example.com/api/v1/user/login") == "apis"
     
     # 测试空URL
-    assert APIConfig.determine_service_package("") == "custom_api"
+    assert APIConfig.determine_service_package("") == "apis"
     
     # 测试None
-    assert APIConfig.determine_service_package(None) == "custom_api"
+    assert APIConfig.determine_service_package(None) == "apis"

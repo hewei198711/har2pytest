@@ -137,7 +137,7 @@ def test_extract_service_package_from_url():
     generator = TestCaseGenerator()
     assert generator.extract_service_package_from_url("/mobile/trade/orderCommit") == "mall_mobile_application"
     assert generator.extract_service_package_from_url("/user/123/info") == "mall_center_user"
-    assert generator.extract_service_package_from_url("") == "custom_api"
+    assert generator.extract_service_package_from_url("") == "apis"
 
 
 @allure.feature("测试用例生成器")

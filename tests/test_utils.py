@@ -7,9 +7,8 @@ import pytest
 import allure
 from har2pytest.utils import (
     extract_url_from_file,
-    format_single_parameter_value,
-    format_list_for_python,
-    escape_string_for_python
+    format_parameter_value,
+    escape_string_for_python,    
 )
 
 
@@ -34,44 +33,27 @@ def test_extract_url_from_file():
 
 @allure.feature("工具函数")
 @allure.story("参数值格式化")
-def test_format_single_parameter_value():
-    """测试参数值格式化"""
+def test_format_parameter_value():
+    """测试参数值格式化为Python字符串"""
     # 测试字符串值
-    assert format_single_parameter_value("test") == '"test"'
+    assert format_parameter_value("test") == '"test"'
     
     # 测试数字值
-    assert format_single_parameter_value(123) == "123"
-    assert format_single_parameter_value(123.456) == "123.456"
+    assert format_parameter_value(123) == "123"
+    assert format_parameter_value(123.456) == "123.456"
     
     # 测试布尔值
-    assert format_single_parameter_value(True) == "True"
-    assert format_single_parameter_value(False) == "False"
+    assert format_parameter_value(True) == "True"
+    assert format_parameter_value(False) == "False"
     
     # 测试 None 值
-    assert format_single_parameter_value(None) == "None"
+    assert format_parameter_value(None) == "None"
     
     # 测试列表值
-    assert format_single_parameter_value([1, 2, 3]) == "[1, 2, 3]"
+    assert format_parameter_value([1, 2, 3]) == "[1, 2, 3]"
     
     # 测试字典值
-    assert format_single_parameter_value({"a": 1, "b": 2}) == "{'a': 1, 'b': 2}"
-
-
-@allure.feature("工具函数")
-@allure.story("列表格式化")
-def test_format_list_for_python():
-    """测试列表格式化为Python字符串"""
-    # 测试空列表
-    assert format_list_for_python([]) == "[]"
-    
-    # 测试数字列表
-    assert format_list_for_python([1, 2, 3], compact=True) == "[1, 2, 3]"
-    
-    # 测试字符串列表
-    assert format_list_for_python(["a", "b", "c"], compact=True) == '["a", "b", "c"]'
-    
-    # 测试混合类型列表
-    assert format_list_for_python([1, "b", True], compact=True) == "[1, \"b\", True]"
+    assert format_parameter_value({"a": 1, "b": 2}) == '{"a": 1, "b": 2}'
 
 
 @allure.feature("工具函数")
@@ -90,3 +72,4 @@ def test_escape_string_for_python():
     
     # 测试包含制表符的字符串
     assert escape_string_for_python("test\ttab") == "test\\ttab"
+

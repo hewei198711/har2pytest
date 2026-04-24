@@ -17,3 +17,9 @@ har2pytest.egg-info/dependency_links.txt
 har2pytest.egg-info/entry_points.txt
 har2pytest.egg-info/requires.txt
 har2pytest.egg-info/top_level.txt
+tests/test_api_generator.py
+tests/test_config.py
+tests/test_har_parser.py
+tests/test_swagger_updater.py
+tests/test_testcase_generator.py
+tests/test_utils.py

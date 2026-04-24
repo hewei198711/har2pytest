@@ -96,6 +96,9 @@ har2pytest generate api_request.har api
 
 # 只指定HAR文件（使用默认输出目录）
 har2pytest generate api_request.har
+
+# 强制覆盖已存在的文件
+har2pytest generate api_request.har api --overwrite
 ```
 
 #### 2. 更新API文档
@@ -131,7 +134,17 @@ har2pytest summary
 har2pytest summary api_request.har
 ```
 
-#### 5. 生成查询类参数化测试用例（list_query模式）
+#### 5. 从Swagger文档生成API文件
+
+```bash
+# 从Swagger文档生成API文件
+har2pytest swagger https://petstore.swagger.io/v2/api-docs api
+
+# 强制覆盖已存在的文件
+har2pytest swagger https://petstore.swagger.io/v2/api-docs api --overwrite
+```
+
+#### 6. 生成查询类参数化测试用例（list_query模式）
 
 ```bash
 # 命令格式: har2pytest testcase list_query [task_id] [har_file]
@@ -196,10 +209,6 @@ class HARParser:
     def filter_invalid_params(self, data: Dict[str, Any]) -> Dict[str, Any]:
         # 过滤无效参数，使用APIConfig.INVALID_PARAMS配置
 
-    def convert_bool_strings(self, data: Any) -> Any:
-        # 递归转换字符串形式的布尔值为Python布尔值
-        # 支持 'true'/'false' -> True/False，容错处理常见拼写错误
-
     def print_api_summary(self, har_file_path):
         # 打印API请求摘要
 ```
@@ -240,6 +249,9 @@ class APIGenerator:
 
     def generate_index_file(self, generated_files):
         # 生成索引文件，包含时间戳和注释
+
+    def generate_apis_from_swagger(self, swagger_url: str, force_overwrite: bool = False) -> List[str]:
+        # 从Swagger文档生成API文件，解析所有API路径和方法
 ```
 
 ### TestCaseGenerator 类
@@ -610,16 +622,19 @@ class TestClass:
 # 1. 从HAR文件生成API接口（自动处理路径参数）
 har2pytest generate api_request.har api
 
-# 2. 更新API文档信息
+# 2. 从Swagger文档生成API接口
+har2pytest swagger https://petstore.swagger.io/v2/api-docs api
+
+# 3. 更新API文档信息
 har2pytest update api
 
-# 3. 生成步骤化测试用例（原格式）
+# 4. 生成步骤化测试用例（原格式）
 har2pytest testcase api_request.har testcases
 
-# 4. 生成查询类参数化测试用例（list_query模式）
+# 5. 生成查询类参数化测试用例（list_query模式）
 har2pytest testcase list_query test_4291 兑换单代客售后.har
 
-# 5. 生成复杂场景测试用例（complex_scenario模式）
+# 6. 生成复杂场景测试用例（complex_scenario模式）
 har2pytest testcase complex_scenario test_4291 /user/mgmt/order/return/submit 代客售后.har
 
 
@@ -688,3 +703,9 @@ done
   - 支持查询类参数化测试用例生成
   - 支持复杂场景流程测试用例生成
   - 提供 `har2pytest` 命令行工具
+
+- **v1.1.0** - 新增功能
+  - 支持从Swagger文档生成API文件
+  - 优化代码结构，避免循环引用
+  - 增强Swagger文档解析能力
+  - 支持自动发现Swagger文档路径

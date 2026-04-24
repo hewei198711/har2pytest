@@ -60,34 +60,6 @@ def test_extract_requests_from_har():
 
 
 @allure.feature("HAR解析器")
-@allure.story("转换布尔值字符串")
-def test_convert_bool_strings():
-    """测试转换布尔值字符串"""
-    parser = HARParser()
-    
-    # 测试字典
-    test_data = {
-        "bool_true": "true",
-        "bool_false": "false",
-        "null_val": "null",
-        "normal_str": "test"
-    }
-    result = parser._convert_bool_strings(test_data)
-    assert result["bool_true"] is True
-    assert result["bool_false"] is False
-    assert result["null_val"] is None
-    assert result["normal_str"] == "test"
-    
-    # 测试列表
-    test_list = ["true", "false", "null", "test"]
-    result_list = parser._convert_bool_strings(test_list)
-    assert result_list[0] is True
-    assert result_list[1] is False
-    assert result_list[2] is None
-    assert result_list[3] == "test"
-
-
-@allure.feature("HAR解析器")
 @allure.story("过滤无效参数")
 def test_filter_invalid_params():
     """测试过滤无效参数"""
@@ -97,7 +69,8 @@ def test_filter_invalid_params():
         "username": "test",
         "password": "123456",
         "sign": "test_sign",  # 无效参数
-        "timestamp": "1234567890"  # 无效参数
+        "timestamp": "1234567890",  # 无效参数
+        "file": "test.txt"  # 现在应该保留file参数
     }
     
     result = parser._filter_invalid_params(test_data)
@@ -105,6 +78,7 @@ def test_filter_invalid_params():
     assert "password" in result
     assert "sign" not in result
     assert "timestamp" not in result
+    assert "file" in result  # 确保file参数被保留
 
 
 @allure.feature("HAR解析器")
