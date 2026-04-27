@@ -7,10 +7,10 @@ import subprocess
 from typing import Any, Dict, List, Optional
 
 from .config import APIConfig
-from .har_parser import HARParser
 from .logger import logger
-from .utils import format_parameter_value
-from .swagger_updater import SwaggerDocUpdater
+from .utils import format_parameter_value, match_path_template, extract_function_name, determine_service_package
+from .swagger_handler import SwaggerHandler
+from .har_generator import HARGenerator
 
 
 class APIGenerator:
@@ -36,126 +36,11 @@ class APIGenerator:
         if output_dir is None:
             output_dir = APIConfig.DEFAULT_SERVICE_PACKAGE()
         self.output_dir = output_dir
-        self.har_parser = HARParser()
-        self.swagger_updater = SwaggerDocUpdater()
-
-    @staticmethod
-    def _match_path_template(url: str) -> tuple:
-        """
-        匹配路径模板
-
-        匹配URL与APIConfig.PATH_URLS中的路径模板，提取路径参数
-        如果没有匹配到模板，自动识别路径中的数字参数
-
-        Args:
-            url: 原始接口URL，如 /mobile/trade/orderCommit
-
-        Returns:
-            tuple: (url_pattern, path_params, result_parts)
-                - url_pattern: 匹配的路径模板，如 /user/{userId}/info
-                - path_params: 路径参数字典，如 {"userId": "123"}
-                - result_parts: 路径部分列表，用于生成函数名
-
-        Example:
-            url = "/user/123/info"
-            pattern, params, parts = APIGenerator._match_path_template(url)
-            # 返回 ("/user/{userId}/info", {"userId": "123"}, ["user", "userId", "info"])
-        """
-        clean_url = url.lstrip("/")
-        url_parts = clean_url.split("/")
-
-        for path_pattern in APIConfig.PATH_URLS():
-            pattern_parts = path_pattern.lstrip("/").split("/")
-
-            if len(url_parts) != len(pattern_parts):
-                continue
-
-            matched = True
-            result_parts = []
-            path_params = {}
-
-            for url_part, pattern_part in zip(url_parts, pattern_parts):
-                if pattern_part.startswith("{") and pattern_part.endswith("}"):
-                    param_name = pattern_part[1:-1]
-                    result_parts.append(param_name)
-                    path_params[param_name] = url_part
-                else:
-                    if url_part != pattern_part:
-                        matched = False
-                        break
-                    result_parts.append(url_part)
-
-            if matched:
-                return path_pattern, path_params, result_parts
-
-        # 如果没有匹配到模板，自动识别路径中的数字参数
-        result_parts = []
-        path_params = {}
-        url_pattern_parts = []
-
-        for i, part in enumerate(url_parts):
-            # 检查是否是数字
-            if part.isdigit():
-                # 生成参数名，如 id, item_id, order_id 等
-                if i == len(url_parts) - 1:
-                    param_name = "id"
-                else:
-                    # 尝试从路径中获取参数名
-                    if i + 1 < len(url_parts) and url_parts[i + 1].isdigit():
-                        param_name = f"param_{i}"
-                    else:
-                        # 尝试使用前一个路径部分作为参数名的一部分
-                        if i > 0:
-                            param_name = f"{url_parts[i-1]}_id"
-                        else:
-                            param_name = f"param_{i}"
-                result_parts.append(param_name)
-                path_params[param_name] = part
-                url_pattern_parts.append(f"{{{param_name}}}")
-            else:
-                result_parts.append(part)
-                url_pattern_parts.append(part)
-
-        url_pattern = "/" + "/".join(url_pattern_parts)
-        return url_pattern, path_params, result_parts
-
-    @staticmethod
-    def extract_function_name(url: str) -> str:
-        """
-        从URL中提取测试方法函数名
-        优先匹配 APIConfig.PATH_URLS 中的路径模板，处理路径参数 {xxx}
-        无匹配时，直接将URL路径用下划线连接并清理非法字符
-
-        Args:
-            url: 原始接口URL，如 /mobile/trade/orderCommit
-
-        Returns:
-            str: 生成的函数名片段，如 _mobile_trade_orderCommit
-
-        Example:
-            URL: /mobile/trade/orderCommit → 返回 _mobile_trade_orderCommit
-            URL: /user/{userId}/info → 返回 _user_userId_info
-        """
-        # 使用辅助方法匹配路径模板
-        _, _, result_parts = APIGenerator._match_path_template(url)
-        return f"_{'_'.join(result_parts)}"
-
-    @staticmethod
-    def determine_service_package(url: str) -> str:
-        """
-        根据URL的第一个字段判断属于哪个微服务包
-
-        Args:
-            url: 原始接口URL，如 /mobile/trade/orderCommit
-
-        Returns:
-            str: 服务包名称，如 mall_mobile_application
-
-        Example:
-            URL: /mobile/trade/orderCommit → 返回 mall_mobile_application
-            URL: /member/info → 返回 mall_center_member
-        """
-        return APIConfig.determine_service_package(url)
+        self.swagger_handler = SwaggerHandler()
+        self.swagger_handler.set_api_generator(self)
+        
+        # 初始化子生成器
+        self.har_generator = HARGenerator(output_dir, self)
 
     def check_api_exists(self, url: str, service_package: str) -> bool:
         """
@@ -172,7 +57,7 @@ class APIGenerator:
             exists = generator.check_api_exists("/mobile/trade/orderCommit", "mall_mobile_application")
             # 如果文件存在返回True，否则返回False
         """
-        function_name = self.extract_function_name(url)
+        function_name = extract_function_name(url)
         filename = f"{function_name}.py"
 
         root_filepath = os.path.join(self.output_dir, filename)
@@ -262,7 +147,11 @@ class APIGenerator:
             is_need_urlencode = True
 
         # 使用辅助方法匹配路径模板
-        url_pattern, path_params, _ = APIGenerator._match_path_template(url)
+        url_pattern, path_params, _ = match_path_template(url)
+
+        # 如果 request_info 中包含路径参数，使用它
+        if "path_params" in request_info and request_info["path_params"]:
+            path_params = request_info["path_params"]
 
         if url_pattern:
             url = url_pattern
@@ -579,7 +468,7 @@ class APIGenerator:
         content_parts = imports + params_section + function_def
         return "\n".join(content_parts)
 
-    def generate_api_file(self, request_info: Dict[str, Any], force_overwrite: bool = False) -> Optional[str]:
+    def generate_api_file(self, request_info: Dict[str, Any], force_overwrite: bool = False, swagger_info: Dict[str, Any] = None) -> Optional[str]:
         """
         为单个API请求生成接口文件
 
@@ -588,6 +477,7 @@ class APIGenerator:
         Args:
             request_info: 请求信息字典，包含method、url、query_params、post_data、headers等
             force_overwrite: 如果为True，即使文件存在也会覆盖；如果为False，跳过已存在的文件
+            swagger_info: Swagger文档信息，包含description、parameters等
 
         Returns:
             Optional[str]: 生成的文件路径，如果文件已存在则返回None
@@ -606,7 +496,7 @@ class APIGenerator:
         method = request_info["method"].upper()
         url = request_info["url"]
 
-        service_package = self.determine_service_package(url)
+        service_package = determine_service_package(url)
 
         # 检查文件是否存在
         if self.check_api_exists(url, service_package):
@@ -616,7 +506,7 @@ class APIGenerator:
             else:
                 logger.info(f"接口已存在，强制覆盖: {method} {url}")
 
-        function_name = self.extract_function_name(url)
+        function_name = extract_function_name(url)
 
         base_filename = function_name
         filename = f"{base_filename}.py"
@@ -633,11 +523,24 @@ class APIGenerator:
         url_pattern = parsed_info.get("url_pattern", url)
 
         # 获取Swagger文档信息
-        swagger_info = self.DEFAULT_SWAGGER_INFO.copy()
-        try:
-            swagger_info = self.swagger_updater.get_api_info(url_pattern, method)
-        except Exception as e:
-            logger.debug(f"获取Swagger文档信息失败: {str(e)}")
+        if swagger_info is None:
+            swagger_info = self.DEFAULT_SWAGGER_INFO.copy()
+            try:
+                # 确定服务包
+                service_package = determine_service_package(url_pattern)
+                
+                # 检查服务包是否有对应的Swagger文档URL
+                if service_package in APIConfig.SWAGGER_DOC_URLS():
+                    # 获取Swagger文档URL
+                    doc_base_url = APIConfig.SWAGGER_DOC_URLS()[service_package]
+                    
+                    # 获取Swagger文档
+                    swagger_data = self.swagger_handler.get_swagger_doc(doc_base_url)
+                    if swagger_data:
+                        # 查找API信息
+                        swagger_info = self.swagger_handler.find_api_info_in_swagger(swagger_data, url_pattern, method)
+            except Exception as e:
+                logger.debug(f"获取Swagger文档信息失败: {str(e)}")
 
         content = self.generate_file_content(request_info, function_name, swagger_info)
 
@@ -672,25 +575,7 @@ class APIGenerator:
             files = generator.generate_api_files_from_har("普通订单.har")
             # 返回生成的文件路径列表，如 ["api/_mobile_product_search.py", "api/_mobile_trade_orderCommit.py"]
         """
-        requests = self.har_parser.extract_requests_from_har(har_file_path)
-
-        if not requests:
-            logger.info(f"HAR文件 {har_file_path} 中没有找到有效的API请求")
-            return []
-
-        logger.info(f"发现 {len(requests)} 个API请求")
-
-        generated_files = []
-        for request_info in requests:
-            try:
-                filepath = self.generate_api_file(request_info, force_overwrite=force_overwrite)
-                if filepath:
-                    generated_files.append(filepath)
-            except Exception as e:
-                logger.error(f"生成API文件失败: {str(e)}")
-                logger.error(traceback.format_exc())
-
-        return generated_files
+        return self.har_generator.generate_api_files_from_har(har_file_path, force_overwrite)
 
     def generate_index_file(self, generated_files: List[str]):
         """
@@ -778,166 +663,18 @@ class APIGenerator:
                 f.write("")
             logger.info(f"创建主目录索引文件: {main_init_path}")
 
-    def _extract_params_from_swagger(
-        self,
-        parameters: List[Dict[str, Any]],
-        swagger_data: Dict[str, Any]
-    ) -> tuple:
-        """
-        从Swagger文档提取参数
-
-        处理查询参数和请求体参数，提取默认值和参数信息
-
-        Args:
-            parameters: Swagger文档中的参数列表
-            swagger_data: 完整的Swagger文档数据
-
-        Returns:
-            tuple: (query_params, post_data, has_query_param, has_body_param)
-        """
-        query_params = {}
-        post_data = {}
-        has_query_param = False
-        has_body_param = False
-
-        for param in parameters:
-            param_name = param.get("name")
-            param_in = param.get("in")
-            param_type = param.get("type", "string")
-
-            if param_in == "query":
-                has_query_param = True
-                query_params[param_name] = self._get_default_value(param_type)
-            elif param_in == "body" and "schema" in param:
-                has_body_param = True
-                post_data = self._extract_body_params(param["schema"], swagger_data)
-
-        return query_params, post_data, has_query_param, has_body_param
-
-    def _get_default_value(self, param_type: str) -> Any:
-        """
-        根据参数类型获取默认值
-
-        Args:
-            param_type: 参数类型
-
-        Returns:
-            Any: 默认值
-        """
-        if param_type == "string":
-            return ""
-        elif param_type == "integer":
-            return 0
-        elif param_type == "boolean":
-            return False
-        return ""
-
-    def _extract_body_params(
-        self,
-        schema: Dict[str, Any],
-        swagger_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        从body参数schema中提取参数
-
-        处理模型引用和内联模型
-
-        Args:
-            schema: 参数的schema定义
-            swagger_data: 完整的Swagger文档数据
-
-        Returns:
-            Dict[str, Any]: 提取的参数字典
-        """
-        body_params = {}
-
-        if "$ref" in schema:
-            ref = schema["$ref"]
-            ref_name = ref.split("/")[-1]
-            if "definitions" in swagger_data and ref_name in swagger_data["definitions"]:
-                definition = swagger_data["definitions"][ref_name]
-                if "properties" in definition:
-                    for prop_name, prop_info in definition["properties"].items():
-                        prop_type = prop_info.get("type", "string")
-                        body_params[prop_name] = self._get_default_value(prop_type)
-        elif "properties" in schema:
-            for prop_name, prop_info in schema["properties"].items():
-                prop_type = prop_info.get("type", "string")
-                body_params[prop_name] = self._get_default_value(prop_type)
-
-        return body_params
-
-    def generate_apis_from_swagger(self, swagger_url: str, force_overwrite: bool = False) -> List[str]:
+    def generate_apis_from_swagger(self, swagger_url: str, force_overwrite: bool = False, specific_path: str = None) -> List[str]:
         """
         从Swagger文档生成API文件
 
-        解析Swagger文档，获取所有API路径和方法，为每个API生成对应的API文件
+        解析Swagger文档，为每个API端点生成对应的API文件
 
         Args:
-            swagger_url: Swagger文档URL
+            swagger_url: Swagger文档的URL
             force_overwrite: 是否覆盖已存在的文件
+            specific_path: 只生成指定的API路径，默认为None（生成所有路径）
 
         Returns:
             List[str]: 生成的文件路径列表
         """
-
-        generated_files = []
-
-        try:
-            # 获取Swagger文档
-            swagger_data = self.swagger_updater.get_swagger_doc(swagger_url)
-            if not swagger_data:
-                logger.error(f"无法获取Swagger文档: {swagger_url}")
-                return generated_files
-
-            # 遍历所有API路径
-            paths = swagger_data.get("paths", {})
-            logger.info(f"从Swagger文档中发现 {len(paths)} 个API路径")
-
-            for path, methods in paths.items():
-                # 遍历支持的HTTP方法
-                for method, method_data in methods.items():
-                    try:
-                        # 构建请求信息
-                        request_info = {
-                            "method": method.upper(),
-                            "url": path,
-                            "query_params": {},
-                            "post_data": {},
-                            "headers": APIConfig.REQUIRED_HEADERS()
-                        }
-
-                        # 提取参数
-                        parameters = method_data.get("parameters", [])
-                        query_params, post_data, has_query_param, has_body_param = \
-                            self._extract_params_from_swagger(parameters, swagger_data)
-
-                        request_info["query_params"] = query_params
-                        request_info["post_data"] = post_data
-
-                        # 判断是否需要urlencode
-                        if method.upper() == "POST" and has_query_param and not post_data and not has_body_param:
-                            request_info["headers"]["content-length"] = "0"
-
-                        # 生成API文件
-                        filepath = self.generate_api_file(request_info, force_overwrite)
-                        if filepath:
-                            generated_files.append(filepath)
-                            logger.info(f"✓ 生成API文件: {filepath}")
-                        else:
-                            logger.info(f"- 跳过已存在的API文件: {path}")
-
-                    except Exception as e:
-                        logger.error(f"❌ 生成API文件失败 {path} {method}: {str(e)}")
-                        logger.debug(traceback.format_exc())
-
-            logger.info(f"\n============================================")
-            logger.info(f"从Swagger文档生成完成:")
-            logger.info(f"✓ 成功生成: {len(generated_files)} 个API文件")
-            logger.info(f"============================================")
-
-        except Exception as e:
-            logger.error(f"❌ 从Swagger文档生成API文件失败: {str(e)}")
-            logger.debug(traceback.format_exc())
-
-        return generated_files
+        return self.swagger_handler.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)

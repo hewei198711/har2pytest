@@ -12,71 +12,25 @@ class APIConfig:
     # 默认配置
     _default_config = {
         # 基础URL列表，用于解析HAR文件中的请求URL
-        "BASE_URLS": [
-            "https://uc-test.perfect99.com/api",  # 测试环境API基础URL
-            "https://uc-uat.perfect99.com/api",  # UAT环境API基础URL
-        ],
+        "BASE_URLS": [],
         # 要过滤的URL关键字列表，包含这些关键字的URL将被过滤掉
-        "KILL_URLS": [
-            "aliyuncs.com",  # 阿里云OSS URL，通常不需要测试
-        ],
+        "KILL_URLS": [],
         # 路径URL列表，包含路径参数的URL模板
-        "PATH_URLS": [
-            "/mobile/msg/manage/letter/dashbord/{usrId}",  # 消息管理仪表板URL
-            "/mobile/msg/manage/letter/dashbord/{usrId}/{systemId}",  # 带系统ID的消息管理仪表板URL
-            "/mobile/order/carts/getRecommendProduct/{serialNo}",  # 获取推荐产品URL
-            "/mobile/order/before/by/store/{cardNo}",  # 按店铺查询订单前置信息URL
-            "/mobile/order/before/by/{cardNo}",  # 按卡号查询订单前置信息URL
-        ],
+        "PATH_URLS": [],
         # 服务包映射字典，将URL前缀映射到对应的服务包名称
-        "SERVICE_MAPPING": {
-            "appstore": "mall_store_application",  # 应用商店服务
-            "store": "mall_center_store",  # 商城中心店铺服务
-            "mobile": "mall_mobile_application",  # 商城移动应用服务
-            "member": "mall_center_member",  # 商城中心会员服务
-            "invt": "mall_center_inventory",  # 商城中心库存服务
-            "mgmt": "mall_mgmt_application",  # 商城管理应用服务
-            "seckill": "mall_center_seckill",  # 商城中心秒杀服务
-            "user": "mall_center_user",  # 商城中心用户服务
-            "xxl": "basic_services",  # XXL任务服务
-            "storage": "basic_services",  # 存储服务
-            "oss": "oss_json",  # OSS JSON服务
-        },
+        "SERVICE_MAPPING": {},
         # 默认服务包名称，当无法确定服务包时使用
         "DEFAULT_SERVICE_PACKAGE": "apis",
         # Swagger文档URL字典，用于获取API文档信息
-        "SWAGGER_DOC_URLS": {
-            "mall_mgmt_application": "https://uc-test.perfect99.com/sw/mall-mgmt-application",  # 商城管理应用Swagger文档
-            "mall_center_inventory": "https://uc-dev.perfect99.com/sw/mall-center-inventory",  # 商城中心库存Swagger文档
-            "mall_center_store": "https://uc-dev.perfect99.com/sw/mall-center-store",  # 商城中心店铺Swagger文档
-            "mall_store_application": "https://uc-dev.perfect99.com/sw/mall-store-application/appStore",  # 商城店铺应用Swagger文档
-            "mall_mobile_application": "https://uc-test.perfect99.com/sw/mall-mobile-application",  # 商城移动应用Swagger文档
-            "mall-center-seckill": "https://uc-dev.perfect99.com/sw/mall-center-seckill",  # 商城中心秒杀Swagger文档
-            "settle_job": "https://uc-dev.perfect99.com/sw/settle-job",  # 结算任务Swagger文档
-            "mall_center_user": "https://uc-dev.perfect99.com/sw/mall-center-user",  # 商城中心用户Swagger文档
-            "mall_center_member": "https://uc-test.perfect99.com/sw/mall-center-member",  # 商城中心会员Swagger文档
-        },
+        "SWAGGER_DOC_URLS": {},
         # 无效参数集合，这些参数将在生成测试用例时被过滤掉
-        "INVALID_PARAMS": {
-            "nonce",
-            "sign",
-            "timestamp",
-            "partnerKey",  # 测试期望的参数
-            "rnd",  # 随机数参数
-        },
+        "INVALID_PARAMS": set(),
         # 需要收录的headers参数集合，只有这些headers参数会被包含在生成的API文件中
-        "HEADERS_TO_INCLUDE": {
-            "authorization",  # 认证令牌
-            "content-Type",  # 内容类型
-            "channel",
-            "client"
-        },
+        "HEADERS_TO_INCLUDE": set(),
         # 必须包含的headers字段及其默认值
-        "REQUIRED_HEADERS": {
-            "Authorization": "请输入认证令牌",  # 认证令牌，必须包含
-        },
+        "REQUIRED_HEADERS": {},
         # 列表查询用例，这些参数不进行参数化处理
-        "PAGINATION_PARAMS": ["pageNum", "pageSize", "commitEndTime", "commitStartTime", "header"],
+        "PAGINATION_PARAMS": [],
         # 测试用例目录，生成的测试用例文件将保存在此目录下
         "TESTCASE_DIR": "testcases",
         # Swagger文档配置
@@ -88,6 +42,9 @@ class APIConfig:
     }
 
     # 初始化配置
+    _config = None
+    _config_warned = False
+
     @classmethod
     def _load_config(cls):
         """加载配置，优先从环境变量和配置文件读取"""
@@ -119,21 +76,49 @@ class APIConfig:
         # 转换集合类型
         if isinstance(config.get("INVALID_PARAMS"), list):
             config["INVALID_PARAMS"] = set(config["INVALID_PARAMS"])
-        
+
         # 转换 HEADERS_TO_INCLUDE 为集合类型
         if isinstance(config.get("HEADERS_TO_INCLUDE"), list):
             config["HEADERS_TO_INCLUDE"] = set(config["HEADERS_TO_INCLUDE"])
 
         return config
 
+    @classmethod
+    def _warn_missing_config(cls):
+        """提示用户创建配置文件"""
+        if cls._config_warned:
+            return
+
+        cls._config_warned = True
+        logger.warning("=" * 60)
+        logger.warning("未找到配置文件 har2pytest_config.json，请创建并配置")
+        logger.warning("=" * 60)
+        logger.warning("配置示例:")
+        logger.warning("""{
+    "BASE_URLS": ["https://api.example.com"],
+    "SERVICE_MAPPING": {
+        "mobile": "mall_mobile_application",
+        "user": "mall_center_user"
+    },
+    "DEFAULT_SERVICE_PACKAGE": "apis",
+    "PATH_URLS": ["/user/{id}/info"],
+    "SWAGGER_DOC_URLS": {
+        "mall-mobile-application": "https://api.example.com/swagger/mall-mobile-application"
+    },
+    "INVALID_PARAMS": ["sign", "token"],
+    "HEADERS_TO_INCLUDE": ["content-type", "authorization"],
+    "REQUIRED_HEADERS": {},
+    "PAGINATION_PARAMS": ["pageNum", "pageSize"]
+}""")
+        logger.warning("=" * 60)
+
     # 类属性访问器
     @classmethod
     def get_config(cls, key):
         """获取配置值"""
-        if not hasattr(cls, "_config"):
-            cls._config = cls._load_config()
         if cls._config is None:
-            return cls._default_config.get(key)
+            cls._config = cls._load_config()
+            cls._warn_missing_config()
         return cls._config.get(key, cls._default_config.get(key))
 
     # 类属性访问方法
@@ -183,7 +168,7 @@ class APIConfig:
 
     @classmethod
     def DEFAULT_TESTCASE_DIR(cls) -> str:
-        return cls.get_config("TESTCASE_DIR")
+        return "testcases"
 
     @classmethod
     def SWAGGER_FILE(cls) -> str:
@@ -209,20 +194,36 @@ class APIConfig:
     def determine_service_package(cls, url: str) -> str:
         """
         根据URL的第一个字段判断属于哪个微服务包
+
+        Args:
+            url: 原始接口URL，如 /mobile/trade/orderCommit
+
+        Returns:
+            str: 服务包名称，如 mall_mobile_application
+
+        Example:
+            URL: /mobile/trade/orderCommit → 返回 mall_mobile_application
+            URL: /member/info → 返回 mall_center_member
         """
-        if not url:
+        import re
+        # 处理 None 或空字符串
+        if url is None or not url:
             return cls.DEFAULT_SERVICE_PACKAGE()
 
-        if "?" in url:
-            url = url.split("?")[0]
+        # 从URL中提取第一个路径段
+        match = re.match(r'^/?([^/]+)', url)
+        if not match:
+            return cls.DEFAULT_SERVICE_PACKAGE()
 
-        if url.startswith("/"):
-            url = url[1:]
+        first_segment = match.group(1)
+        # 从SERVICE_MAPPING中查找对应的服务包
+        service_mapping = cls.SERVICE_MAPPING()
+        if first_segment in service_mapping:
+            return service_mapping[first_segment]
 
-        first_segment = url.split("/")[0].lower()
-
-        for prefix, package in cls.SERVICE_MAPPING().items():
-            if first_segment.startswith(prefix):
-                return package
-
+        # 默认服务包
         return cls.DEFAULT_SERVICE_PACKAGE()
+
+
+# 导出配置实例
+config = APIConfig()

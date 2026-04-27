@@ -13,7 +13,7 @@ from .config import APIConfig
 from .har_parser import HARParser
 from .api_generator import APIGenerator
 from .testcase_generator import TestCaseGenerator
-from .swagger_updater import SwaggerDocUpdater
+from .swagger_handler import SwaggerHandler
 from .logger import get_logger, logger
 from .utils import (
     extract_url_from_file,
@@ -26,7 +26,7 @@ __all__ = [
     "HARParser",
     "APIGenerator",
     "TestCaseGenerator",
-    "SwaggerDocUpdater",
+    "SwaggerHandler",
     "get_logger",
     "logger",
     "extract_url_from_file",

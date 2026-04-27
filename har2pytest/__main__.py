@@ -7,7 +7,7 @@ from .config import APIConfig
 from .har_parser import HARParser
 from .api_generator import APIGenerator
 from .testcase_generator import TestCaseGenerator
-from .swagger_updater import SwaggerDocUpdater
+from .swagger_handler import SwaggerHandler
 from .logger import logger
 
 
@@ -172,32 +172,35 @@ def main():
             else:
                 logger.info("生成测试用例文件失败")
 
-    elif command == "update":
-        api_dir = APIConfig.DEFAULT_SERVICE_PACKAGE()
-        if len(sys.argv) > 2:
-            api_dir = sys.argv[2]
 
-        logger.info(f"更新API目录中的文档信息: {api_dir}")
-        logger.info("-" * 50)
-
-        updater = SwaggerDocUpdater()
-        updater.scan_and_update_apis(api_dir)
 
     elif command == "swagger":
         swagger_url = None
         output_dir = APIConfig.DEFAULT_SERVICE_PACKAGE()
         force_overwrite = False
+        specific_path = None
 
-        # 解析参数：har2pytest swagger <swagger_url> [output_dir] [--overwrite]
+        # 解析参数：har2pytest swagger <swagger_url> [output_dir] [--overwrite] [--path <path>]
         args = sys.argv[2:]
 
-        for arg in args:
+        i = 0
+        while i < len(args):
+            arg = args[i]
             if arg in ["--overwrite", "-f"]:
                 force_overwrite = True
+            elif arg in ["--path", "-p"]:
+                if i + 1 < len(args):
+                    specific_path = args[i + 1]
+                    i += 1
+                else:
+                    logger.error("错误: --path 参数需要指定路径值")
+                    logger.info("使用 'har2pytest help' 查看帮助信息")
+                    return
             elif not swagger_url:
                 swagger_url = arg
             else:
                 output_dir = arg
+            i += 1
 
         if not swagger_url:
             logger.error("错误: 必须提供Swagger文档URL")
@@ -207,10 +210,12 @@ def main():
         logger.info(f"从Swagger文档生成API接口文件: {swagger_url}")
         logger.info(f"输出目录: {output_dir}")
         logger.info(f"强制覆盖: {force_overwrite}")
+        if specific_path:
+            logger.info(f"特定路径: {specific_path}")
         logger.info("-" * 50)
 
         generator = APIGenerator(output_dir=output_dir)
-        generated_files = generator.generate_apis_from_swagger(swagger_url, force_overwrite)
+        generated_files = generator.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)
 
         logger.info("-" * 50)
         logger.info(f"共生成 {len(generated_files)} 个API接口文件")

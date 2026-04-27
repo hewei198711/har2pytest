@@ -7,7 +7,10 @@ import shutil
 import pytest
 import allure
 import os
+import shutil
 from har2pytest.api_generator import APIGenerator
+from har2pytest.utils import extract_function_name, determine_service_package, match_path_template
+from har2pytest.swagger_handler import SwaggerHandler
 from har2pytest.config import APIConfig
 
 
@@ -15,37 +18,54 @@ from har2pytest.config import APIConfig
 @allure.story("提取函数名")
 def test_extract_function_name():
     """测试从URL提取函数名"""
+    # 触发配置初始化
+    APIConfig.get_config('PATH_URLS')
+
     # 测试普通URL
-    assert APIGenerator.extract_function_name("/mobile/trade/orderCommit") == "_mobile_trade_orderCommit"
-    
+    assert extract_function_name("/mobile/trade/orderCommit") == "_mobile_trade_orderCommit"
+
     # 测试带路径参数的URL
     # 临时设置 PATH_URLS 配置
     original_path_urls = APIConfig._config.get('PATH_URLS', [])
     APIConfig._config['PATH_URLS'] = ["/user/{id}/info"]
-    
+
     try:
         # 由于 PATH_URLS 中有匹配的模板 "/user/{id}/info"，所以使用模板中的参数名
-        assert APIGenerator.extract_function_name("/user/123/info") == "_user_id_info"
+        assert extract_function_name("/user/123/info") == "_user_id_info"
     finally:
         # 恢复原始配置
         APIConfig._config['PATH_URLS'] = original_path_urls
-    
+
     # 测试根路径
-    assert APIGenerator.extract_function_name("/") == "_"
+    assert extract_function_name("/") == "_"
 
 
 @allure.feature("API生成器")
 @allure.story("确定服务包")
 def test_determine_service_package():
     """测试确定服务包"""
-    # 测试普通URL
-    assert APIGenerator.determine_service_package("/mobile/trade/orderCommit") == "mall_mobile_application"
-    
-    # 测试带路径参数的URL
-    assert APIGenerator.determine_service_package("/user/123/info") == "mall_center_user"
-    
-    # 测试空URL
-    assert APIGenerator.determine_service_package("") == "apis"
+    # 触发配置初始化
+    APIConfig.get_config('SERVICE_MAPPING')
+
+    # 临时设置 SERVICE_MAPPING 配置
+    original_service_mapping = APIConfig._config.get('SERVICE_MAPPING', {})
+    APIConfig._config['SERVICE_MAPPING'] = {
+        "mobile": "mall_mobile_application",
+        "user": "mall_center_user"
+    }
+
+    try:
+        # 测试普通URL
+        assert determine_service_package("/mobile/trade/orderCommit") == "mall_mobile_application"
+
+        # 测试带路径参数的URL
+        assert determine_service_package("/user/123/info") == "mall_center_user"
+
+        # 测试空URL
+        assert determine_service_package("") == "apis"
+    finally:
+        # 恢复原始配置
+        APIConfig._config['SERVICE_MAPPING'] = original_service_mapping
 
 
 @allure.feature("API生成器")
@@ -53,10 +73,10 @@ def test_determine_service_package():
 def test_check_api_exists():
     """测试检查API是否存在"""
     generator = APIGenerator(output_dir="test_api")
-    
+
     # 测试不存在的API
     assert not generator.check_api_exists("/mobile/trade/orderCommit", "apis")
-    
+
     # 清理
     if os.path.exists("test_api"):
         shutil.rmtree("test_api")
@@ -67,10 +87,10 @@ def test_check_api_exists():
 def test_generate_params_string():
     """测试生成参数字符串"""
     generator = APIGenerator()
-    
+
     # 测试空参数
     assert generator._generate_params_string({}) == "{}"
-    
+
     # 测试简单参数
     params = {"keyword": "TS001", "pageNum": 1}
     result = generator._generate_params_string(params)
@@ -85,7 +105,7 @@ def test_generate_params_string():
 def test_generate_file_content():
     """测试生成API文件内容"""
     generator = APIGenerator()
-    
+
     request_info = {
         "method": "POST",
         "url": "/user/login",
@@ -93,7 +113,7 @@ def test_generate_file_content():
         "post_data": {"username": "test", "password": "123456"},
         "headers": {"content-type": "application/json"}
     }
-    
+
     content = generator.generate_file_content(request_info, "_user_login")
     assert "from util.client import client" in content
     assert "def _user_login" in content
@@ -111,7 +131,7 @@ def test_generate_file_content():
 def test_generate_api_file():
     """测试生成API文件"""
     generator = APIGenerator(output_dir="test_api")
-    
+
     request_info = {
         "method": "POST",
         "url": "/user/login",
@@ -119,15 +139,15 @@ def test_generate_api_file():
         "post_data": {"username": "test", "password": "123456"},
         "headers": {"content-type": "application/json"}
     }
-    
+
     filepath = generator.generate_api_file(request_info)
     assert filepath is not None
     assert os.path.exists(filepath)
-    
+
     # 测试文件已存在的情况
     filepath2 = generator.generate_api_file(request_info)
     assert filepath2 is None
-    
+
     # 清理
     import shutil
     if os.path.exists("test_api"):
@@ -139,7 +159,7 @@ def test_generate_api_file():
 def test_generate_api_with_swagger_info():
     """测试生成包含Swagger文档信息的API文件"""
     generator = APIGenerator(output_dir="test_api")
-    
+
     # 模拟请求信息
     request_info = {
         "method": "POST",
@@ -148,12 +168,12 @@ def test_generate_api_with_swagger_info():
         "post_data": {"username": "test", "password": "123456"},
         "headers": {"content-type": "application/json"}
     }
-    
+
     # 生成API文件
     filepath = generator.generate_api_file(request_info)
     assert filepath is not None
     assert os.path.exists(filepath)
-    
+
     # 清理
     import shutil
     if os.path.exists("test_api"):
@@ -165,7 +185,7 @@ def test_generate_api_with_swagger_info():
 def test_parameter_description_from_swagger():
     """测试从Swagger文档获取参数说明"""
     generator = APIGenerator()
-    
+
     # 模拟Swagger信息
     swagger_info = {
         "description": "用户登录接口",
@@ -175,7 +195,7 @@ def test_parameter_description_from_swagger():
         },
         "summary": "用户登录"
     }
-    
+
     # 模拟请求信息
     request_info = {
         "method": "POST",
@@ -184,7 +204,7 @@ def test_parameter_description_from_swagger():
         "post_data": {"username": "test", "password": "123456"},
         "headers": {"content-type": "application/json"}
     }
-    
+
     # 生成文件内容
     content = generator.generate_file_content(request_info, "_user_login", swagger_info)
     assert "用户登录" in content
@@ -199,15 +219,18 @@ def test_swagger_cache_usage():
     generator1 = APIGenerator()
     generator2 = APIGenerator()
 
-    # 验证两个实例都有swagger_updater属性
-    assert hasattr(generator1, 'swagger_updater')
-    assert hasattr(generator2, 'swagger_updater')
+    # 验证两个实例都有swagger_handler属性
+    assert hasattr(generator1, 'swagger_handler')
+    assert hasattr(generator2, 'swagger_handler')
 
 
 @allure.feature("API生成器")
 @allure.story("路径URL处理-配置有模板")
 def test_path_url_with_config_template():
     """测试路径URL处理-配置有模板的情况"""
+    # 触发配置初始化
+    APIConfig.get_config('PATH_URLS')
+
     generator = APIGenerator(output_dir="test_api")
 
     # 临时设置 PATH_URLS 配置
@@ -242,6 +265,9 @@ def test_path_url_with_config_template():
 @allure.story("路径URL处理-配置无模板")
 def test_path_url_without_config_template():
     """测试路径URL处理-配置无模板的情况（自动识别数字参数）"""
+    # 触发配置初始化
+    APIConfig.get_config('PATH_URLS')
+
     generator = APIGenerator(output_dir="test_api")
 
     # 确保 PATH_URLS 配置不包含匹配的模板
@@ -420,6 +446,9 @@ def test_generate_api_with_swagger_info_complete():
 @allure.story("路径参数自动识别-多个数字参数")
 def test_path_url_multiple_numeric_params():
     """测试路径参数自动识别-多个数字参数的情况"""
+    # 触发配置初始化
+    APIConfig.get_config('PATH_URLS')
+
     generator = APIGenerator(output_dir="test_api")
 
     # 确保 PATH_URLS 配置不包含匹配的模板
@@ -453,7 +482,7 @@ def test_path_url_multiple_numeric_params():
 @allure.story("从Swagger文档提取参数")
 def test_extract_params_from_swagger():
     """测试从Swagger文档提取参数"""
-    generator = APIGenerator()
+    generator = SwaggerHandler()
 
     # 测试只包含查询参数的Swagger参数
     query_params_only = [
@@ -463,7 +492,7 @@ def test_extract_params_from_swagger():
     ]
     swagger_data = {"paths": {}}
 
-    query_params, post_data, has_query_param, has_body_param = \
+    query_params, post_data, has_query_param, has_body_param, path_params = \
         generator._extract_params_from_swagger(query_params_only, swagger_data)
 
     assert has_query_param is True
@@ -489,7 +518,7 @@ def test_extract_params_from_swagger():
         }
     }
 
-    query_params, post_data, has_query_param, has_body_param = \
+    query_params, post_data, has_query_param, has_body_param, path_params = \
         generator._extract_params_from_swagger(body_params_only, swagger_data_with_def)
 
     assert has_query_param is False
@@ -505,7 +534,7 @@ def test_extract_params_from_swagger():
         {"name": "dto", "in": "body", "schema": {"$ref": "#/definitions/UserDto"}}
     ]
 
-    query_params, post_data, has_query_param, has_body_param = \
+    query_params, post_data, has_query_param, has_body_param, path_params = \
         generator._extract_params_from_swagger(mixed_params, swagger_data_with_def)
 
     assert has_query_param is True
@@ -517,7 +546,7 @@ def test_extract_params_from_swagger():
     assert post_data["age"] == 0
 
     # 测试空参数列表
-    query_params, post_data, has_query_param, has_body_param = \
+    query_params, post_data, has_query_param, has_body_param, path_params = \
         generator._extract_params_from_swagger([], swagger_data)
 
     assert has_query_param is False
@@ -530,7 +559,7 @@ def test_extract_params_from_swagger():
 @allure.story("获取参数默认值")
 def test_get_default_value():
     """测试根据参数类型获取默认值"""
-    generator = APIGenerator()
+    generator = SwaggerHandler()
 
     # 测试 string 类型
     assert generator._get_default_value("string") == ""
@@ -552,7 +581,7 @@ def test_get_default_value():
 @allure.story("提取body参数")
 def test_extract_body_params():
     """测试从body参数schema中提取参数"""
-    generator = APIGenerator()
+    generator = SwaggerHandler()
 
     # 测试带 $ref 的模型引用
     schema_with_ref = {"$ref": "#/definitions/UserDto"}

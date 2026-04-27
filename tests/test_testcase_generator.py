@@ -27,10 +27,10 @@ def _user_login(data=data, access_token=access_token):
     with client.post(url=url, headers=headers, json=data) as r:
         return r
 '''
-    
+
     with open("test_api.py", "w", encoding="utf-8") as f:
         f.write(test_content)
-    
+
     try:
         generator = TestCaseGenerator()
         function_name = generator.extract_function_name_from_file("test_api.py")
@@ -45,7 +45,7 @@ def _user_login(data=data, access_token=access_token):
 def test_extract_api_params_dict_from_har():
     """测试从HAR请求信息中提取参数字典"""
     generator = TestCaseGenerator()
-    
+
     # 测试POST请求带post_data
     request_info = {
         "method": "POST",
@@ -53,7 +53,7 @@ def test_extract_api_params_dict_from_har():
     }
     params = generator.extract_api_params_dict_from_har(request_info)
     assert params == {"username": "test", "password": "123456"}
-    
+
     # 测试POST请求带query_params
     request_info = {
         "method": "POST",
@@ -61,7 +61,7 @@ def test_extract_api_params_dict_from_har():
     }
     params = generator.extract_api_params_dict_from_har(request_info)
     assert params == {"page": 1, "size": 10}
-    
+
     # 测试GET请求带query_params
     request_info = {
         "method": "GET",
@@ -69,7 +69,7 @@ def test_extract_api_params_dict_from_har():
     }
     params = generator.extract_api_params_dict_from_har(request_info)
     assert params == {"id": 123}
-    
+
     # 测试无参数的情况
     request_info = {
         "method": "GET"
@@ -83,10 +83,10 @@ def test_extract_api_params_dict_from_har():
 def test_format_params_for_test_case():
     """测试格式化参数为测试用例中的参数字符串"""
     generator = TestCaseGenerator()
-    
+
     # 测试空参数
     assert generator.format_params_for_test_case({}) == "{}"
-    
+
     # 测试简单参数
     params = {"keyword": "TS001", "pageNum": 1}
     result = generator.format_params_for_test_case(params)
@@ -101,7 +101,7 @@ def test_format_params_for_test_case():
 def test_process_params_to_map():
     """测试处理参数到映射"""
     generator = TestCaseGenerator()
-    
+
     # 测试单个参数
     requests_params = [
         {"keyword": "TS001"},
@@ -114,7 +114,7 @@ def test_process_params_to_map():
     assert len(result[0]["keyword"]) == 2  # 去重后应该有2个值
     assert "TS001" in result[0]["keyword"]
     assert "TS002" in result[0]["keyword"]
-    
+
     # 测试组合参数
     requests_params = [
         {"startDate": "2026-01-01", "endDate": "2026-01-31"},
@@ -134,10 +134,26 @@ def test_process_params_to_map():
 @allure.story("从URL提取服务包名")
 def test_extract_service_package_from_url():
     """测试从URL中提取服务包名"""
-    generator = TestCaseGenerator()
-    assert generator.extract_service_package_from_url("/mobile/trade/orderCommit") == "mall_mobile_application"
-    assert generator.extract_service_package_from_url("/user/123/info") == "mall_center_user"
-    assert generator.extract_service_package_from_url("") == "apis"
+    from har2pytest.config import APIConfig
+
+    # 触发配置初始化
+    APIConfig.get_config('SERVICE_MAPPING')
+
+    # 临时设置 SERVICE_MAPPING 配置
+    original_service_mapping = APIConfig._config.get('SERVICE_MAPPING', {})
+    APIConfig._config['SERVICE_MAPPING'] = {
+        "mobile": "mall_mobile_application",
+        "user": "mall_center_user"
+    }
+
+    try:
+        generator = TestCaseGenerator()
+        assert generator.extract_service_package_from_url("/mobile/trade/orderCommit") == "mall_mobile_application"
+        assert generator.extract_service_package_from_url("/user/123/info") == "mall_center_user"
+        assert generator.extract_service_package_from_url("") == "apis"
+    finally:
+        # 恢复原始配置
+        APIConfig._config['SERVICE_MAPPING'] = original_service_mapping
 
 
 @allure.feature("测试用例生成器")
@@ -163,10 +179,10 @@ def _user_login(data=data, access_token=access_token):
     with client.post(url=url, headers=headers, json=data) as r:
         return r
 """
-    
+
     with open("test_api.py", "w", encoding="utf-8") as f:
         f.write(test_content)
-    
+
     try:
         generator = TestCaseGenerator()
         remarks = generator.extract_param_remarks_from_api_file("test_api.py")
