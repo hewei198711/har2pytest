@@ -264,7 +264,7 @@ def test_path_url_with_config_template():
 @allure.feature("API生成器")
 @allure.story("路径URL处理-配置无模板")
 def test_path_url_without_config_template():
-    """测试路径URL处理-配置无模板的情况（自动识别数字参数）"""
+    """测试路径URL处理-配置无模板的情况"""
     # 触发配置初始化
     APIConfig.get_config('PATH_URLS')
 
@@ -275,7 +275,7 @@ def test_path_url_without_config_template():
     APIConfig._config['PATH_URLS'] = ["/other/path"]
 
     try:
-        # 测试带路径参数的URL（无配置模板，自动识别数字参数）
+        # 测试带路径参数的URL（无配置模板，直接返回原始URL）
         request_info = {
             "method": "GET",
             "url": "/appStore/store/dis/mortgageOrder/detail/96453",
@@ -286,8 +286,7 @@ def test_path_url_without_config_template():
 
         content = generator.generate_file_content(request_info, "_appStore_store_dis_mortgageOrder_detail_id")
         assert "def _appStore_store_dis_mortgageOrder_detail_id" in content
-        assert "/appStore/store/dis/mortgageOrder/detail/{id}" in content
-        assert "params['id']" in content
+        assert "/appStore/store/dis/mortgageOrder/detail/96453" in content
     finally:
         # 恢复原始配置
         APIConfig._config['PATH_URLS'] = original_path_urls

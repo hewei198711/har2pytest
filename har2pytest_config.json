@@ -11,7 +11,8 @@
     "/mobile/msg/manage/letter/dashbord/{usrId}/{systemId}",
     "/mobile/order/carts/getRecommendProduct/{serialNo}",
     "/mobile/order/before/by/store/{cardNo}",
-    "/mobile/order/before/by/{cardNo}"
+    "/mobile/order/before/by/{cardNo}",
+    "/mobile/order/before/by/{cardNo}/{systemId}"
   ],
   "SERVICE_MAPPING": {
     "appstore": "mall_store_application",
@@ -40,20 +41,20 @@
     "mall_center_member": "https://uc-test.perfect99.com/sw/mall-center-member"
   },
   "INVALID_PARAMS": [
-    "rnd",
-    "nonce",
     "sign",
-    "timestamp",
-    "partnerKey"
+    "nonce",
+    "rnd",
+    "partnerKey",
+    "timestamp"
   ],
   "HEADERS_TO_INCLUDE": [
     "authorization",
-    "content-type",
     "channel",
+    "content-type",
     "client"
   ],
   "REQUIRED_HEADERS": {
-      "authorization": "请输入认证令牌"
+    "authorization": "请输入认证令牌"
   },
   "PAGINATION_PARAMS": [
     "pageNum",
@@ -62,5 +63,10 @@
     "commitStartTime",
     "header"
   ],
-  "TESTCASE_DIR": "testcases"
+  "TESTCASE_DIR": "testcases",
+  "SWAGGER_FILE": "swagger.json",
+  "SWAGGER_HOST": "https://api.example.com",
+  "SWAGGER_BASE_PATH": "/api",
+  "SWAGGER_TITLE": "API Documentation",
+  "SWAGGER_VERSION": "1.0.0"
 }

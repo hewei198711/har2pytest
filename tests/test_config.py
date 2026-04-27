@@ -48,11 +48,12 @@ def test_config_file_loading():
         
         # 重新加载配置
         APIConfig._config = None
-        config = APIConfig._load_config()
+        config, config_file_exists = APIConfig._load_config()
         
         # 测试配置是否正确加载
         assert config.get('BASE_URLS') == ["https://test.example.com/api"]
         assert config.get('DEFAULT_SERVICE_PACKAGE') == "test_api"
+        assert config_file_exists == True
     finally:
         # 清理
         if "HAR2PYTEST_CONFIG" in os.environ:

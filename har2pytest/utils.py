@@ -7,15 +7,17 @@ from .logger import logger
 from .config import APIConfig
 
 
-def match_path_template(url: str) -> tuple:
+def match_path_template(url: str, swagger_data: Dict[str, Any] = None) -> tuple:
     """
     匹配路径模板
 
     匹配URL与APIConfig.PATH_URLS中的路径模板，提取路径参数
-    如果没有匹配到模板，自动识别路径中的数字参数
+    如果提供了Swagger文档数据，会尝试从中匹配带{}的路径模板
+    如果没有匹配到模板，直接返回原始URL
 
     Args:
-        url: 原始接口URL，如 /mobile/trade/orderCommit
+        url: 原始接口URL，如 /mobile/trade/orderCommit 或 /user/123/info
+        swagger_data: Swagger文档数据，可选
 
     Returns:
         tuple: (url_pattern, path_params, result_parts)
@@ -25,35 +27,25 @@ def match_path_template(url: str) -> tuple:
 
     Example:
         url = "/user/123/info"
-        pattern, params, parts = match_path_template(url)
-        # 返回 ("/user/{userId}/info", {"userId": "123"}, ["user", "userId", "info"])
+        pattern, params, parts = match_path_template(url, swagger_data)
+        # 如果Swagger文档中有 /user/{userId}/info 路径，则返回 ("/user/{userId}/info", {"userId": "123"}, ["user", "userId", "info"])
+        # 否则返回 ("/user/123/info", {}, ["user", "123", "info"])
     """
     clean_url = url.lstrip("/")
     url_parts = clean_url.split("/")
 
-    # 检查URL是否已经包含花括号参数
-    has_braces = any(part.startswith("{") and part.endswith("}") for part in url_parts)
-
-    # 处理已经包含花括号的路径部分
-    processed_url_parts = []
-    for part in url_parts:
-        # 如果部分包含花括号，提取参数名
-        if part.startswith("{") and part.endswith("}"):
-            processed_url_parts.append(part[1:-1])
-        else:
-            processed_url_parts.append(part)
-
+    # 先尝试从配置的PATH_URLS中匹配
     for path_pattern in APIConfig.PATH_URLS():
         pattern_parts = path_pattern.lstrip("/").split("/")
 
-        if len(processed_url_parts) != len(pattern_parts):
+        if len(url_parts) != len(pattern_parts):
             continue
 
         matched = True
         result_parts = []
         path_params = {}
 
-        for url_part, pattern_part in zip(processed_url_parts, pattern_parts):
+        for url_part, pattern_part in zip(url_parts, pattern_parts):
             if pattern_part.startswith("{") and pattern_part.endswith("}"):
                 param_name = pattern_part[1:-1]
                 result_parts.append(param_name)
@@ -67,43 +59,87 @@ def match_path_template(url: str) -> tuple:
         if matched:
             return path_pattern, path_params, result_parts
 
-    # 如果没有匹配到模板
-    result_parts = []
-    path_params = {}
-    url_pattern_parts = []
+    # 检查URL中是否有数字
+    has_numeric = any(part.isdigit() for part in url_parts)
+    logger.info(f"检查URL: {url}, 是否包含数字: {has_numeric}")
 
-    for i, part in enumerate(url_parts):
-        # 检查是否是已经包含花括号的参数
-        if part.startswith("{") and part.endswith("}"):
-            # 提取参数名
-            param_name = part[1:-1]
-            result_parts.append(param_name)
-            path_params[param_name] = ""
-            url_pattern_parts.append(part)  # 保留原始的花括号
-        # 检查是否是数字
-        elif part.isdigit():
-            # 生成参数名，如 id, item_id, order_id 等
-            if i == len(url_parts) - 1:
-                param_name = "id"
+    # 如果有数字且提供了Swagger文档，尝试从Swagger文档中匹配路径模板
+    if has_numeric and swagger_data and "paths" in swagger_data:
+        paths = swagger_data["paths"]
+        logger.info(f"Swagger文档中总共有 {len(paths)} 个路径")
+        
+        # 获取Swagger文档的basePath
+        base_path = swagger_data.get("basePath", "")
+        logger.info(f"Swagger文档的basePath: {base_path}")
+        
+        # 处理basePath：如果url包含basePath前缀，去掉它
+        search_url = url
+        if base_path and base_path != "/":
+            # 确保basePath以"/"结尾
+            if not base_path.endswith("/"):
+                base_path_with_slash = base_path + "/"
             else:
-                # 尝试从路径中获取参数名
-                if i + 1 < len(url_parts) and url_parts[i + 1].isdigit():
-                    param_name = f"param_{i}"
-                else:
-                    # 尝试使用前一个路径部分作为参数名的一部分
-                    if i > 0:
-                        param_name = f"{url_parts[i-1]}_id"
-                    else:
-                        param_name = f"param_{i}"
-            result_parts.append(param_name)
-            path_params[param_name] = part
-            url_pattern_parts.append(f"{{{param_name}}}")
-        else:
-            result_parts.append(part)
-            url_pattern_parts.append(part)
+                base_path_with_slash = base_path
+            
+            # 尝试去掉basePath前缀（带斜杠）
+            if url.startswith(base_path_with_slash):
+                search_url = url[len(base_path_with_slash):]
+                # 确保路径以"/"开头
+                if not search_url.startswith("/"):
+                    search_url = "/" + search_url
+            # 尝试去掉basePath前缀（不带斜杠）
+            elif url.startswith(base_path):
+                search_url = url[len(base_path):]
+                # 确保路径以"/"开头
+                if not search_url.startswith("/"):
+                    search_url = "/" + search_url
+            logger.info(f"去掉basePath后的URL: {search_url}")
+        
+        # 重新解析URL
+        clean_search_url = search_url.lstrip("/")
+        search_url_parts = clean_search_url.split("/")
 
-    url_pattern = "/" + "/".join(url_pattern_parts)
-    return url_pattern, path_params, result_parts
+        # 先过滤出所有带{}的路径，这样可以减少遍历的数量
+        swagger_paths_with_params = [path for path in paths.keys() if "{" in path and "}" in path]
+        logger.info(f"Swagger文档中有 {len(swagger_paths_with_params)} 个带参数的路径")
+        
+        # 打印前10个带参数的路径用于调试
+        for i, path in enumerate(swagger_paths_with_params[:10]):
+            logger.info(f"  带参数的路径 {i+1}: {path}")
+
+        # 遍历带{}的路径
+        for swagger_path in swagger_paths_with_params:
+            swagger_parts = swagger_path.lstrip("/").split("/")
+
+            # 长度必须相同
+            if len(search_url_parts) != len(swagger_parts):
+                continue
+
+            matched = True
+            result_parts = []
+            path_params = {}
+
+            for url_part, swagger_part in zip(search_url_parts, swagger_parts):
+                # 如果Swagger路径部分是参数（带{}）
+                if swagger_part.startswith("{") and swagger_part.endswith("}"):
+                    param_name = swagger_part[1:-1]
+                    result_parts.append(param_name)
+                    path_params[param_name] = url_part
+                else:
+                    # 非参数部分必须完全匹配
+                    if url_part != swagger_part:
+                        matched = False
+                        break
+                    result_parts.append(url_part)
+
+            if matched:
+                logger.info(f"从Swagger文档中匹配到路径模板: {swagger_path}")
+                return swagger_path, path_params, result_parts
+        logger.info(f"未能从Swagger文档中匹配到路径模板")
+
+    # 如果没有匹配到模板，直接返回原始URL
+    return url, {}, url_parts
+
 
 def extract_function_name(url: str) -> str:
     """
@@ -127,10 +163,39 @@ def extract_function_name(url: str) -> str:
     # 匹配 {param} 格式的参数
     param_pattern = r"\{([^\}]+)\}"
     processed_url = re.sub(param_pattern, r"\1", processed_url)
-    
-    # 使用辅助方法匹配路径模板
-    _, _, result_parts = match_path_template(processed_url)
-    return f"_{'_'.join(result_parts)}"
+
+    # 直接从URL中提取路径部分，生成函数名
+    clean_url = processed_url.lstrip("/")
+    url_parts = clean_url.split("/")
+
+    # 先尝试从配置的PATH_URLS中匹配
+    for path_pattern in APIConfig.PATH_URLS():
+        pattern_parts = path_pattern.lstrip("/").split("/")
+
+        if len(url_parts) != len(pattern_parts):
+            continue
+
+        matched = True
+        result_parts = []
+
+        for url_part, pattern_part in zip(url_parts, pattern_parts):
+            if pattern_part.startswith("{") and pattern_part.endswith("}"):
+                # 如果pattern_part是参数（带{}），使用参数名
+                param_name = pattern_part[1:-1]
+                result_parts.append(param_name)
+            else:
+                # 非参数部分必须完全匹配
+                if url_part != pattern_part:
+                    matched = False
+                    break
+                result_parts.append(url_part)
+
+        if matched:
+            return f"_{'_'.join(result_parts)}"
+
+    # 如果没有匹配到PATH_URLS，直接使用URL路径部分
+    return f"_{'_'.join(url_parts)}"
+
 
 def determine_service_package(url: str) -> str:
     """

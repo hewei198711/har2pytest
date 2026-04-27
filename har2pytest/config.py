@@ -44,11 +44,13 @@ class APIConfig:
     # 初始化配置
     _config = None
     _config_warned = False
+    _config_file_exists = False
 
     @classmethod
     def _load_config(cls):
         """加载配置，优先从环境变量和配置文件读取"""
         config = cls._default_config.copy()
+        config_file_exists = False
 
         # 尝试从环境变量读取配置文件路径
         config_file = os.environ.get("HAR2PYTEST_CONFIG")
@@ -61,6 +63,7 @@ class APIConfig:
 
         # 尝试从配置文件读取
         if os.path.exists(config_file):
+            config_file_exists = True
             try:
                 with open(config_file, "r", encoding="utf-8") as f:
                     user_config = json.load(f)
@@ -68,6 +71,7 @@ class APIConfig:
                     logger.info(f"成功加载配置文件，DEFAULT_SERVICE_PACKAGE: {config.get('DEFAULT_SERVICE_PACKAGE')}")
             except Exception as e:
                 # 配置文件读取失败，使用默认配置
+                config_file_exists = False
                 logger.warning(f"配置文件 {config_file} 读取失败: {str(e)}，将使用默认配置")
         else:
             # 配置文件不存在，使用默认配置
@@ -81,7 +85,7 @@ class APIConfig:
         if isinstance(config.get("HEADERS_TO_INCLUDE"), list):
             config["HEADERS_TO_INCLUDE"] = set(config["HEADERS_TO_INCLUDE"])
 
-        return config
+        return config, config_file_exists
 
     @classmethod
     def _warn_missing_config(cls):
@@ -117,8 +121,10 @@ class APIConfig:
     def get_config(cls, key):
         """获取配置值"""
         if cls._config is None:
-            cls._config = cls._load_config()
-            cls._warn_missing_config()
+            cls._config, config_file_exists = cls._load_config()
+            # 只有当配置文件不存在时才显示警告
+            if not config_file_exists:
+                cls._warn_missing_config()
         return cls._config.get(key, cls._default_config.get(key))
 
     # 类属性访问方法
@@ -215,11 +221,12 @@ class APIConfig:
         if not match:
             return cls.DEFAULT_SERVICE_PACKAGE()
 
-        first_segment = match.group(1)
-        # 从SERVICE_MAPPING中查找对应的服务包
+        first_segment = match.group(1).lower()
+        # 从SERVICE_MAPPING中查找对应的服务包（不区分大小写）
         service_mapping = cls.SERVICE_MAPPING()
-        if first_segment in service_mapping:
-            return service_mapping[first_segment]
+        for key, value in service_mapping.items():
+            if key.lower() == first_segment:
+                return value
 
         # 默认服务包
         return cls.DEFAULT_SERVICE_PACKAGE()

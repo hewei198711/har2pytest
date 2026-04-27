@@ -102,6 +102,7 @@ har2pytest generate api_request.har
 # 强制覆盖已存在的文件
 har2pytest generate api_request.har api --overwrite
 ```
+
 #### 2. 从Swagger文档生成API文件
 
 ```bash

@@ -106,7 +106,7 @@ class APIGenerator:
 
         return "{\n" + "\n".join(items) + "\n}"
 
-    def _parse_request_info(self, request_info: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_request_info(self, request_info: Dict[str, Any], swagger_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         解析请求信息
 
@@ -115,6 +115,7 @@ class APIGenerator:
 
         Args:
             request_info: 请求信息字典，包含method、url、query_params、post_data、headers等
+            swagger_data: Swagger文档数据，可选，用于匹配路径模板
 
         Returns:
             Dict[str, Any]: 解析后的请求信息字典
@@ -147,7 +148,7 @@ class APIGenerator:
             is_need_urlencode = True
 
         # 使用辅助方法匹配路径模板
-        url_pattern, path_params, _ = match_path_template(url)
+        url_pattern, path_params, _ = match_path_template(url, swagger_data)
 
         # 如果 request_info 中包含路径参数，使用它
         if "path_params" in request_info and request_info["path_params"]:
@@ -433,19 +434,20 @@ class APIGenerator:
         function_def.append("")
         return function_def
 
-    def generate_file_content(self, request_info: Dict[str, Any], function_name: str, swagger_info: Dict[str, Any] = None) -> str:
+    def generate_file_content(self, request_info: Dict[str, Any], function_name: str, swagger_info: Dict[str, Any] = None, parsed_info: Dict[str, Any] = None) -> str:
         """
-        生成API文件的内容
+        生成API文件内容
 
-        生成单个API接口文件的完整内容，包括导入语句、参数定义和函数实现
+        根据请求信息和函数名生成API文件内容
 
         Args:
             request_info: 请求信息字典，包含method、url、query_params、post_data、headers等
-            function_name: 函数名，如 "_mobile_trade_orderCommit"
+            function_name: 函数名
             swagger_info: Swagger文档信息，包含description、parameters等
+            parsed_info: 预解析的请求信息字典，如果为None则内部会解析
 
         Returns:
-            str: 生成的API文件内容
+            str: 生成的文件内容
 
         Example:
             request_info = {
@@ -460,7 +462,8 @@ class APIGenerator:
         """
         if swagger_info is None:
             swagger_info = self.DEFAULT_SWAGGER_INFO.copy()
-        parsed_info = self._parse_request_info(request_info)
+        if parsed_info is None:
+            parsed_info = self._parse_request_info(request_info)
         imports = self._generate_imports(parsed_info)
         params_section = self._process_parameters(parsed_info, swagger_info)
         function_def = self._generate_function_definition(parsed_info, function_name, swagger_info)
@@ -498,15 +501,47 @@ class APIGenerator:
 
         service_package = determine_service_package(url)
 
+        # 先获取Swagger文档数据
+        swagger_data = None
+        if swagger_info is None:
+            swagger_info = self.DEFAULT_SWAGGER_INFO.copy()
+            try:
+                # 检查服务包是否有对应的Swagger文档URL
+                if service_package in APIConfig.SWAGGER_DOC_URLS():
+                    # 获取Swagger文档URL
+                    doc_base_url = APIConfig.SWAGGER_DOC_URLS()[service_package]
+                    logger.info(f"服务包: {service_package}, Swagger文档URL: {doc_base_url}")
+                    
+                    # 获取Swagger文档
+                    swagger_data = self.swagger_handler.get_swagger_doc(doc_base_url)
+                    if swagger_data:
+                        logger.info(f"成功获取Swagger文档，路径数量: {len(swagger_data.get('paths', {}))}")
+                        # 查找API信息（先使用原始URL查找）
+                        swagger_info = self.swagger_handler.find_api_info_in_swagger(swagger_data, url, method)
+                        logger.info(f"使用原始URL查找Swagger信息: {url}, 结果: {swagger_info}")
+                    else:
+                        logger.warning(f"无法获取Swagger文档: {doc_base_url}")
+            except Exception as e:
+                logger.debug(f"获取Swagger文档信息失败: {str(e)}")
+
+        # 解析请求信息，传递Swagger文档数据用于匹配路径模板
+        parsed_info = self._parse_request_info(request_info, swagger_data)
+        url_pattern = parsed_info.get("url_pattern", url)
+
+        # 如果有Swagger文档数据，再次查找API信息（使用匹配后的路径模板）
+        if swagger_data and url_pattern != url:
+            swagger_info = self.swagger_handler.find_api_info_in_swagger(swagger_data, url_pattern, method)
+
         # 检查文件是否存在
-        if self.check_api_exists(url, service_package):
+        if self.check_api_exists(url_pattern, service_package):
             if not force_overwrite:
-                logger.info(f"接口已存在，跳过生成 (设置 force_overwrite=True 可覆盖): {method} {url}")
+                logger.info(f"接口已存在，跳过生成 (设置 force_overwrite=True 可覆盖): {method} {url_pattern}")
                 return None
             else:
-                logger.info(f"接口已存在，强制覆盖: {method} {url}")
+                logger.info(f"接口已存在，强制覆盖: {method} {url_pattern}")
 
-        function_name = extract_function_name(url)
+        # 使用匹配后的路径模板生成函数名
+        function_name = extract_function_name(url_pattern)
 
         base_filename = function_name
         filename = f"{base_filename}.py"
@@ -518,31 +553,7 @@ class APIGenerator:
 
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-        # 解析请求信息，获取 url_pattern
-        parsed_info = self._parse_request_info(request_info)
-        url_pattern = parsed_info.get("url_pattern", url)
-
-        # 获取Swagger文档信息
-        if swagger_info is None:
-            swagger_info = self.DEFAULT_SWAGGER_INFO.copy()
-            try:
-                # 确定服务包
-                service_package = determine_service_package(url_pattern)
-                
-                # 检查服务包是否有对应的Swagger文档URL
-                if service_package in APIConfig.SWAGGER_DOC_URLS():
-                    # 获取Swagger文档URL
-                    doc_base_url = APIConfig.SWAGGER_DOC_URLS()[service_package]
-                    
-                    # 获取Swagger文档
-                    swagger_data = self.swagger_handler.get_swagger_doc(doc_base_url)
-                    if swagger_data:
-                        # 查找API信息
-                        swagger_info = self.swagger_handler.find_api_info_in_swagger(swagger_data, url_pattern, method)
-            except Exception as e:
-                logger.debug(f"获取Swagger文档信息失败: {str(e)}")
-
-        content = self.generate_file_content(request_info, function_name, swagger_info)
+        content = self.generate_file_content(request_info, function_name, swagger_info, parsed_info)
 
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
