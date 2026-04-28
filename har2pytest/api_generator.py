@@ -36,8 +36,7 @@ class APIGenerator:
         if output_dir is None:
             output_dir = APIConfig.DEFAULT_SERVICE_PACKAGE()
         self.output_dir = output_dir
-        self.swagger_handler = SwaggerHandler()
-        self.swagger_handler.set_api_generator(self)
+        self.swagger_handler = SwaggerHandler(api_generator=self)
         
         # 初始化子生成器
         self.har_generator = HARGenerator(output_dir, self)
@@ -569,25 +568,6 @@ class APIGenerator:
         logger.info(f"生成API文件: {filepath} (服务包: {service_package})")
         return filepath
 
-    def generate_api_files_from_har(self, har_file_path: str, force_overwrite: bool = False) -> List[str]:
-        """
-        从HAR文件生成所有API接口文件
-
-        解析HAR文件中的所有请求，为每个请求生成对应的API接口文件
-
-        Args:
-            har_file_path: HAR文件路径，如 "api_request.har"
-            force_overwrite: 是否覆盖已存在的文件
-
-        Returns:
-            List[str]: 生成的文件路径列表
-
-        Example:
-            files = generator.generate_api_files_from_har("普通订单.har")
-            # 返回生成的文件路径列表，如 ["api/_mobile_product_search.py", "api/_mobile_trade_orderCommit.py"]
-        """
-        return self.har_generator.generate_api_files_from_har(har_file_path, force_overwrite)
-
     def generate_index_file(self, generated_files: List[str]):
         """
         生成API索引文件
@@ -674,18 +654,4 @@ class APIGenerator:
                 f.write("")
             logger.info(f"创建主目录索引文件: {main_init_path}")
 
-    def generate_apis_from_swagger(self, swagger_url: str, force_overwrite: bool = False, specific_path: str = None) -> List[str]:
-        """
-        从Swagger文档生成API文件
 
-        解析Swagger文档，为每个API端点生成对应的API文件
-
-        Args:
-            swagger_url: Swagger文档的URL
-            force_overwrite: 是否覆盖已存在的文件
-            specific_path: 只生成指定的API路径，默认为None（生成所有路径）
-
-        Returns:
-            List[str]: 生成的文件路径列表
-        """
-        return self.swagger_handler.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)

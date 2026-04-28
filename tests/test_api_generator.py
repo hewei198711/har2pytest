@@ -491,7 +491,7 @@ def test_extract_params_from_swagger():
     ]
     swagger_data = {"paths": {}}
 
-    query_params, post_data, has_query_param, has_body_param, path_params = \
+    query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions = \
         generator._extract_params_from_swagger(query_params_only, swagger_data)
 
     assert has_query_param is True
@@ -501,6 +501,7 @@ def test_extract_params_from_swagger():
     assert query_params["pageSize"] == ""
     assert query_params["keyword"] == ""
     assert post_data == {}
+    assert param_descriptions == {}
 
     # 测试只包含body参数的Swagger参数
     body_params_only = [
@@ -517,7 +518,7 @@ def test_extract_params_from_swagger():
         }
     }
 
-    query_params, post_data, has_query_param, has_body_param, path_params = \
+    query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions = \
         generator._extract_params_from_swagger(body_params_only, swagger_data_with_def)
 
     assert has_query_param is False
@@ -526,6 +527,7 @@ def test_extract_params_from_swagger():
     assert len(post_data) == 2
     assert post_data["username"] == ""
     assert post_data["age"] == 0
+    assert param_descriptions == {}
 
     # 测试同时包含查询参数和body参数的Swagger参数
     mixed_params = [
@@ -533,7 +535,7 @@ def test_extract_params_from_swagger():
         {"name": "dto", "in": "body", "schema": {"$ref": "#/definitions/UserDto"}}
     ]
 
-    query_params, post_data, has_query_param, has_body_param, path_params = \
+    query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions = \
         generator._extract_params_from_swagger(mixed_params, swagger_data_with_def)
 
     assert has_query_param is True
@@ -543,15 +545,17 @@ def test_extract_params_from_swagger():
     assert len(post_data) == 2
     assert post_data["username"] == ""
     assert post_data["age"] == 0
+    assert param_descriptions == {}
 
     # 测试空参数列表
-    query_params, post_data, has_query_param, has_body_param, path_params = \
+    query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions = \
         generator._extract_params_from_swagger([], swagger_data)
 
     assert has_query_param is False
     assert has_body_param is False
     assert query_params == {}
     assert post_data == {}
+    assert param_descriptions == {}
 
 
 @allure.feature("API生成器")

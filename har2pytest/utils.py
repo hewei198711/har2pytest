@@ -7,6 +7,36 @@ from .logger import logger
 from .config import APIConfig
 
 
+def handle_base_path(url: str, base_path: str) -> str:
+    """
+    处理URL中的basePath前缀
+
+    如果URL包含basePath前缀，将其移除，并确保结果以"/"开头
+
+    Args:
+        url: 原始URL，如 /appStore/store/xxx
+        base_path: Swagger文档中的basePath，如 /appStore
+
+    Returns:
+        str: 移除basePath前缀后的URL，如 /store/xxx
+
+    Example:
+        handle_base_path("/appStore/store/xxx", "/appStore")  # 返回 "/store/xxx"
+        handle_base_path("/appStore/store/xxx", "/")  # 返回 "/appStore/store/xxx"
+        handle_base_path("/appStore/store/xxx", "")  # 返回 "/appStore/store/xxx"
+    """
+    if not base_path or base_path == "/":
+        return url
+
+    # 尝试去掉basePath前缀
+    if url.startswith(base_path):
+        result = url[len(base_path):]
+        if not result.startswith("/"):
+            result = "/" + result
+        return result
+    return url
+
+
 def match_path_template(url: str, swagger_data: Dict[str, Any] = None) -> tuple:
     """
     匹配路径模板
@@ -68,32 +98,13 @@ def match_path_template(url: str, swagger_data: Dict[str, Any] = None) -> tuple:
         paths = swagger_data["paths"]
         logger.info(f"Swagger文档中总共有 {len(paths)} 个路径")
         
-        # 获取Swagger文档的basePath
+        # 获取Swagger文档的basePath并处理
         base_path = swagger_data.get("basePath", "")
         logger.info(f"Swagger文档的basePath: {base_path}")
         
-        # 处理basePath：如果url包含basePath前缀，去掉它
-        search_url = url
-        if base_path and base_path != "/":
-            # 确保basePath以"/"结尾
-            if not base_path.endswith("/"):
-                base_path_with_slash = base_path + "/"
-            else:
-                base_path_with_slash = base_path
-            
-            # 尝试去掉basePath前缀（带斜杠）
-            if url.startswith(base_path_with_slash):
-                search_url = url[len(base_path_with_slash):]
-                # 确保路径以"/"开头
-                if not search_url.startswith("/"):
-                    search_url = "/" + search_url
-            # 尝试去掉basePath前缀（不带斜杠）
-            elif url.startswith(base_path):
-                search_url = url[len(base_path):]
-                # 确保路径以"/"开头
-                if not search_url.startswith("/"):
-                    search_url = "/" + search_url
-            logger.info(f"去掉basePath后的URL: {search_url}")
+        # 使用工具函数处理basePath
+        search_url = handle_base_path(url, base_path)
+        logger.info(f"去掉basePath后的URL: {search_url}")
         
         # 重新解析URL
         clean_search_url = search_url.lstrip("/")
@@ -103,10 +114,6 @@ def match_path_template(url: str, swagger_data: Dict[str, Any] = None) -> tuple:
         swagger_paths_with_params = [path for path in paths.keys() if "{" in path and "}" in path]
         logger.info(f"Swagger文档中有 {len(swagger_paths_with_params)} 个带参数的路径")
         
-        # 打印前10个带参数的路径用于调试
-        for i, path in enumerate(swagger_paths_with_params[:10]):
-            logger.info(f"  带参数的路径 {i+1}: {path}")
-
         # 遍历带{}的路径
         for swagger_path in swagger_paths_with_params:
             swagger_parts = swagger_path.lstrip("/").split("/")

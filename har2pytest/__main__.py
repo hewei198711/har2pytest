@@ -5,6 +5,7 @@ har2pytest 命令行入口
 
 from .config import APIConfig
 from .har_parser import HARParser
+from .har_generator import HARGenerator
 from .api_generator import APIGenerator
 from .testcase_generator import TestCaseGenerator
 from .swagger_handler import SwaggerHandler
@@ -84,14 +85,15 @@ def main():
         logger.info(f"强制覆盖: {force_overwrite}") # 新增日志
         logger.info("-" * 50)
 
-        generator = APIGenerator(output_dir)
-        generated_files = generator.generate_api_files_from_har(har_file, force_overwrite=force_overwrite)
+        har_generator = HARGenerator(output_dir=output_dir)
+        generated_files = har_generator.generate_api_files_from_har(har_file, force_overwrite=force_overwrite)
 
         logger.info("-" * 50)
         logger.info(f"共生成 {len(generated_files)} 个API接口文件")
 
         if generated_files:
-            generator.generate_index_file(generated_files)
+            api_generator = APIGenerator(output_dir)
+            api_generator.generate_index_file(generated_files)
 
     elif command == "testcase":
         har_file = "api_request.har"
@@ -214,15 +216,16 @@ def main():
             logger.info(f"特定路径: {specific_path}")
         logger.info("-" * 50)
 
-        generator = APIGenerator(output_dir=output_dir)
-        generated_files = generator.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)
+        swagger_handler = SwaggerHandler()
+        generated_files = swagger_handler.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)
 
         logger.info("-" * 50)
         logger.info(f"共生成 {len(generated_files)} 个API接口文件")
 
         if generated_files:
             # 生成索引文件
-            generator.generate_index_file(generated_files)
+            api_generator = APIGenerator(output_dir)
+            api_generator.generate_index_file(generated_files)
 
     elif command == "summary":
         har_file = "api_request.har"

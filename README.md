@@ -111,6 +111,9 @@ har2pytest swagger https://petstore.swagger.io/v2/api-docs api
 
 # 强制覆盖已存在的文件
 har2pytest swagger https://petstore.swagger.io/v2/api-docs api --overwrite
+
+# 只生成指定路径的API文件
+har2pytest swagger https://petstore.swagger.io/v2/api-docs api --path /pet/{petId}
 ```
 
 #### 3. 生成测试用例

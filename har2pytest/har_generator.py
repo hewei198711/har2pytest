@@ -1,15 +1,20 @@
 # coding:utf-8
 
 import traceback
-from typing import List
+from typing import List, Optional, TYPE_CHECKING
+
 from .har_parser import HARParser
 from .logger import logger
+
+# 仅在类型检查时导入，运行时不会执行
+if TYPE_CHECKING:
+    from .api_generator import APIGenerator
 
 
 class HARGenerator:
     """HAR文件生成器类"""
 
-    def __init__(self, output_dir: str = None, api_generator=None):
+    def __init__(self, output_dir: str = None, api_generator: Optional["APIGenerator"] = None):
         """
         初始化HAR生成器
 
@@ -17,8 +22,8 @@ class HARGenerator:
             output_dir: API文件输出目录
             api_generator: API生成器实例
         """
-        self.output_dir = output_dir
-        self.api_generator = api_generator
+        self.output_dir: Optional[str] = output_dir
+        self.api_generator: Optional["APIGenerator"] = api_generator  # API生成器实例
         self.har_parser = HARParser()
 
     def generate_api_files_from_har(self, har_file_path: str, force_overwrite: bool = False) -> List[str]:

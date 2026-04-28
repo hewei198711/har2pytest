@@ -63,13 +63,18 @@ class HARParser:
             headers = {}
             for header in request.get("headers", []):
                 headers[header["name"]] = header["value"]
+            
+            # 过滤 headers
+            headers = self._filter_headers(headers)
 
             query_params = {}
             for param in request.get("queryString", []):
                 query_params[param["name"]] = param["value"]
 
+            # 过滤 query参数
             query_params = self._filter_invalid_params(query_params)
 
+            # 获取 POST 数据，过滤无效参数和空值
             post_data = None
             content_type = ""
             if request.get("postData"):
@@ -91,6 +96,7 @@ class HARParser:
                 else:
                     raise Exception(f"{full_url} 不支持的Content-Type: {content_type}, 请检查")
 
+            # 响应内容
             response_content = None
             if response.get("content", {}).get("text"):
                 response_text = response["content"]["text"]
@@ -99,11 +105,20 @@ class HARParser:
                 except json.JSONDecodeError:
                     response_content = response_text
 
+            # 清理 URL，移除 query 参数
             clean_url = full_url
-            for base_url in self.base_urls:
-                if full_url.startswith(base_url):
-                    clean_url = full_url[len(base_url) :]
-                    break
+            # 如果配置了 base_urls，尝试匹配并移除前缀
+            if self.base_urls:
+                for base_url in self.base_urls:
+                    if full_url.startswith(base_url):
+                        clean_url = full_url[len(base_url) :]
+                        break
+            else:
+                # 如果没有配置 base_urls，尝试从 headers 中获取 origin
+                origin = headers.get("origin", headers.get("Origin", ""))
+                if origin and full_url.startswith(origin):
+                    clean_url = full_url[len(origin) :]
+                    logger.debug(f"使用 origin header 作为 base URL: {origin}")
 
             if "?" in clean_url:
                 clean_url = clean_url.split("?")[0]
@@ -123,6 +138,7 @@ class HARParser:
                 "server_ip": entry.get("serverIPAddress", ""),
             }
 
+            # 过滤重复 URL
             if filter_duplicate_url:
                 url_key = f"{request_info['method']}:{clean_url}"
                 if url_key in seen_urls:
@@ -149,6 +165,38 @@ class HARParser:
                 logger.debug(f"过滤无效参数: {key} = {value}")
 
         return filtered_data
+
+    def _filter_headers(self, headers: Dict[str, str]) -> Dict[str, str]:
+        """
+        过滤 headers，只保留配置中指定的和必要的 headers
+
+        Args:
+            headers: 原始 headers 字典
+
+        Returns:
+            Dict[str, str]: 过滤后的 headers 字典
+        """
+        if not isinstance(headers, dict):
+            return headers
+
+        headers_to_include = APIConfig.HEADERS_TO_INCLUDE()
+        # 如果没有配置 HEADERS_TO_INCLUDE，返回所有 headers
+        if not headers_to_include:
+            return headers
+
+        # 需要保留的关键 headers，用于后续处理
+        required_headers = {"content-type", "content-length", "authorization", "origin"}
+        # 合并需要保留的 headers
+        headers_to_keep = set([h.lower() for h in headers_to_include] + list(required_headers))
+
+        filtered_headers = {}
+        for key, value in headers.items():
+            if key.lower() in headers_to_keep:
+                filtered_headers[key] = value
+            else:
+                logger.debug(f"过滤 header: {key} = {value}")
+
+        return filtered_headers
 
     def print_api_summary(self, har_file_path: str):
         """
