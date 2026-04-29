@@ -129,6 +129,67 @@ def test_process_params_to_map():
         if "startDate" in key and "endDate" in key:
             assert len(result[0][key]) == 2
 
+    # 测试参数值包含列表的情况（边界情况）
+    requests_params = [
+        {"ids": [1, 2, 3]},
+        {"ids": [1, 2, 3]},  # 重复值
+        {"ids": [4, 5, 6]}
+    ]
+    result = generator.process_params_to_map(requests_params)
+    assert len(result) == 1
+    assert "ids" in result[0]
+    assert len(result[0]["ids"]) == 2  # 去重后应该有2个值
+
+    # 测试组合参数包含列表类型值的情况（边界情况）
+    requests_params = [
+        {"orderStatusList": [1, 2], "customerSourceList": [0, 1]},
+        {"orderStatusList": [1, 2], "customerSourceList": [0, 1]},  # 重复值
+        {"orderStatusList": [3, 4], "customerSourceList": [2, 4]}
+    ]
+    result = generator.process_params_to_map(requests_params)
+    assert len(result) == 1
+    # 检查是否包含 orderStatusList 和 customerSourceList 的组合键
+    assert any("orderStatusList" in key and "customerSourceList" in key for key in result[0])
+    # 检查组合键的值长度（去重后应该有2个值）
+    for key in result[0]:
+        if "orderStatusList" in key and "customerSourceList" in key:
+            assert len(result[0][key]) == 2
+
+    # 测试实际业务场景：6个请求，空列表视为无效参数，相同参数请求分组参数化
+    # 场景：
+    # - 4个请求：customerType分别为1,2,3,4，其他参数相同，空列表不视为有效参数
+    # - 1个请求：creatorCard有传参
+    # - 1个请求：commitTimeBegin和commitTimeEnd有传参
+    requests_params = [
+        {"customerType": 1, "customerSourceList": [], "orderStatusList": []},
+        {"customerType": 2, "customerSourceList": [], "orderStatusList": []},
+        {"customerType": 3, "customerSourceList": [], "orderStatusList": []},
+        {"customerType": 4, "customerSourceList": [], "orderStatusList": []},
+        {"creatorCard": "3000470099", "customerSourceList": [], "orderStatusList": []},
+        {"commitTimeBegin": "2026-04-01", "commitTimeEnd": "2026-04-29", "customerSourceList": [], "orderStatusList": []}
+    ]
+    result = generator.process_params_to_map(requests_params)
+    # 应该生成3个参数化项：customerType、creatorCard、commitTimeBegin+commitTimeEnd组合
+    assert len(result) == 3
+    
+    # 检查customerType参数化
+    customer_type_item = next((item for item in result if "customerType" in item and "," not in list(item.keys())[0]), None)
+    assert customer_type_item is not None
+    assert len(customer_type_item["customerType"]) == 4  # 4个不同的值
+    
+    # 检查creatorCard参数化
+    creator_card_item = next((item for item in result if "creatorCard" in item and "," not in list(item.keys())[0]), None)
+    assert creator_card_item is not None
+    assert len(creator_card_item["creatorCard"]) == 1
+    
+    # 检查commitTimeBegin和commitTimeEnd组合参数化
+    time_range_item = next((item for item in result if "commitTimeBegin" in list(item.keys())[0] or "commitTimeEnd" in list(item.keys())[0]), None)
+    assert time_range_item is not None
+    # 检查是否是组合参数
+    param_name = next(iter(time_range_item.keys()))
+    assert "commitTimeBegin" in param_name and "commitTimeEnd" in param_name
+    assert len(time_range_item[param_name]) == 1
+
 
 @allure.feature("测试用例生成器")
 @allure.story("从URL提取服务包名")

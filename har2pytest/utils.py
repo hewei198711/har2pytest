@@ -1,6 +1,9 @@
 # coding:utf-8
+import os
 import re
 import json
+import subprocess
+import sys
 from typing import Dict, Any, Optional
 
 from .logger import logger
@@ -252,9 +255,10 @@ def extract_url_from_file(filepath: str) -> Optional[tuple]:
             lines = [line.strip() for line in doc_content.split("\n") if line.strip()]
             if len(lines) >= 2:
                 api_name = lines[0]
-                second_line = lines[-1]
-                if second_line.startswith("/"):
-                    return api_name, second_line
+                # 从第二行开始查找第一个以 / 开头的行作为 URL
+                for line in lines[1:]:
+                    if line.startswith("/"):
+                        return api_name, line
 
         # 如果从文档字符串中提取失败，尝试从整个文件内容中提取URL
         url_pattern = r"https?://[^\s]+"
@@ -331,4 +335,22 @@ def escape_string_for_python(value: str) -> str:
     value = value.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
 
     return value
+
+
+def format_python_file(filepath: str) -> None:
+    """
+    使用ruff格式化Python文件
+    
+    先执行 ruff check --fix 修复代码问题，再执行 ruff format 格式化代码
+    
+    Args:
+        filepath: 要格式化的Python文件路径
+    """
+    try:
+        ruff_path = os.path.join(os.path.dirname(sys.executable), "ruff")
+        subprocess.run([ruff_path, "check", "--fix", filepath], capture_output=True, text=True)
+        subprocess.run([ruff_path, "format", filepath], capture_output=True, text=True)
+        logger.info(f"使用ruff格式化文件: {filepath}")
+    except Exception as e:
+        logger.warning(f"格式化文件失败 {filepath}: {str(e)}")
 

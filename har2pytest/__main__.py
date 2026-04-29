@@ -85,14 +85,14 @@ def main():
         logger.info(f"强制覆盖: {force_overwrite}") # 新增日志
         logger.info("-" * 50)
 
-        har_generator = HARGenerator(output_dir=output_dir)
+        api_generator = APIGenerator(output_dir)
+        har_generator = HARGenerator(output_dir=output_dir, api_generator=api_generator)
         generated_files = har_generator.generate_api_files_from_har(har_file, force_overwrite=force_overwrite)
 
         logger.info("-" * 50)
         logger.info(f"共生成 {len(generated_files)} 个API接口文件")
 
         if generated_files:
-            api_generator = APIGenerator(output_dir)
             api_generator.generate_index_file(generated_files)
 
     elif command == "testcase":
@@ -115,7 +115,7 @@ def main():
             logger.info(f"任务ID: {task_id}")
             logger.info("-" * 50)
 
-            generator = TestCaseGenerator(api_dir="api", output_dir="testcases")
+            generator = TestCaseGenerator(api_dir="apis", output_dir="testcases")
             test_files = generator.generate_list_query_testcases(har_file, task_id)
 
             logger.info("-" * 50)
@@ -146,7 +146,7 @@ def main():
             logger.info(f"目标接口: {target_url or '(自动选择第一个)'}")
             logger.info("-" * 50)
 
-            generator = TestCaseGenerator(api_dir="api", output_dir="testcases")
+            generator = TestCaseGenerator(api_dir="apis", output_dir="testcases")
             test_file = generator.generate_complex_scenario_testcase(har_file, target_url, task_id)
 
             logger.info("-" * 50)
@@ -165,7 +165,7 @@ def main():
             logger.info(f"输出目录: {output_dir}")
             logger.info("-" * 50)
 
-            generator = TestCaseGenerator(api_dir="api", output_dir=output_dir)
+            generator = TestCaseGenerator(api_dir="apis", output_dir=output_dir)
             test_file = generator.generate_test_case_from_har(har_file)
 
             logger.info("-" * 50)

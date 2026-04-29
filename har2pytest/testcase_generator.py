@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional
 
 from .config import APIConfig
 from .har_parser import HARParser
-from .utils import extract_url_from_file, format_parameter_value
+from .utils import extract_url_from_file, format_parameter_value, format_python_file
 from .logger import logger
 
 
@@ -101,8 +101,12 @@ class TestCaseGenerator:
             for param_name, param_value in req.items():
                 # 只处理非分页参数
                 if param_name not in APIConfig.PAGINATION_PARAMS():
-                    # 非 None 且非空字符串的值视为有效参数
-                    if param_value is not None and param_value != "":
+                    # 非 None、非空字符串且非空列表的值视为有效参数
+                    is_valid = param_value is not None and param_value != ""
+                    # 额外检查：如果是列表或集合，必须非空才视为有效参数
+                    if isinstance(param_value, (list, set)):
+                        is_valid = is_valid and len(param_value) > 0
+                    if is_valid:
                         valid_params[param_name] = param_value
                     else:
                         other_params[param_name] = param_value
@@ -146,8 +150,14 @@ class TestCaseGenerator:
                 seen = set()
                 unique_values = []
                 for value_list in data["values"]:
-                    # 将列表转换为元组以便去重
-                    value_tuple = tuple(value_list)
+                    # 将列表中的每个元素转换为可哈希的类型（处理可能包含列表的值）
+                    hashable_values = []
+                    for val in value_list:
+                        if isinstance(val, list):
+                            hashable_values.append(tuple(val))
+                        else:
+                            hashable_values.append(val)
+                    value_tuple = tuple(hashable_values)
                     if value_tuple not in seen:
                         seen.add(value_tuple)
                         # 将值列表转换为元组，保持与 expected 一致
@@ -159,7 +169,18 @@ class TestCaseGenerator:
                 # 对于单个参数，data["values"] 是一个包含多个值的列表
                 # 例如：[1, 2, 3, 2, 1]
                 # 需要去重并保留所有不同的值
-                unique_values = list(set(data["values"]))
+                # 使用列表推导式和 seen 集合来处理可能包含列表的值
+                seen = []
+                unique_values = []
+                for value in data["values"]:
+                    # 将列表转换为元组以便比较
+                    if isinstance(value, list):
+                        value_key = tuple(value)
+                    else:
+                        value_key = value
+                    if value_key not in seen:
+                        seen.append(value_key)
+                        unique_values.append(value)
 
             merged_item = {param_name: unique_values, "other_params": data["other_params"]}
             merged_result.append(merged_item)
@@ -183,12 +204,6 @@ class TestCaseGenerator:
         requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
 
         content = [
-            "# coding:utf-8",
-            "",
-            f"# 自动生成的pytest用例文件",
-            f"# 基于HAR文件: {har_filename}",
-            f"# 生成时间: {__import__('datetime').datetime.now()}",
-            "",
             "import os",
             "import pytest",
             "import allure",
@@ -201,7 +216,13 @@ class TestCaseGenerator:
             module_path = api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
             function_name = self.extract_function_name_from_file(api_file)
             if function_name:
-                imports.append(f"from {module_path} import {function_name}")
+                # 提取服务包名称（apis.mall_center_user._xxx -> mall_center_user）
+                parts = module_path.split(".")
+                if len(parts) >= 2:
+                    service_package = parts[1]
+                    imports.append(f"from apis.{service_package} import {function_name}")
+                else:
+                    imports.append(f"from {module_path} import {function_name}")
 
         if imports:
             content.extend(imports)
@@ -252,14 +273,15 @@ class TestCaseGenerator:
 
         content.extend(
             [
-                '    """',
-                f"    基于HAR文件 {har_filename} 的API流程测试",
-                "    每个API请求作为一个测试步骤",
-                '    """',
                 "",
                 "    # 初始化测试数据字典，用于在步骤间传递数据",
                 "    test_data = {",
-                '        "access_token": os.environ["token_icbc_mall"],',
+                '        "headers": {',
+                '            "channel": "pc",',
+                '            "client": "op",',
+                '            "content-type": "application/json;charset=UTF-8",',
+                '            "authorization": f"bearer {os.environ[\'access_token\']}",',
+                "        },",
                 "    }",
                 "",
             ]
@@ -332,20 +354,20 @@ class TestCaseGenerator:
                         # 添加文件参数
                         content.extend([f'            "file": "data/示例文件.png"', f"        }}"])
                         content.extend(
-                            [f"        with {api_function}(access_token=test_data['access_token'], files=files) as r:"]
+                            [f"        with {api_function}(files=files, headers=test_data['headers']) as r:"]
                         )
                     elif method == "POST":
                         content.extend(
                             [
                                 f"        data = {api_params}",
-                                f"        with {api_function}(access_token=test_data['access_token'], data=data) as r:",
+                                f"        with {api_function}(data=data, headers=test_data['headers']) as r:",
                             ]
                         )
                     else:
                         content.extend(
                             [
                                 f"        params = {api_params}",
-                                f"        with {api_function}(access_token=test_data['access_token'], params=params) as r:",
+                                f"        with {api_function}(params=params, headers=test_data['headers']) as r:",
                             ]
                         )
                 else:
@@ -360,11 +382,11 @@ class TestCaseGenerator:
                                 f'            "clientKey": "mall-center-product",',
                                 f'            "file": "data/示例文件.png"',
                                 f"        }}",
-                                f"        with {api_function}(access_token=test_data['access_token'], files=files) as r:",
+                                f"        with {api_function}(files=files, headers=test_data['headers']) as r:",
                             ]
                         )
                     else:
-                        content.extend([f"        with {api_function}(access_token=test_data['access_token']) as r:"])
+                        content.extend([f"        with {api_function}(headers=test_data['headers']) as r:"])
 
                 content.extend(
                     [
@@ -406,7 +428,11 @@ class TestCaseGenerator:
                     if result:
                         _, file_url = result
                         for request in requests:
-                            if request["url"] == file_url:
+                            request_url = request["url"]
+                            # 支持两种匹配方式：
+                            # 1. 直接相等
+                            # 2. request_url 以 file_url 结尾（处理完整URL的情况）
+                            if request_url == file_url or request_url.endswith(file_url):
                                 api_files.append(filepath)
                                 break
 
@@ -444,14 +470,8 @@ class TestCaseGenerator:
         with open(test_filepath, "w", encoding="utf-8") as f:
             f.write(test_content)
 
-        # 使用black格式化生成的文件
-        try:
-            import subprocess
-
-            subprocess.run(["black", test_filepath], capture_output=True, text=True)
-            logger.info(f"使用black格式化测试用例文件: {test_filepath}")
-        except Exception as e:
-            logger.warning(f"格式化文件失败: {str(e)}")
+        # 使用ruff格式化生成的文件
+        format_python_file(test_filepath)
 
         logger.info(f"生成测试用例文件: {test_filepath}")
         return test_filepath
@@ -505,14 +525,8 @@ class TestCaseGenerator:
                 with open(test_filepath, "w", encoding="utf-8") as f:
                     f.write(test_content)
 
-                # 使用black格式化生成的文件
-                try:
-                    import subprocess
-
-                    subprocess.run(["black", test_filepath], capture_output=True, text=True)
-                    logger.info(f"使用black格式化测试用例文件: {test_filepath}")
-                except Exception as e:
-                    logger.warning(f"格式化文件失败: {str(e)}")
+                # 使用ruff格式化生成的文件
+                format_python_file(test_filepath)
 
                 generated_files.append(test_filepath)
                 logger.info(f"生成测试用例文件: {test_filepath}")
@@ -577,7 +591,7 @@ class TestCaseGenerator:
         content.extend(
             [
                 "        }",
-                f"        with {function_name}(access_token=self.access_token, {param_var_name}={param_var_name}) as r:",
+                f"        with {function_name}(data={param_var_name}, headers=self.headers) as r:",
                 "            assert r.status_code == 200",
                 "            assert r.json()['code'] == 200",
                 '            data_list = r.json()["data"]["list"]',
@@ -625,10 +639,17 @@ class TestCaseGenerator:
                 api_params = self.extract_api_params_dict_from_har(req)
                 if isinstance(api_params, dict):
                     all_requests_params.append(api_params)
-                    all_params.update(api_params.keys())
-                # 记录请求方法
-                request_method = req.get("method", "GET")
-                break  # 只使用第一个匹配的请求
+                    # 只添加非空参数到 all_params（空列表视为无效参数）
+                    for param_name, param_value in api_params.items():
+                        is_valid = param_value is not None and param_value != ""
+                        if isinstance(param_value, (list, set)):
+                            is_valid = is_valid and len(param_value) > 0
+                        if is_valid:
+                            all_params.add(param_name)
+                # 记录请求方法（只记录第一个匹配的）
+                if request_method == "GET":
+                    request_method = req.get("method", "GET")
+                # 继续处理所有匹配的请求，而不是只处理第一个
 
         if not all_requests_params:
             return None
@@ -643,18 +664,12 @@ class TestCaseGenerator:
 
         # 生成测试用例内容
         content = [
-            "# coding:utf-8",
-            "",
-            "# 自动生成的pytest用例文件",
-            f"# 基于HAR文件: {har_filename}",
-            f"# 生成时间: {__import__('datetime').datetime.now()}",
-            "",
             "import os",
             "import pytest",
             "import allure",
             "from setting import P1, P2, P3",
             "",
-            f"from {module_path} import {function_name}",
+            f"from apis.{service_package} import {function_name}",
             "",
             f"@allure.feature('{service_package}')",
             f"@allure.story('{api_url}')",
@@ -674,21 +689,17 @@ class TestCaseGenerator:
                 remark = "# TODO 请填写参数备注"
             content.append(f"- {param_name}：{remark}")
 
-        content.append("")
-        content.append("业务场景：")
-        content.append("1. 成功路径：使用各种条件查询订单列表")
-        content.append("2. 验证逻辑：返回列表数据，验证code=200")
-        content.append("3. 测试数据清理：无副作用，仅查询数据")
         content.append('""")')
         content.append("class TestClass:")
-        content.append('    """')
-        content.append(f"    基于HAR文件 {har_filename} 的API流程测试")
-        content.append("    每个API请求作为一个测试步骤")
-        content.append('    """')
         content.append("")
         content.append("    # 初始化测试数据字典，用于在步骤间传递数据")
         content.append("    def setup_class(self):")
-        content.append("        self.access_token = os.environ['access_token']")
+        content.append("        self.headers = {")
+        content.append('            "channel": "pc",')
+        content.append('            "client": "op",')
+        content.append('            "content-type": "application/json;charset=UTF-8",')
+        content.append('            "authorization": f"bearer {os.environ[\'access_token\']}",')
+        content.append("        }")
         content.append("")
 
         # 生成参数化测试方法
@@ -875,6 +886,9 @@ class TestCaseGenerator:
 
         with open(test_filepath, "w", encoding="utf-8") as f:
             f.write(test_content)
+
+        # 使用ruff格式化文件
+        format_python_file(test_filepath)
 
         logger.info(f"生成测试用例文件: {test_filepath}")
         return test_filepath

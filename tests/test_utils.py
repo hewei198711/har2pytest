@@ -20,7 +20,7 @@ def test_extract_url_from_file():
     test_content = "some content https://example.com/api/test some more content"
     with open("test_url.txt", "w", encoding="utf-8") as f:
         f.write(test_content)
-    
+
     try:
             result = extract_url_from_file("test_url.txt")
             assert result is not None
@@ -29,6 +29,40 @@ def test_extract_url_from_file():
         import os
         if os.path.exists("test_url.txt"):
             os.remove("test_url.txt")
+
+
+@allure.feature("工具函数")
+@allure.story("URL提取")
+def test_extract_url_from_api_file():
+    """测试从API文件中提取URL（真实的API文件格式）"""
+    # 测试真实的API文件格式
+    test_content = '''from util.client import client
+
+def _user_order_getStoreAgentOrderList(data=data, headers=headers):
+    """
+    PC店铺查询兑换订单列表
+    /user/order/getStoreAgentOrderList
+
+    参数说明:
+    - orderNo: 兑换流水号
+    - pageNum: 页码
+    """
+
+    url = "/user/order/getStoreAgentOrderList"
+'''
+
+    with open("test_api.py", "w", encoding="utf-8") as f:
+        f.write(test_content)
+
+    try:
+        result = extract_url_from_file("test_api.py")
+        assert result is not None
+        assert result[0] == "PC店铺查询兑换订单列表"
+        assert result[1] == "/user/order/getStoreAgentOrderList"
+    finally:
+        import os
+        if os.path.exists("test_api.py"):
+            os.remove("test_api.py")
 
 
 @allure.feature("工具函数")

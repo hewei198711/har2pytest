@@ -1,14 +1,11 @@
 # coding:utf-8
 
 import os
-import sys
-import traceback
-import subprocess
 from typing import Any, Dict, List, Optional
 
 from .config import APIConfig
 from .logger import logger
-from .utils import format_parameter_value, match_path_template, extract_function_name, determine_service_package
+from .utils import format_parameter_value, match_path_template, extract_function_name, determine_service_package, format_python_file
 from .swagger_handler import SwaggerHandler
 from .har_generator import HARGenerator
 
@@ -557,13 +554,8 @@ class APIGenerator:
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
-        # 使用black格式化生成的文件
-        try:
-            black_path = os.path.join(os.path.dirname(sys.executable), "black")
-            subprocess.run([black_path, filepath], capture_output=True, text=True)
-            logger.info(f"使用black格式化API文件: {filepath}")
-        except Exception as e:
-            logger.warning(f"格式化文件失败: {str(e)}")
+        # 使用ruff格式化生成的文件
+        format_python_file(filepath)
 
         logger.info(f"生成API文件: {filepath} (服务包: {service_package})")
         return filepath
@@ -622,7 +614,8 @@ class APIGenerator:
                 module_name = module_path.replace(".py", "").replace("/", ".")
                 # 获取模块名的最后一部分作为导入的函数名
                 last_part = module_name.split(".")[-1]
-                import_stmt = f"from {module_name} import {last_part}"
+                # 生成相对导入语句（如 from ._user_mgmt_order_page import _user_mgmt_order_page）
+                import_stmt = f"from .{last_part} import {last_part}"
                 
                 # 检查导入语句是否已存在
                 if import_stmt not in content:
