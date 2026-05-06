@@ -1,24 +1,24 @@
-# coding:utf-8
-
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .config import APIConfig
-from .logger import logger
-from .utils import format_parameter_value, match_path_template, extract_function_name, determine_service_package, format_python_file
-from .swagger_handler import SwaggerHandler
 from .har_generator import HARGenerator
+from .logger import logger
+from .swagger_handler import SwaggerHandler
+from .utils import (
+    determine_service_package,
+    extract_function_name,
+    format_parameter_value,
+    format_python_file,
+    match_path_template,
+)
 
 
 class APIGenerator:
     """API文件生成器类"""
 
     # 定义默认的 Swagger 信息结构常量
-    DEFAULT_SWAGGER_INFO = {
-        "description": "",
-        "parameters": {},
-        "summary": ""
-    }
+    DEFAULT_SWAGGER_INFO = {"description": "", "parameters": {}, "summary": ""}
 
     def __init__(self, output_dir: str = None):
         """
@@ -34,7 +34,7 @@ class APIGenerator:
             output_dir = APIConfig.DEFAULT_SERVICE_PACKAGE()
         self.output_dir = output_dir
         self.swagger_handler = SwaggerHandler(api_generator=self)
-        
+
         # 初始化子生成器
         self.har_generator = HARGenerator(output_dir, self)
 
@@ -67,7 +67,7 @@ class APIGenerator:
 
         return False
 
-    def _generate_params_string(self, params_dict: Dict[str, Any], swagger_info: Dict[str, Any] = None) -> str:
+    def _generate_params_string(self, params_dict: dict[str, Any], swagger_info: dict[str, Any] = None) -> str:
         """
         生成API文件中的参数字符串
 
@@ -102,7 +102,7 @@ class APIGenerator:
 
         return "{\n" + "\n".join(items) + "\n}"
 
-    def _parse_request_info(self, request_info: Dict[str, Any], swagger_data: Dict[str, Any] = None) -> Dict[str, Any]:
+    def _parse_request_info(self, request_info: dict[str, Any], swagger_data: dict[str, Any] = None) -> dict[str, Any]:
         """
         解析请求信息
 
@@ -138,7 +138,7 @@ class APIGenerator:
         is_file_upload = False
         if method == "POST" and raw_headers.get("content-type", "").startswith("multipart/form-data"):
             is_file_upload = True
-        
+
         is_need_urlencode = False
         if method == "POST" and raw_headers.get("content-length", "") == "0" and not post_data:
             is_need_urlencode = True
@@ -165,7 +165,7 @@ class APIGenerator:
             "url_pattern": url_pattern,
         }
 
-    def _generate_imports(self, parsed_info: Dict[str, Any]) -> List[str]:
+    def _generate_imports(self, parsed_info: dict[str, Any]) -> list[str]:
         """
         生成导入语句
 
@@ -192,7 +192,7 @@ class APIGenerator:
         imports.append("")
         return imports
 
-    def _process_parameters(self, parsed_info: Dict[str, Any], swagger_info: Dict[str, Any] = None) -> List[str]:
+    def _process_parameters(self, parsed_info: dict[str, Any], swagger_info: dict[str, Any] = None) -> list[str]:
         """
         处理参数
 
@@ -252,13 +252,13 @@ class APIGenerator:
         if is_need_urlencode:
             is_need_urlencode_headers = headers.copy()
             is_need_urlencode_headers["content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
-            params_section.append(f'headers = {headers}')
+            params_section.append(f"headers = {headers}")
         else:
-            params_section.append(f'headers = {headers}')
+            params_section.append(f"headers = {headers}")
 
         return params_section
 
-    def _handle_file_upload(self, post_data: Any) -> List[str]:
+    def _handle_file_upload(self, post_data: Any) -> list[str]:
         """
         处理文件上传
 
@@ -296,10 +296,10 @@ class APIGenerator:
         self,
         method: str,
         param_name: str,
-        path_params: Dict[str, Any],
-        query_params: Dict[str, Any],
+        path_params: dict[str, Any],
+        query_params: dict[str, Any],
         is_need_urlencode: bool,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         处理HTTP方法
 
@@ -343,7 +343,9 @@ class APIGenerator:
         function_def.append("        return r")
         return function_def
 
-    def _generate_function_definition(self, parsed_info: Dict[str, Any], function_name: str, swagger_info: Dict[str, Any]) -> List[str]:
+    def _generate_function_definition(
+        self, parsed_info: dict[str, Any], function_name: str, swagger_info: dict[str, Any]
+    ) -> list[str]:
         """
         生成函数定义
 
@@ -367,7 +369,6 @@ class APIGenerator:
         is_need_urlencode = parsed_info["is_need_urlencode"]
         path_params = parsed_info["path_params"]
         url_pattern = parsed_info["url_pattern"]
-        headers = parsed_info["headers"]
 
         if path_params:
             param_name = "params"
@@ -397,8 +398,8 @@ class APIGenerator:
         elif swagger_info.get("description"):
             function_def.append(f"    {swagger_info['description']}")
         else:
-            function_def.append('    TODO: 添加接口描述')
-        
+            function_def.append("    TODO: 添加接口描述")
+
         function_def.append(f"    {url}")
 
         # 添加参数说明
@@ -430,7 +431,13 @@ class APIGenerator:
         function_def.append("")
         return function_def
 
-    def generate_file_content(self, request_info: Dict[str, Any], function_name: str, swagger_info: Dict[str, Any] = None, parsed_info: Dict[str, Any] = None) -> str:
+    def generate_file_content(
+        self,
+        request_info: dict[str, Any],
+        function_name: str,
+        swagger_info: dict[str, Any] = None,
+        parsed_info: dict[str, Any] = None,
+    ) -> str:
         """
         生成API文件内容
 
@@ -467,7 +474,9 @@ class APIGenerator:
         content_parts = imports + params_section + function_def
         return "\n".join(content_parts)
 
-    def generate_api_file(self, request_info: Dict[str, Any], force_overwrite: bool = False, swagger_info: Dict[str, Any] = None) -> Optional[str]:
+    def generate_api_file(
+        self, request_info: dict[str, Any], force_overwrite: bool = False, swagger_info: dict[str, Any] = None
+    ) -> str | None:
         """
         为单个API请求生成接口文件
 
@@ -507,7 +516,7 @@ class APIGenerator:
                     # 获取Swagger文档URL
                     doc_base_url = APIConfig.SWAGGER_DOC_URLS()[service_package]
                     logger.info(f"服务包: {service_package}, Swagger文档URL: {doc_base_url}")
-                    
+
                     # 获取Swagger文档
                     swagger_data = self.swagger_handler.get_swagger_doc(doc_base_url)
                     if swagger_data:
@@ -560,7 +569,7 @@ class APIGenerator:
         logger.info(f"生成API文件: {filepath} (服务包: {service_package})")
         return filepath
 
-    def generate_index_file(self, generated_files: List[str]):
+    def generate_index_file(self, generated_files: list[str]):
         """
         生成API索引文件
 
@@ -602,7 +611,7 @@ class APIGenerator:
 
             # 读取或创建服务包的 __init__.py 文件
             if os.path.exists(package_init_path):
-                with open(package_init_path, "r", encoding="utf-8") as f:
+                with open(package_init_path, encoding="utf-8") as f:
                     content = f.read().splitlines()
             else:
                 content = [""]
@@ -615,8 +624,8 @@ class APIGenerator:
                 # 获取模块名的最后一部分作为导入的函数名
                 last_part = module_name.split(".")[-1]
                 # 生成相对导入语句（如 from ._user_mgmt_order_page import _user_mgmt_order_page）
-                import_stmt = f"from .{last_part} import {last_part}"
-                
+                import_stmt = f"from .{last_part} import {last_part} # noqa: F401"
+
                 # 检查导入语句是否已存在
                 if import_stmt not in content:
                     import_statements.append(import_stmt)
@@ -626,7 +635,7 @@ class APIGenerator:
                 # 确保文件末尾有空白行
                 if content and content[-1].strip():
                     content.append("")
-                
+
                 # 添加新的导入语句
                 content.extend(import_statements)
                 content.append("")
@@ -646,5 +655,3 @@ class APIGenerator:
             with open(main_init_path, "w", encoding="utf-8") as f:
                 f.write("")
             logger.info(f"创建主目录索引文件: {main_init_path}")
-
-

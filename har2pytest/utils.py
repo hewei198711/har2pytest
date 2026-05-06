@@ -1,13 +1,12 @@
-# coding:utf-8
+import json
 import os
 import re
-import json
 import subprocess
 import sys
-from typing import Dict, Any, Optional
+from typing import Any
 
-from .logger import logger
 from .config import APIConfig
+from .logger import logger
 
 
 def handle_base_path(url: str, base_path: str) -> str:
@@ -33,14 +32,14 @@ def handle_base_path(url: str, base_path: str) -> str:
 
     # 尝试去掉basePath前缀
     if url.startswith(base_path):
-        result = url[len(base_path):]
+        result = url[len(base_path) :]
         if not result.startswith("/"):
             result = "/" + result
         return result
     return url
 
 
-def match_path_template(url: str, swagger_data: Dict[str, Any] = None) -> tuple:
+def match_path_template(url: str, swagger_data: dict[str, Any] = None) -> tuple:
     """
     匹配路径模板
 
@@ -100,15 +99,15 @@ def match_path_template(url: str, swagger_data: Dict[str, Any] = None) -> tuple:
     if has_numeric and swagger_data and "paths" in swagger_data:
         paths = swagger_data["paths"]
         logger.info(f"Swagger文档中总共有 {len(paths)} 个路径")
-        
+
         # 获取Swagger文档的basePath并处理
         base_path = swagger_data.get("basePath", "")
         logger.info(f"Swagger文档的basePath: {base_path}")
-        
+
         # 使用工具函数处理basePath
         search_url = handle_base_path(url, base_path)
         logger.info(f"去掉basePath后的URL: {search_url}")
-        
+
         # 重新解析URL
         clean_search_url = search_url.lstrip("/")
         search_url_parts = clean_search_url.split("/")
@@ -116,7 +115,7 @@ def match_path_template(url: str, swagger_data: Dict[str, Any] = None) -> tuple:
         # 先过滤出所有带{}的路径，这样可以减少遍历的数量
         swagger_paths_with_params = [path for path in paths.keys() if "{" in path and "}" in path]
         logger.info(f"Swagger文档中有 {len(swagger_paths_with_params)} 个带参数的路径")
-        
+
         # 遍历带{}的路径
         for swagger_path in swagger_paths_with_params:
             swagger_parts = swagger_path.lstrip("/").split("/")
@@ -145,7 +144,7 @@ def match_path_template(url: str, swagger_data: Dict[str, Any] = None) -> tuple:
             if matched:
                 logger.info(f"从Swagger文档中匹配到路径模板: {swagger_path}")
                 return swagger_path, path_params, result_parts
-        logger.info(f"未能从Swagger文档中匹配到路径模板")
+        logger.info("未能从Swagger文档中匹配到路径模板")
 
     # 如果没有匹配到模板，直接返回原始URL
     return url, {}, url_parts
@@ -170,6 +169,7 @@ def extract_function_name(url: str) -> str:
     # 先处理URL中的花括号参数，将 {param} 转换为 param
     processed_url = url
     import re
+
     # 匹配 {param} 格式的参数
     param_pattern = r"\{([^\}]+)\}"
     processed_url = re.sub(param_pattern, r"\1", processed_url)
@@ -224,7 +224,7 @@ def determine_service_package(url: str) -> str:
     return APIConfig.determine_service_package(url)
 
 
-def extract_url_from_file(filepath: str) -> Optional[tuple]:
+def extract_url_from_file(filepath: str) -> tuple | None:
     """
     从API文件中提取URL路径
 
@@ -243,7 +243,7 @@ def extract_url_from_file(filepath: str) -> Optional[tuple]:
         # 返回 ("提交订单", "/mobile/trade/orderCommit")
     """
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             content = f.read()
 
         # 先尝试从函数文档字符串中提取
@@ -304,8 +304,39 @@ def format_parameter_value(value: Any) -> str:
     result = result.replace("null", "None")
     result = result.replace("false", "False")
     result = result.replace("true", "True")
-    
+
     return result
+
+
+def deduplicate_values(values: list[Any]) -> list[Any]:
+    """
+    对值列表进行去重处理，支持列表类型值
+
+    将不可哈希的值（list）转为可哈希的tuple进行去重，然后返回去重后的列表
+    如果元素是列表，则转换为元组后返回；否则直接返回原值
+
+    Args:
+        values: 需要去重的值列表，可以包含任意类型，包括嵌套列表
+
+    Returns:
+        List[Any]: 去重后的值列表，列表类型的元素会被转换为元组
+
+    Example:
+        result = deduplicate_values([1, 2, 3, 2, 1])
+        # 返回 [1, 2, 3]
+        result = deduplicate_values([[1, 2], [3, 4], [1, 2]])
+        # 返回 [(1, 2), (3, 4)]
+        result = deduplicate_values(["a", "b", "a"])
+        # 返回 ["a", "b"]
+    """
+    seen = []
+    unique_values = []
+    for value in values:
+        key = tuple(value) if isinstance(value, list) else value
+        if key not in seen:
+            seen.append(key)
+            unique_values.append(tuple(value) if isinstance(value, list) else value)
+    return unique_values
 
 
 def escape_string_for_python(value: str) -> str:
@@ -340,9 +371,9 @@ def escape_string_for_python(value: str) -> str:
 def format_python_file(filepath: str) -> None:
     """
     使用ruff格式化Python文件
-    
+
     先执行 ruff check --fix 修复代码问题，再执行 ruff format 格式化代码
-    
+
     Args:
         filepath: 要格式化的Python文件路径
     """
@@ -353,4 +384,3 @@ def format_python_file(filepath: str) -> None:
         logger.info(f"使用ruff格式化文件: {filepath}")
     except Exception as e:
         logger.warning(f"格式化文件失败 {filepath}: {str(e)}")
-

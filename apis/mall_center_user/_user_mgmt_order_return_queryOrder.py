@@ -1,15 +1,15 @@
 from util.client import client
 
 data = {
-    "orderNo": None,  # 兑换流水号
-    "customerPhone": None,  # 顾客手机号
-    "customerCard": None,  # 顾客卡号
-    "creatorCard": None,  # 开单人卡号
-    "exchangeNoWord": None,  # 兑换品编码/名称
-    "customerType": None,  # 顾客类型 1->普通顾客 2->优惠顾客 3->云商 4->微店 5->云+子账号
-    "expressType": None,  # 配送方式 1->服务中心自提 2->公司配送
-    "orderWay": None,  # 下单方式 1->自购订单 2->代购订单
-    "customerSource": None,  # 顾客来源平台:0->商城mall；1->健康health；2->学堂edu；4->荟友趣
+    "orderNo": "",  # 兑换流水号
+    "customerPhone": "",  # 顾客手机号
+    "customerCard": "",  # 顾客卡号
+    "creatorCard": "",  # 开单人卡号
+    "exchangeNoWord": "",  # 兑换品编码/名称
+    "customerType": "",  # 顾客类型 1->普通顾客 2->优惠顾客 3->云商 4->微店 5->云+子账号
+    "expressType": "",  # 配送方式 1->服务中心自提 2->公司配送
+    "orderWay": "",  # 下单方式 1->自购订单 2->代购订单
+    "customerSource": "",  # 顾客来源平台:0->商城mall；1->健康health；2->学堂edu；4->荟友趣
     "exchangeTimeBegin": None,  # 兑换时间-开始
     "exchangeTimeEnd": None,  # 兑换时间-结束
     "pageNum": 1,  # TODO: 添加参数说明

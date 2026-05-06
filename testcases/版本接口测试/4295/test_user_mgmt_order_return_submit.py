@@ -2,7 +2,7 @@ import os
 
 import allure
 import pytest
-from setting import P1
+from allure_commons.types import Severity
 
 from apis.mall_center_user import (
     _user_mgmt_order_detail,
@@ -11,8 +11,8 @@ from apis.mall_center_user import (
 )
 
 
-@pytest.mark.test_4291
-@allure.severity(P1)
+@pytest.mark.test_4295
+@allure.severity(Severity.CRITICAL)
 @allure.feature("mall_center_user")
 @allure.story("/user/mgmt/order/return/submit")
 @allure.title("提交售后")
@@ -49,31 +49,43 @@ def test_user_mgmt_order_return_submit():
         with _user_mgmt_order_return_queryOrder(data=data, headers=test_data["headers"]) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
-            test_data["return_queryOrder"] = r.json()["data"]["list"][0]
+            test_data["return_queryOrder"] = r.json()
 
     @allure.step("订单详情")
     def step_user_mgmt_order_detail():
 
-        params = {"orderNo": test_data["return_queryOrder"]["orderNo"]}
+        params = {"orderNo": "EX002000260416000003"}
         with _user_mgmt_order_detail(params=params, headers=test_data["headers"]) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
-
-    @allure.step("提交售后")
-    def step_user_mgmt_order_return_submit():
-
-        data = {"orderNo": test_data["return_queryOrder"]["orderNo"], "returnReason": "111111111111111111111111111111111"}
-        with _user_mgmt_order_return_submit(data=data, headers=test_data["headers"]) as r:
-            assert r.status_code == 200
-            assert r.json()["code"] == 200
+            test_data["order_detail"] = r.json()
 
     @allure.step("订单详情")
     def step_1_user_mgmt_order_detail():
 
-        params = {"orderNo": test_data["return_queryOrder"]["orderNo"]}
+        params = {"orderNo": "EX002000260416000003"}
         with _user_mgmt_order_detail(params=params, headers=test_data["headers"]) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
+            test_data["order_detail"] = r.json()
+
+    @allure.step("提交售后")
+    def step_user_mgmt_order_return_submit():
+
+        data = {"orderNo": "EX002000260416000003", "returnReason": "111111111111111111111111111111111"}
+        with _user_mgmt_order_return_submit(data=data, headers=test_data["headers"]) as r:
+            assert r.status_code == 200
+            assert r.json()["code"] == 200
+            test_data["return_submit"] = r.json()
+
+    @allure.step("订单详情")
+    def step_2_user_mgmt_order_detail():
+
+        params = {"orderNo": "EX002000260416000003"}
+        with _user_mgmt_order_detail(params=params, headers=test_data["headers"]) as r:
+            assert r.status_code == 200
+            assert r.json()["code"] == 200
+            test_data["order_detail"] = r.json()
 
     @allure.step("分页查询代客售后订单管理列表")
     def step_1_user_mgmt_order_return_queryOrder():
@@ -96,10 +108,12 @@ def test_user_mgmt_order_return_submit():
         with _user_mgmt_order_return_queryOrder(data=data, headers=test_data["headers"]) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
+            test_data["return_queryOrder"] = r.json()
 
     # 执行所有测试步骤
     step_user_mgmt_order_return_queryOrder()
     step_user_mgmt_order_detail()
-    step_user_mgmt_order_return_submit()
     step_1_user_mgmt_order_detail()
+    step_user_mgmt_order_return_submit()
+    step_2_user_mgmt_order_detail()
     step_1_user_mgmt_order_return_queryOrder()

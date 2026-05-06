@@ -1,7 +1,5 @@
-# coding:utf-8
-import os
 import json
-from typing import List, Dict, Set, Optional
+import os
 
 from .logger import logger
 
@@ -65,7 +63,7 @@ class APIConfig:
         if os.path.exists(config_file):
             config_file_exists = True
             try:
-                with open(config_file, "r", encoding="utf-8") as f:
+                with open(config_file, encoding="utf-8") as f:
                     user_config = json.load(f)
                     config.update(user_config)
                     logger.info(f"成功加载配置文件，DEFAULT_SERVICE_PACKAGE: {config.get('DEFAULT_SERVICE_PACKAGE')}")
@@ -129,19 +127,19 @@ class APIConfig:
 
     # 类属性访问方法
     @classmethod
-    def BASE_URLS(cls) -> List[str]:
+    def BASE_URLS(cls) -> list[str]:
         return cls.get_config("BASE_URLS")
 
     @classmethod
-    def KILL_URLS(cls) -> List[str]:
+    def KILL_URLS(cls) -> list[str]:
         return cls.get_config("KILL_URLS")
 
     @classmethod
-    def PATH_URLS(cls) -> List[str]:
+    def PATH_URLS(cls) -> list[str]:
         return cls.get_config("PATH_URLS")
 
     @classmethod
-    def SERVICE_MAPPING(cls) -> Dict[str, str]:
+    def SERVICE_MAPPING(cls) -> dict[str, str]:
         return cls.get_config("SERVICE_MAPPING")
 
     @classmethod
@@ -149,23 +147,23 @@ class APIConfig:
         return cls.get_config("DEFAULT_SERVICE_PACKAGE")
 
     @classmethod
-    def SWAGGER_DOC_URLS(cls) -> Dict[str, str]:
+    def SWAGGER_DOC_URLS(cls) -> dict[str, str]:
         return cls.get_config("SWAGGER_DOC_URLS")
 
     @classmethod
-    def INVALID_PARAMS(cls) -> Set[str]:
+    def INVALID_PARAMS(cls) -> set[str]:
         return cls.get_config("INVALID_PARAMS")
 
     @classmethod
-    def HEADERS_TO_INCLUDE(cls) -> Set[str]:
+    def HEADERS_TO_INCLUDE(cls) -> set[str]:
         return cls.get_config("HEADERS_TO_INCLUDE")
 
     @classmethod
-    def REQUIRED_HEADERS(cls) -> Dict[str, str]:
+    def REQUIRED_HEADERS(cls) -> dict[str, str]:
         return cls.get_config("REQUIRED_HEADERS")
 
     @classmethod
-    def PAGINATION_PARAMS(cls) -> List[str]:
+    def PAGINATION_PARAMS(cls) -> list[str]:
         return cls.get_config("PAGINATION_PARAMS")
 
     @classmethod
@@ -212,12 +210,13 @@ class APIConfig:
             URL: /member/info → 返回 mall_center_member
         """
         import re
+
         # 处理 None 或空字符串
         if url is None or not url:
             return cls.DEFAULT_SERVICE_PACKAGE()
 
         # 从URL中提取第一个路径段
-        match = re.match(r'^/?([^/]+)', url)
+        match = re.match(r"^/?([^/]+)", url)
         if not match:
             return cls.DEFAULT_SERVICE_PACKAGE()
 

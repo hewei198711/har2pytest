@@ -58,10 +58,7 @@
   },
   "PAGINATION_PARAMS": [
     "pageNum",
-    "pageSize",
-    "commitEndTime",
-    "commitStartTime",
-    "header"
+    "pageSize"
   ],
   "TESTCASE_DIR": "testcases",
   "SWAGGER_FILE": "swagger.json",

@@ -1,7 +1,5 @@
-# coding:utf-8
-
 import traceback
-from typing import List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from .har_parser import HARParser
 from .logger import logger
@@ -22,11 +20,11 @@ class HARGenerator:
             output_dir: API文件输出目录
             api_generator: API生成器实例
         """
-        self.output_dir: Optional[str] = output_dir
-        self.api_generator: Optional["APIGenerator"] = api_generator  # API生成器实例
+        self.output_dir: str | None = output_dir
+        self.api_generator: APIGenerator | None = api_generator  # API生成器实例
         self.har_parser = HARParser()
 
-    def generate_api_files_from_har(self, har_file_path: str, force_overwrite: bool = False) -> List[str]:
+    def generate_api_files_from_har(self, har_file_path: str, force_overwrite: bool = False) -> list[str]:
         """
         从HAR文件生成所有API接口文件
 

@@ -1,9 +1,6 @@
-# coding:utf-8
-import os
-import re
 import json
 import urllib.request
-from typing import Dict, Any, Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from .config import APIConfig
 from .logger import logger
@@ -12,6 +9,7 @@ from .utils import handle_base_path
 # 仅在类型检查时导入，运行时不会执行
 if TYPE_CHECKING:
     from .api_generator import APIGenerator
+
 
 class SwaggerHandler:
     """Swagger文档处理器类"""
@@ -23,24 +21,24 @@ class SwaggerHandler:
         Args:
             api_generator: API生成器实例
         """
-        self.swagger_cache: Dict[str, Dict[str, Any]] = {}
-        self.api_generator: Optional["APIGenerator"] = api_generator  # API生成器实例
+        self.swagger_cache: dict[str, dict[str, Any]] = {}
+        self.api_generator: APIGenerator | None = api_generator  # API生成器实例
 
-    def _send_request(self, url: str) -> Optional[Any]:
+    def _send_request(self, url: str) -> Any | None:
         """
         发送HTTP请求并返回响应数据
         """
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
         }
 
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=30) as response:
-            content = response.read().decode('utf-8')
+            content = response.read().decode("utf-8")
             return json.loads(content)
 
-    def get_swagger_doc(self, service_base_url: str) -> Optional[Dict[str, Any]]:
+    def get_swagger_doc(self, service_base_url: str) -> dict[str, Any] | None:
         """
         获取Swagger API文档数据
         """
@@ -48,28 +46,28 @@ class SwaggerHandler:
             return self.swagger_cache[service_base_url]
 
         # 首先尝试通过 swagger-resources 获取真实的文档路径
-        swagger_resource_path = '/swagger-resources'
+        swagger_resource_path = "/swagger-resources"
         try:
             logger.info(f"正在获取Swagger资源: {service_base_url}{swagger_resource_path}")
-            
+
             # 发送请求获取 swagger-resources
             resources = self._send_request(f"{service_base_url}{swagger_resource_path}")
             if resources:
                 # 查找所有 Swagger 文档资源
                 for resource in resources:
-                    doc_path = resource.get('location') or resource.get('url')
+                    doc_path = resource.get("location") or resource.get("url")
                     if doc_path:
                         # 构建完整的文档 URL
-                        if doc_path.startswith('http'):
+                        if doc_path.startswith("http"):
                             doc_url = doc_path
                         else:
                             doc_url = f"{service_base_url}{doc_path}"
-                        
+
                         logger.info(f"✓ 从swagger-resources获取文档路径: {doc_url}")
-                        
+
                         # 访问文档
                         data = self._send_request(doc_url)
-                        if data and 'paths' in data:
+                        if data and "paths" in data:
                             self.swagger_cache[service_base_url] = data
                             logger.info(f"✓ 成功获取 {len(data['paths'])} 个API路径 (使用 swagger-resources)")
                             return data
@@ -78,23 +76,23 @@ class SwaggerHandler:
 
         # 如果swagger-resources失败，回退到遍历常见路径
         doc_paths = [
-            '/v3/api-docs',
-            '/v2/api-docs',
-            '/api-docs',
+            "/v3/api-docs",
+            "/v2/api-docs",
+            "/api-docs",
         ]
 
         for doc_path in doc_paths:
             try:
                 logger.info(f"正在获取Swagger文档: {service_base_url}{doc_path}")
-                
+
                 # 发送请求获取文档
                 data = self._send_request(f"{service_base_url}{doc_path}")
-                if data and 'paths' in data:
+                if data and "paths" in data:
                     self.swagger_cache[service_base_url] = data
                     logger.info(f"✓ 成功获取 {len(data['paths'])} 个API路径 (使用 {doc_path})")
                     return data
                 else:
-                    logger.warning(f"❌ 文档格式不正确，缺少paths字段")
+                    logger.warning("❌ 文档格式不正确，缺少paths字段")
                     continue
 
             except Exception as e:
@@ -105,16 +103,12 @@ class SwaggerHandler:
         return None
 
     def find_api_info_in_swagger(
-        self, swagger_data: Dict[str, Any], api_path: str, method: str = "GET"
-    ) -> Dict[str, Any]:
+        self, swagger_data: dict[str, Any], api_path: str, method: str = "GET"
+    ) -> dict[str, Any]:
         """
         在Swagger文档中查找特定API的信息
         """
-        api_info = {
-            "description": "",
-            "parameters": {},
-            "summary": ""
-        }
+        api_info = {"description": "", "parameters": {}, "summary": ""}
 
         if not swagger_data or "paths" not in swagger_data:
             return api_info
@@ -122,12 +116,11 @@ class SwaggerHandler:
         paths = swagger_data["paths"]
 
         path_data = None
-        matched_path = None
 
         # 1. 获取Swagger文档的basePath并处理
         base_path = swagger_data.get("basePath", "")
         search_path = handle_base_path(api_path, base_path)
-        
+
         # 2. 尝试匹配处理后的路径
         if search_path in paths:
             path_data = paths[search_path]
@@ -151,7 +144,7 @@ class SwaggerHandler:
                 for param in parameters:
                     param_name = param.get("name", "")
                     param_desc = param.get("description", "")
-                    
+
                     # 对于所有参数，只要有名称和描述，就添加到参数列表中
                     # 包括 GET 请求的 body 参数（通常作为查询参数传递）
                     if param_name and param_desc:
@@ -173,11 +166,7 @@ class SwaggerHandler:
 
         return api_info
 
-    def _extract_params_from_swagger(
-        self,
-        parameters: List[Dict[str, Any]],
-        swagger_data: Dict[str, Any]
-    ) -> tuple:
+    def _extract_params_from_swagger(self, parameters: list[dict[str, Any]], swagger_data: dict[str, Any]) -> tuple:
         """
         从Swagger文档提取参数
 
@@ -192,7 +181,7 @@ class SwaggerHandler:
         """
         query_params = {}
         post_data = {}
-        path_params = {} # 路径参数，通过这个就可以判断是否路径url中包含动态参数
+        path_params = {}  # 路径参数，通过这个就可以判断是否路径url中包含动态参数
         param_descriptions = {}  # 参数描述信息
         has_query_param = False
         has_body_param = False
@@ -246,19 +235,21 @@ class SwaggerHandler:
         Returns:
             Any: 默认值
         """
-        if param_type == "string":
+        if param_type in ("string",):
             return ""
-        elif param_type == "integer":
+        elif param_type in ("integer", "int"):
             return 0
+        elif param_type in ("number", "float"):
+            return 0.0
         elif param_type == "boolean":
             return False
+        elif param_type == "array":
+            return []
+        elif param_type == "object":
+            return {}
         return ""
 
-    def _extract_body_params(
-        self,
-        schema: Dict[str, Any],
-        swagger_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def _extract_body_params(self, schema: dict[str, Any], swagger_data: dict[str, Any]) -> dict[str, Any]:
         """
         从body参数schema中提取参数
 
@@ -289,7 +280,9 @@ class SwaggerHandler:
 
         return body_params
 
-    def generate_apis_from_swagger(self, swagger_url: str, force_overwrite: bool = False, specific_path: str = None) -> List[str]:
+    def generate_apis_from_swagger(
+        self, swagger_url: str, force_overwrite: bool = False, specific_path: str = None
+    ) -> list[str]:
         """
         从Swagger文档生成API文件
 
@@ -340,13 +333,14 @@ class SwaggerHandler:
                             "url": full_path,
                             "query_params": {},
                             "post_data": {},
-                            "headers": APIConfig.REQUIRED_HEADERS()
+                            "headers": APIConfig.REQUIRED_HEADERS(),
                         }
 
                         # 提取参数
                         parameters = method_data.get("parameters", [])
-                        query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions = \
+                        query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions = (
                             self._extract_params_from_swagger(parameters, swagger_data)
+                        )
 
                         request_info["query_params"] = query_params
                         request_info["post_data"] = post_data
@@ -356,7 +350,7 @@ class SwaggerHandler:
                         swagger_info = {
                             "summary": method_data.get("summary", ""),
                             "description": method_data.get("description", "") or method_data.get("summary", ""),
-                            "parameters": param_descriptions
+                            "parameters": param_descriptions,
                         }
 
                         # 判断是否需要urlencode
@@ -375,10 +369,10 @@ class SwaggerHandler:
                     except Exception as e:
                         logger.error(f"❌ 生成API文件失败 {path} {method}: {str(e)}")
 
-            logger.info(f"\n============================================")
-            logger.info(f"从Swagger文档生成完成:")
+            logger.info("\n============================================")
+            logger.info("从Swagger文档生成完成:")
             logger.info(f"✓ 成功生成: {len(generated_files)} 个API文件")
-            logger.info(f"============================================")
+            logger.info("============================================")
 
         except Exception as e:
             logger.error(f"❌ 从Swagger文档生成API文件失败: {str(e)}")

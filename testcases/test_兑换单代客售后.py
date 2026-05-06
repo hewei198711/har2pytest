@@ -1,7 +1,7 @@
 import os
 
 import allure
-from setting import P1
+from allure_commons.types import Severity
 
 from apis.mall_center_user import (
     _user_mgmt_order_detail,
@@ -10,10 +10,10 @@ from apis.mall_center_user import (
 )
 
 
-@allure.severity(P1)
+@allure.severity(Severity.CRITICAL)
 @allure.feature("请填写被测试接口所属的微服务名称，如 mall_store_application")
 @allure.story("请填写被测试接口，如 /appStore/order/orderSign/signCommit")
-@allure.title("请填写测试用例名称，如 签约购提交订单")
+@allure.title("请填写测试用例名称，如 提交订单")
 def test_har_api_flow():
 
     # 初始化测试数据字典，用于在步骤间传递数据

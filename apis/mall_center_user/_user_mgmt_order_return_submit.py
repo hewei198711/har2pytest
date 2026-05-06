@@ -1,8 +1,8 @@
 from util.client import client
 
 data = {
-    "orderNo": "EX002000260416000003",  # 兑换流水号
-    "returnReason": "111111111111111111111111111111111",  # 退货原因
+    "orderNo": "EX914008260407000003",  # 兑换流水号
+    "returnReason": "111111",  # 退货原因
 }
 
 headers = {

@@ -1,9 +1,9 @@
-# coding:utf-8
 import json
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 from .config import APIConfig
 from .logger import logger
+
 
 class HARParser:
     """HAR文件解析器类"""
@@ -15,12 +15,12 @@ class HARParser:
         self.base_urls = base_urls if base_urls is not None else APIConfig.BASE_URLS()
         self.kill_urls = kill_urls if kill_urls is not None else APIConfig.KILL_URLS()
 
-    def extract_requests_from_har(self, har_file_path: str, filter_duplicate_url: bool = True) -> List[Dict[str, Any]]:
+    def extract_requests_from_har(self, har_file_path: str, filter_duplicate_url: bool = True) -> list[dict[str, Any]]:
         """
         从HAR文件中提取请求信息
         """
         try:
-            with open(har_file_path, "r", encoding="utf-8") as f:
+            with open(har_file_path, encoding="utf-8") as f:
                 har_data = json.load(f)
         except FileNotFoundError:
             logger.info(f"HAR文件不存在: {har_file_path}")
@@ -63,7 +63,7 @@ class HARParser:
             headers = {}
             for header in request.get("headers", []):
                 headers[header["name"]] = header["value"]
-            
+
             # 过滤 headers
             headers = self._filter_headers(headers)
 
@@ -150,7 +150,7 @@ class HARParser:
         logger.info(f"解析完成，提取到 {len(requests)} 个有效的API请求")
         return requests
 
-    def _filter_invalid_params(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _filter_invalid_params(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         过滤无效参数
         """
@@ -166,7 +166,7 @@ class HARParser:
 
         return filtered_data
 
-    def _filter_headers(self, headers: Dict[str, str]) -> Dict[str, str]:
+    def _filter_headers(self, headers: dict[str, str]) -> dict[str, str]:
         """
         过滤 headers，只保留配置中指定的和必要的 headers
 

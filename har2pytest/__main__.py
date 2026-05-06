@@ -1,15 +1,14 @@
-# coding:utf-8
 """
 har2pytest 命令行入口
 """
 
-from .config import APIConfig
-from .har_parser import HARParser
-from .har_generator import HARGenerator
 from .api_generator import APIGenerator
-from .testcase_generator import TestCaseGenerator
-from .swagger_handler import SwaggerHandler
+from .config import APIConfig
+from .har_generator import HARGenerator
+from .har_parser import HARParser
 from .logger import logger
+from .swagger_handler import SwaggerHandler
+from .testcase_generator import TestCaseGenerator
 
 
 def main():
@@ -59,7 +58,7 @@ def main():
 
         # 解析参数：har2pytest generate [har_file] [output_dir] [--overwrite]
         args = sys.argv[2:]
-        
+
         for arg in args:
             if arg in ["--overwrite", "-f"]:
                 force_overwrite = True
@@ -71,7 +70,7 @@ def main():
                 else:
                     # 如果第二个参数不是 .har 结尾，可能是 output_dir
                     output_dir = arg
-            
+
         # 更稳健的解析方式（推荐替换上面的简单循环，如果参数顺序固定）：
         # 假设用法: har2pytest generate <har_file> <output_dir> --overwrite
         positional_args = [arg for arg in args if arg not in ["--overwrite", "-f"]]
@@ -82,7 +81,7 @@ def main():
 
         logger.info(f"从HAR文件生成API接口文件: {har_file}")
         logger.info(f"输出目录: {output_dir}")
-        logger.info(f"强制覆盖: {force_overwrite}") # 新增日志
+        logger.info(f"强制覆盖: {force_overwrite}")  # 新增日志
         logger.info("-" * 50)
 
         api_generator = APIGenerator(output_dir)
@@ -116,7 +115,7 @@ def main():
             logger.info("-" * 50)
 
             generator = TestCaseGenerator(api_dir="apis", output_dir="testcases")
-            test_files = generator.generate_list_query_testcases(har_file, task_id)
+            test_files = generator.generate_parametrized_list_testcases(har_file, task_id)
 
             logger.info("-" * 50)
             if test_files:
@@ -147,7 +146,7 @@ def main():
             logger.info("-" * 50)
 
             generator = TestCaseGenerator(api_dir="apis", output_dir="testcases")
-            test_file = generator.generate_complex_scenario_testcase(har_file, target_url, task_id)
+            test_file = generator.generate_scenario_testcase(har_file, target_url, task_id)
 
             logger.info("-" * 50)
             if test_file:
@@ -173,8 +172,6 @@ def main():
                 logger.info(f"成功生成测试用例文件: {test_file.replace('\\', '/')}")
             else:
                 logger.info("生成测试用例文件失败")
-
-
 
     elif command == "swagger":
         swagger_url = None

@@ -16,7 +16,7 @@ classifiers = [
     "Topic :: Software Development :: Testing",
     "Topic :: Software Development :: Code Generators"
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.12"
 dependencies = [
     "allure-pytest==2.15.3",
     "allure-python-commons==2.15.3",
@@ -42,10 +42,10 @@ find = { where = ["."], include = ["har2pytest"] }
 line-length = 120
 
 # 启用的规则集：E=错误, F=格式, I=导入排序, UP=升级建议
-select = ["E", "F", "I", "UP"]
+lint.select = ["E", "F", "I", "UP"]
 
 # 忽略的规则（如行长度检查）
-ignore = ["E501"]
+lint.ignore = ["E501"]
 
 # 排除的目录
 exclude = [".git", "__pycache__", "venv", ".venv"]

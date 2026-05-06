@@ -1,12 +1,12 @@
-# coding:utf-8
 """
 测试 config.py 模块
 """
 
-import pytest
-import allure
-import os
 import json
+import os
+
+import allure
+
 from har2pytest.config import APIConfig
 
 
@@ -34,26 +34,23 @@ def test_default_config():
 def test_config_file_loading():
     """测试配置文件加载"""
     # 创建临时配置文件
-    test_config = {
-        "BASE_URLS": ["https://test.example.com/api"],
-        "DEFAULT_SERVICE_PACKAGE": "test_api"
-    }
-    
+    test_config = {"BASE_URLS": ["https://test.example.com/api"], "DEFAULT_SERVICE_PACKAGE": "test_api"}
+
     with open("test_config.json", "w", encoding="utf-8") as f:
         json.dump(test_config, f)
-    
+
     try:
         # 设置环境变量指定配置文件
         os.environ["HAR2PYTEST_CONFIG"] = "test_config.json"
-        
+
         # 重新加载配置
         APIConfig._config = None
         config, config_file_exists = APIConfig._load_config()
-        
+
         # 测试配置是否正确加载
-        assert config.get('BASE_URLS') == ["https://test.example.com/api"]
-        assert config.get('DEFAULT_SERVICE_PACKAGE') == "test_api"
-        assert config_file_exists == True
+        assert config.get("BASE_URLS") == ["https://test.example.com/api"]
+        assert config.get("DEFAULT_SERVICE_PACKAGE") == "test_api"
+        assert config_file_exists is True
     finally:
         # 清理
         if "HAR2PYTEST_CONFIG" in os.environ:
@@ -71,12 +68,12 @@ def test_determine_service_package():
     """测试根据URL判断服务包"""
     # 测试正常URL
     assert APIConfig.determine_service_package("https://example.com/api/user/login") == "apis"
-    
+
     # 测试带路径的URL
     assert APIConfig.determine_service_package("https://example.com/api/v1/user/login") == "apis"
-    
+
     # 测试空URL
     assert APIConfig.determine_service_package("") == "apis"
-    
+
     # 测试None
     assert APIConfig.determine_service_package(None) == "apis"

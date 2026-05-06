@@ -577,7 +577,7 @@ def test_har_api_flow():
 import os
 import pytest
 import allure
-from setting import P1, P2, P3
+from allure_commons.types import Severity
 from util.logger import logger
 from api.mall_center_user._user_mgmt_audience_editAudienceProduct import _user_mgmt_audience_editAudienceProduct
 
