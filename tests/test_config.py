@@ -20,7 +20,12 @@ def test_default_config():
     assert APIConfig.DEFAULT_SERVICE_PACKAGE() == "apis"
     assert APIConfig.DEFAULT_TESTCASE_DIR() == "testcases"
     assert APIConfig.INVALID_PARAMS() == {"partnerKey", "sign", "timestamp", "nonce", "rnd"}
-    assert APIConfig.HEADERS_TO_INCLUDE() == {"authorization", "content-type", "channel", "client"}
+    assert APIConfig.HEADERS_TO_INCLUDE() == {
+        "authorization": "bearer {os.environ['access_token']}",
+        "channel": "pc",
+        "content-type": "application/json;charset=UTF-8",
+        "client": "op",
+    }
     assert APIConfig.REQUIRED_HEADERS() == {"authorization": "请输入认证令牌"}
     assert APIConfig.SWAGGER_FILE() == "swagger.json"
     assert APIConfig.SWAGGER_HOST() == "https://api.example.com"

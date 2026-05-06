@@ -384,3 +384,31 @@ def format_python_file(filepath: str) -> None:
         logger.info(f"使用ruff格式化文件: {filepath}")
     except Exception as e:
         logger.warning(f"格式化文件失败 {filepath}: {str(e)}")
+
+
+def get_output_dir(base_output_dir: str, task_id: str = None) -> str:
+    """
+    获取输出目录路径
+
+    :param base_output_dir: 基础输出目录
+    :param task_id: 任务ID，如果提供则创建子目录 {base_output_dir}/{task_id}
+    :return: 输出目录路径
+    """
+    if task_id:
+        output_dir = os.path.join(base_output_dir, task_id)
+    else:
+        output_dir = base_output_dir
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir
+
+
+def write_test_file(filepath: str, content: str):
+    """
+    写入测试API/用例文件并格式化
+
+    :param filepath: 文件路径
+    :param content: 文件内容
+    """
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+    format_python_file(filepath)

@@ -47,12 +47,12 @@
     "partnerKey",
     "timestamp"
   ],
-  "HEADERS_TO_INCLUDE": [
-    "authorization",
-    "channel",
-    "content-type",
-    "client"
-  ],
+  "HEADERS_TO_INCLUDE": {
+    "authorization": "bearer {os.environ['access_token']}",
+    "channel": "pc",
+    "content-type": "application/json;charset=UTF-8",
+    "client": "op"
+  },
   "REQUIRED_HEADERS": {
     "authorization": "请输入认证令牌"
   },

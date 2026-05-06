@@ -23,8 +23,10 @@ class APIConfig:
         "SWAGGER_DOC_URLS": {},
         # 无效参数集合，这些参数将在生成测试用例时被过滤掉
         "INVALID_PARAMS": set(),
-        # 需要收录的headers参数集合，只有这些headers参数会被包含在生成的API文件中
-        "HEADERS_TO_INCLUDE": set(),
+        # 需要收录的headers参数及其默认值，用于生成测试用例时的headers
+        "HEADERS_TO_INCLUDE": {
+            "authorization": "bearer {os.environ['access_token']}",
+        },
         # 必须包含的headers字段及其默认值
         "REQUIRED_HEADERS": {},
         # 列表查询用例，这些参数不进行参数化处理
@@ -79,9 +81,19 @@ class APIConfig:
         if isinstance(config.get("INVALID_PARAMS"), list):
             config["INVALID_PARAMS"] = set(config["INVALID_PARAMS"])
 
-        # 转换 HEADERS_TO_INCLUDE 为集合类型
+        # 如果 HEADERS_TO_INCLUDE 是列表格式，转换为字典格式（兼容旧配置）
         if isinstance(config.get("HEADERS_TO_INCLUDE"), list):
-            config["HEADERS_TO_INCLUDE"] = set(config["HEADERS_TO_INCLUDE"])
+            headers_dict = {}
+            for header in config["HEADERS_TO_INCLUDE"]:
+                # 使用默认值
+                default_values = {
+                    "authorization": "bearer {os.environ['access_token']}",
+                    "channel": "pc",
+                    "client": "op",
+                    "content-type": "application/json;charset=UTF-8",
+                }
+                headers_dict[header] = default_values.get(header, "")
+            config["HEADERS_TO_INCLUDE"] = headers_dict
 
         return config, config_file_exists
 

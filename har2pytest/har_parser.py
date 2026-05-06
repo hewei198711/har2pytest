@@ -184,6 +184,10 @@ class HARParser:
         if not headers_to_include:
             return headers
 
+        # 获取 headers 名称集合（支持字典格式）
+        if isinstance(headers_to_include, dict):
+            headers_to_include = set(headers_to_include.keys())
+
         # 需要保留的关键 headers，用于后续处理
         required_headers = {"content-type", "content-length", "authorization", "origin"}
         # 合并需要保留的 headers

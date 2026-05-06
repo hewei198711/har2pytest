@@ -9,8 +9,8 @@ from .utils import (
     determine_service_package,
     extract_function_name,
     format_parameter_value,
-    format_python_file,
     match_path_template,
+    write_test_file,
 )
 
 
@@ -124,6 +124,11 @@ class APIGenerator:
 
         # 只收录配置中指定的 headers 参数
         headers_to_include = APIConfig.HEADERS_TO_INCLUDE()
+
+        # 获取 headers 名称集合（支持字典格式）
+        if isinstance(headers_to_include, dict):
+            headers_to_include = set(headers_to_include.keys())
+
         headers = {}
         for key, value in raw_headers.items():
             if key.lower() in [h.lower() for h in headers_to_include]:
@@ -560,11 +565,7 @@ class APIGenerator:
 
         content = self.generate_file_content(request_info, function_name, swagger_info, parsed_info)
 
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        # 使用ruff格式化生成的文件
-        format_python_file(filepath)
+        write_test_file(filepath, content)
 
         logger.info(f"生成API文件: {filepath} (服务包: {service_package})")
         return filepath

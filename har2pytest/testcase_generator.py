@@ -5,7 +5,13 @@ from typing import Any
 from .config import APIConfig
 from .har_parser import HARParser
 from .logger import logger
-from .utils import deduplicate_values, extract_url_from_file, format_parameter_value, format_python_file
+from .utils import (
+    deduplicate_values,
+    extract_url_from_file,
+    format_parameter_value,
+    get_output_dir,
+    write_test_file,
+)
 
 
 class TestCaseGenerator:
@@ -31,18 +37,35 @@ class TestCaseGenerator:
         self.filter_duplicate_url = filter_duplicate_url
         self.har_parser = HARParser(base_urls=base_urls, kill_urls=kill_urls)
 
-    def _get_output_dir(self, task_id: str = None) -> str:
+    def _get_clean_function_name(self, filepath: str) -> str:
         """
-        获取输出目录路径
-        :param task_id: 任务ID，如果提供则创建子目录 {output_dir}/{task_id}
-        :return: 输出目录路径
+        获取清理后的函数名
         """
-        if task_id:
-            output_dir = os.path.join(self.output_dir, task_id)
-        else:
-            output_dir = self.output_dir
-        os.makedirs(output_dir, exist_ok=True)
-        return output_dir
+        function_name = self.get_function_name_from_api_file(filepath)
+        if function_name:
+            return function_name.lstrip("_").strip()
+        return os.path.splitext(os.path.basename(filepath))[0].lstrip("_").strip()
+
+    def _get_headers_str(self) -> str:
+        """
+        从配置文件中获取需要包含的 headers，生成测试用例中的 headers 字符串
+        使用 HEADERS_TO_INCLUDE 配置中的 header 及其默认值
+        """
+        # 从配置中获取需要包含的 headers（字典格式）
+        headers_config = APIConfig.HEADERS_TO_INCLUDE()
+
+        # 生成 headers 字符串
+        header_lines = []
+        for header_name, default_value in headers_config.items():
+            # 判断值是否包含 os.environ，需要特殊处理
+            if "{os.environ[" in default_value:
+                # 保留 f-string 格式
+                header_lines.append(f'            "{header_name}": {default_value},')
+            else:
+                # 添加引号
+                header_lines.append(f'            "{header_name}": "{default_value}",')
+
+        return "\n".join(header_lines)
 
     def match_api_files_for_har(self, har_file_path: str) -> list[str]:
         """
@@ -324,12 +347,8 @@ class TestCaseGenerator:
 
         # 生成测试函数名称
         if target_api_file:
-            function_name = self.get_function_name_from_api_file(target_api_file)
-            if function_name:
-                clean_function_name = function_name.lstrip("_").strip()
-                test_function_name = f"def test_{clean_function_name}():"
-            else:
-                test_function_name = "def test_har_api_flow():"
+            clean_function_name = self._get_clean_function_name(target_api_file)
+            test_function_name = f"def test_{clean_function_name}():"
         else:
             test_function_name = "def test_har_api_flow():"
         content.append(test_function_name)
@@ -484,24 +503,13 @@ class TestCaseGenerator:
 
         logger.info(f"找到 {len(api_files)} 个对应的API文件")
 
-        if output_subdir:
-            output_dir = os.path.join(self.output_dir, output_subdir)
-            logger.info(output_dir)
-        else:
-            output_dir = self.output_dir
-
-        os.makedirs(output_dir, exist_ok=True)
+        output_dir = get_output_dir(self.output_dir, output_subdir)
 
         test_filename = f"test_{os.path.splitext(os.path.basename(har_file_path))[0]}.py"
         test_filepath = os.path.join(output_dir, test_filename)
 
         test_content = self.generate_test_case_content(har_file_path, api_files)
-
-        with open(test_filepath, "w", encoding="utf-8") as f:
-            f.write(test_content)
-
-        # 使用ruff格式化生成的文件
-        format_python_file(test_filepath)
+        write_test_file(test_filepath, test_content)
 
         logger.info(f"生成测试用例文件: {test_filepath}")
         return test_filepath
@@ -527,21 +535,14 @@ class TestCaseGenerator:
             task_id = task_id[5:]
 
         # 获取输出目录
-        output_dir = self._get_output_dir(task_id)
+        output_dir = get_output_dir(self.output_dir, task_id)
 
         generated_files = []
 
         for api_file in api_files:
             try:
-                function_name = self.get_function_name_from_api_file(api_file)
-                if function_name:
-                    clean_function_name = function_name.lstrip("_").strip()
-                    test_filename = f"test_{clean_function_name}.py"
-                else:
-                    api_basename = os.path.splitext(os.path.basename(api_file))[0]
-                    clean_basename = api_basename.lstrip("_").strip()
-                    test_filename = f"test_{clean_basename}.py"
-
+                clean_function_name = self._get_clean_function_name(api_file)
+                test_filename = f"test_{clean_function_name}.py"
                 test_filepath = os.path.join(output_dir, test_filename)
 
                 # 生成参数化测试用例内容
@@ -551,11 +552,7 @@ class TestCaseGenerator:
                     logger.info(f"跳过文件（无法生成内容）: {api_file}")
                     continue
 
-                with open(test_filepath, "w", encoding="utf-8") as f:
-                    f.write(test_content)
-
-                # 使用ruff格式化生成的文件
-                format_python_file(test_filepath)
+                write_test_file(test_filepath, test_content)
 
                 generated_files.append(test_filepath)
                 logger.info(f"生成测试用例文件: {test_filepath}")
@@ -851,7 +848,7 @@ class TestCaseGenerator:
             task_id = task_id[5:]
 
         # 获取输出目录
-        output_dir = self._get_output_dir(task_id)
+        output_dir = get_output_dir(self.output_dir, task_id)
 
         # 查找目标接口文件，用于生成文件名
         target_api_file = None
@@ -866,19 +863,11 @@ class TestCaseGenerator:
                 logger.info(f"未找到指定URL对应的API文件: {target_url}")
                 return None
         else:
-            # 没有指定目标接口，退出
             return None
 
         # 生成测试用例文件
-        function_name = self.get_function_name_from_api_file(target_api_file)
-        if function_name:
-            clean_function_name = function_name.lstrip("_").strip()
-            test_filename = f"test_{clean_function_name}.py"
-        else:
-            api_basename = os.path.splitext(os.path.basename(target_api_file))[0]
-            clean_basename = api_basename.lstrip("_").strip()
-            test_filename = f"test_{clean_basename}.py"
-
+        clean_function_name = self._get_clean_function_name(target_api_file)
+        test_filename = f"test_{clean_function_name}.py"
         test_filepath = os.path.join(output_dir, test_filename)
 
         # 生成测试用例内容，传递所有API文件和接口信息
@@ -888,11 +877,7 @@ class TestCaseGenerator:
             logger.info("无法生成测试用例内容")
             return None
 
-        with open(test_filepath, "w", encoding="utf-8") as f:
-            f.write(test_content)
-
-        # 使用ruff格式化文件
-        format_python_file(test_filepath)
+        write_test_file(test_filepath, test_content)
 
         logger.info(f"生成测试用例文件: {test_filepath}")
         return test_filepath
