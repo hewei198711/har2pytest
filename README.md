@@ -90,17 +90,17 @@ har2pytest <command> [arguments]
 #### 1. 生成API文件
 
 ```bash
-# 使用默认参数
-har2pytest generate
+# 使用默认参数（默认 api_request.har 和 apis 目录）
+har2pytest api
 
 # 指定HAR文件和输出目录
-har2pytest generate api_request.har api
+har2pytest api api_request.har --output apis
 
-# 只指定HAR文件（使用默认输出目录）
-har2pytest generate api_request.har
+# 只指定HAR文件（使用默认输出目录 apis）
+har2pytest api api_request.har
 
 # 强制覆盖已存在的文件
-har2pytest generate api_request.har api --overwrite
+har2pytest api api_request.har --output apis --overwrite
 ```
 
 #### 2. 从Swagger文档生成API文件
@@ -119,14 +119,23 @@ har2pytest swagger https://petstore.swagger.io/v2/api-docs api --path /pet/{petI
 #### 3. 生成测试用例
 
 ```bash
-# 使用默认参数
-har2pytest testcase
-
-# 指定HAR文件和输出目录
-har2pytest testcase api_request.har testcases
-
-# 只指定HAR文件（使用默认输出目录）
+# 生成通用测试用例（简单模式，默认）
 har2pytest testcase api_request.har
+
+# 生成查询类参数化测试用例（不传mark）
+har2pytest testcase api_request.har --pattern list_query
+
+# 生成查询类参数化测试用例（传mark）
+har2pytest testcase api_request.har --pattern list_query --mark test_4295
+
+# 生成复杂场景测试用例（不传mark）
+har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login
+
+# 生成复杂场景测试用例（传mark）
+har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
+
+# 自定义输出目录
+har2pytest testcase api_request.har --pattern list_query --mark test_4295 --output my_tests
 ```
 
 #### 4. 查看HAR文件摘要
@@ -139,31 +148,75 @@ har2pytest summary
 har2pytest summary api_request.har
 ```
 
-#### 5. 生成查询类参数化测试用例（list_query模式）
+#### 5. 测试用例生成详细说明
+
+##### 5.1 simple 模式（通用测试用例）
+
+用于生成简单的通用测试用例，将HAR文件中的每个请求转换为对应的API调用测试。
 
 ```bash
-# 命令格式: har2pytest testcase list_query [task_id] [har_file]
-# 示例：从兑换单代客售后.har 生成查询类测试用例，输出到 testcases/版本接口测试/test_4291/
-har2pytest testcase list_query test_4291 兑换单代客售后.har
+# 基本用法
+har2pytest testcase api_request.har
 
-# 参数说明：
-# - task_id: 任务ID（如 test_4295），会自动去掉 test_ 前缀，生成目录 testcases/版本接口测试/4295/
-# - har_file: HAR文件路径
+# 自定义输出目录
+har2pytest testcase api_request.har --output testcases
+
+# 指定API文件目录
+har2pytest testcase api_request.har --api-dir apis --output testcases
 ```
 
-#### 6. 生成复杂场景流程测试用例（complex_scenario模式）
+**参数说明**：
+- `--api-dir`: 可选，API文件目录，默认为 `apis`
+- `--output`: 可选，输出目录，默认为 `testcases`
+
+**说明**：此模式调用 `generate_test_case_from_har()` 方法，将HAR文件中的请求转换为对应的API调用测试用例。
+
+##### 5.2 list_query 模式（查询类参数化测试）
+
+用于生成查询接口的参数化测试用例，自动生成多参数组合测试。
 
 ```bash
-# 命令格式: har2pytest testcase complex_scenario [task_id] [url] [har_file]
-# 示例：从代客售后.har 生成复杂场景测试用例
-har2pytest testcase complex_scenario test_4295 /user/mgmt/order/return/submit 代客售后.har
+# 基本用法
+har2pytest testcase 兑换单代客售后.har --pattern list_query
 
-# 参数说明：
-# - task_id: 任务ID（如 test_4295），会自动去掉 test_ 前缀，生成目录 testcases/版本接口测试/4295/
-# - url: 目标接口URL，工具会找到该接口并生成完整的测试用例
-# - har_file: HAR文件路径
-# 注意：如果 task_id 是 .har 文件，则自动切换为 list_query 模式
+# 指定测试标记（会生成 @pytest.mark.test_4291）
+har2pytest testcase 兑换单代客售后.har --pattern list_query --mark test_4291
+
+# 自定义API目录和输出目录
+har2pytest testcase api.har --pattern list_query --mark test_4291 --api-dir apis --output testcases
 ```
+
+**参数说明**：
+- `--pattern list_query`: 指定为查询类参数化测试模式
+- `--mark test_xxx`: 可选，测试标记，会在测试用例中添加 `@pytest.mark.test_xxx` 装饰器
+- `--api-dir`: 可选，API文件目录，默认为 `apis`
+- `--output`: 可选，输出目录，默认为 `testcases`
+
+##### 5.2 complex_scenario 模式（复杂场景流程测试）
+
+用于生成复杂业务流程的测试用例，支持指定目标接口进行重点测试。
+
+```bash
+# 基本用法（不传mark）
+har2pytest testcase 代客售后.har --pattern complex_scenario --url /user/mgmt/order/return/submit
+
+# 指定测试标记
+har2pytest testcase 代客售后.har --pattern complex_scenario --url /user/mgmt/order/return/submit --mark test_4295
+
+# 自定义目录
+har2pytest testcase api.har --pattern complex_scenario --url /api/user/login --mark test_4295 --api-dir apis --output testcases
+```
+
+**参数说明**：
+- `--pattern complex_scenario`: 指定为复杂场景测试模式
+- `--url`: 必填，目标接口URL，工具会找到该接口并生成完整的测试用例
+- `--mark test_xxx`: 可选，测试标记，会在测试用例中添加 `@pytest.mark.test_xxx` 装饰器
+- `--api-dir`: 可选，API文件目录，默认为 `apis`
+- `--output`: 可选，输出目录，默认为 `testcases`
+
+**注意**：
+- `--mark` 参数非必传，不传时测试用例中不会有 `@pytest.mark.test_**` 标记
+- `--mark` 参数支持 `test_xxx` 格式，工具会自动去掉 `test_` 前缀
 
 
 ## 类结构说明

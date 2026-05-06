@@ -2,273 +2,232 @@
 har2pytest 命令行入口
 """
 
+import argparse
+
 from .api_generator import APIGenerator
 from .config import APIConfig
 from .har_generator import HARGenerator
 from .har_parser import HARParser
 from .logger import logger
-from .swagger_handler import SwaggerHandler
 from .testcase_generator import TestCaseGenerator
 
 
 def main():
     """
     主函数 - 支持多种命令行操作模式
-
-    支持的命令：
-    1. generate - 从HAR文件生成API接口文件
-    2. update - 更新现有API文件的文档信息
-    3. summary - 显示HAR文件的API请求摘要
-    4. help - 显示帮助信息
-
-    示例用法:
-        # 从HAR文件生成API文件
-        har2pytest generate api_request.har api
-
-        # 使用默认参数生成
-        har2pytest
-
-        # 更新API文档信息
-        har2pytest update api
-
-        # 查看HAR文件摘要
-        har2pytest summary api_request.har
-
-        # 显示帮助
-        har2pytest help
-        har2pytest --help
     """
-    import sys
-
     # 初始化配置
     APIConfig._load_config()
 
-    if len(sys.argv) > 1:
-        command = sys.argv[1]
-        # 处理 --help 选项
-        if command == "--help":
-            command = "help"
+    # 创建主解析器
+    parser = argparse.ArgumentParser(
+        prog="har2pytest",
+        description="har2pytest - HAR文件转pytest测试用例工具",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""示例用法:
+  # 从HAR文件生成API接口文件
+  har2pytest api api_request.har --output apis
+
+  # 查看HAR文件摘要
+  har2pytest summary api_request.har
+
+  # 更新API文档信息
+  har2pytest update apis
+
+  # 生成查询类参数化测试用例
+  har2pytest testcase api_request.har --pattern list_query --mark test_4291
+
+  # 生成复杂场景测试用例
+  har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
+""",
+    )
+
+    # 创建子命令解析器
+    subparsers = parser.add_subparsers(dest="command", help="可用命令")
+
+    # api 子命令
+    api_parser = subparsers.add_parser("api", help="从HAR文件生成API接口文件", description="从HAR文件生成API接口文件")
+    api_parser.add_argument("har_file", nargs="?", default="api_request.har", help="HAR文件路径")
+    api_parser.add_argument("--output", "-o", default=APIConfig.DEFAULT_SERVICE_PACKAGE(), help="输出目录")
+    api_parser.add_argument("--overwrite", "-f", action="store_true", help="强制覆盖现有文件")
+
+    # summary 子命令
+    sum_parser = subparsers.add_parser(
+        "summary", help="显示HAR文件的API请求摘要", description="显示HAR文件的API请求摘要"
+    )
+    sum_parser.add_argument("har_file", help="HAR文件路径")
+
+    # update 子命令
+    upd_parser = subparsers.add_parser(
+        "update", help="更新现有API文件的文档信息", description="更新现有API文件的文档信息"
+    )
+    upd_parser.add_argument("api_dir", nargs="?", default=APIConfig.DEFAULT_SERVICE_PACKAGE(), help="API文件目录")
+
+    # testcase 子命令
+    tc_parser = subparsers.add_parser(
+        "testcase",
+        help="生成测试用例",
+        description="从HAR文件生成pytest测试用例",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""示例用法:
+  # 生成查询类参数化测试用例（不传mark）
+  har2pytest testcase api_request.har --pattern list_query
+
+  # 生成查询类参数化测试用例（传mark）
+  har2pytest testcase api_request.har --pattern list_query --mark test_4291
+
+  # 生成复杂场景测试用例（不传mark）
+  har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login
+
+  # 生成复杂场景测试用例（传mark）
+  har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
+""",
+    )
+    tc_parser.add_argument("har_file", help="HAR文件路径")
+    tc_parser.add_argument(
+        "--pattern",
+        "-p",
+        default="simple",
+        choices=["simple", "list_query", "complex_scenario"],
+        help="测试用例模式: simple(通用测试)、list_query(查询类参数化) 或 complex_scenario(复杂场景)",
+    )
+    tc_parser.add_argument("--mark", "-m", help="测试标记（如 test_4291）")
+    tc_parser.add_argument("--url", "-u", help="目标接口URL（complex_scenario模式必填）")
+    tc_parser.add_argument("--output", "-o", default="testcases", help="输出目录")
+    tc_parser.add_argument("--api-dir", default="apis", help="API文件目录")
+
+    # 解析参数
+    args = parser.parse_args()
+
+    # 如果没有指定命令，默认使用 generate
+    if args.command is None:
+        args.command = "generate"
+        args.har_file = "api_request.har"
+        args.output = APIConfig.DEFAULT_SERVICE_PACKAGE()
+        args.overwrite = False
+
+    # 执行对应的命令
+    if args.command == "api":
+        handle_api(args)
+    elif args.command == "summary":
+        handle_summary(args)
+    elif args.command == "update":
+        handle_update(args)
+    elif args.command == "testcase":
+        handle_testcase(args)
+    elif args.command == "help":
+        parser.print_help()
     else:
-        command = "generate"
+        logger.error(f"未知命令: {args.command}")
+        parser.print_help()
 
-    if command == "generate":
-        har_file = "api_request.har"
-        output_dir = APIConfig.DEFAULT_SERVICE_PACKAGE()
-        force_overwrite = False  # 默认不覆盖
 
-        # 解析参数：har2pytest generate [har_file] [output_dir] [--overwrite]
-        args = sys.argv[2:]
+def handle_api(args):
+    """处理 api 命令"""
+    har_file = args.har_file
+    output_dir = args.output
+    force_overwrite = args.overwrite
 
-        for arg in args:
-            if arg in ["--overwrite", "-f"]:
-                force_overwrite = True
-            elif not har_file or har_file == "api_request.har":
-                # 简单的位置参数解析逻辑：第一个非flag参数作为 har_file
-                # 注意：这里为了兼容旧用法，如果用户只传了 har_file，它会覆盖默认值
-                if arg.endswith(".har"):
-                    har_file = arg
-                else:
-                    # 如果第二个参数不是 .har 结尾，可能是 output_dir
-                    output_dir = arg
+    logger.info(f"从HAR文件生成API接口文件: {har_file}")
+    logger.info(f"输出目录: {output_dir}")
+    logger.info(f"强制覆盖: {force_overwrite}")
+    logger.info("-" * 50)
 
-        # 更稳健的解析方式（推荐替换上面的简单循环，如果参数顺序固定）：
-        # 假设用法: har2pytest generate <har_file> <output_dir> --overwrite
-        positional_args = [arg for arg in args if arg not in ["--overwrite", "-f"]]
-        if len(positional_args) >= 1:
-            har_file = positional_args[0]
-        if len(positional_args) >= 2:
-            output_dir = positional_args[1]
+    api_generator = APIGenerator(output_dir)
+    har_generator = HARGenerator(output_dir=output_dir, api_generator=api_generator)
+    generated_files = har_generator.generate_api_files_from_har(har_file, force_overwrite=force_overwrite)
 
-        logger.info(f"从HAR文件生成API接口文件: {har_file}")
-        logger.info(f"输出目录: {output_dir}")
-        logger.info(f"强制覆盖: {force_overwrite}")  # 新增日志
+    logger.info("-" * 50)
+    logger.info(f"共生成 {len(generated_files)} 个API接口文件")
+
+    if generated_files:
+        api_generator.generate_index_file(generated_files)
+
+
+def handle_summary(args):
+    """处理 summary 命令"""
+    har_file = args.har_file
+
+    parser = HARParser()
+    parser.print_api_summary(har_file)
+
+
+def handle_update(args):
+    """处理 update 命令"""
+    api_dir = args.api_dir
+
+    logger.info(f"更新API文件文档信息: {api_dir}")
+    logger.info("-" * 50)
+
+    api_generator = APIGenerator(api_dir)
+    updated_count = api_generator.update_api_docs()
+
+    logger.info("-" * 50)
+    logger.info(f"共更新 {updated_count} 个API文件")
+
+
+def handle_testcase(args):
+    """处理 testcase 命令"""
+    har_file = args.har_file
+    pattern = args.pattern
+    task_id = args.mark
+    target_url = args.url
+    output_dir = args.output
+    api_dir = args.api_dir
+
+    # 如果 task_id 以 test_ 开头，去掉前缀
+    if task_id and task_id.startswith("test_"):
+        task_id = task_id[5:]
+
+    if pattern == "simple":
+        logger.info(f"生成通用测试用例: {har_file}")
         logger.info("-" * 50)
 
-        api_generator = APIGenerator(output_dir)
-        har_generator = HARGenerator(output_dir=output_dir, api_generator=api_generator)
-        generated_files = har_generator.generate_api_files_from_har(har_file, force_overwrite=force_overwrite)
+        generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
+        test_file = generator.generate_test_case_from_har(har_file)
 
         logger.info("-" * 50)
-        logger.info(f"共生成 {len(generated_files)} 个API接口文件")
-
-        if generated_files:
-            api_generator.generate_index_file(generated_files)
-
-    elif command == "testcase":
-        har_file = "api_request.har"
-        output_dir = APIConfig.TESTCASE_DIR()
-        sub_command = None
-        task_id = None
-        target_url = None
-
-        if len(sys.argv) > 2:
-            sub_command = sys.argv[2]
-
-        if sub_command == "list_query":
-            if len(sys.argv) > 3:
-                task_id = sys.argv[3]
-            if len(sys.argv) > 4:
-                har_file = sys.argv[4]
-
-            logger.info(f"生成查询类测试用例: {har_file}")
-            logger.info(f"任务ID: {task_id}")
-            logger.info("-" * 50)
-
-            generator = TestCaseGenerator(api_dir="apis", output_dir="testcases")
-            test_files = generator.generate_parametrized_list_testcases(har_file, task_id)
-
-            logger.info("-" * 50)
-            if test_files:
-                logger.info(f"成功生成 {len(test_files)} 个测试用例文件:")
-                for test_file in test_files:
-                    logger.info(f"  - {test_file}")
-            else:
-                logger.info("生成测试用例文件失败")
-
-        elif sub_command == "complex_scenario":
-            if len(sys.argv) > 3:
-                task_id = sys.argv[3]
-            if len(sys.argv) > 4:
-                target_url = sys.argv[4]
-            if len(sys.argv) > 5:
-                har_file = sys.argv[5]
-
-            if target_url and target_url.endswith(".har"):
-                har_file = target_url
-                target_url = None
-
-            if task_id and task_id.startswith("test_"):
-                task_id = task_id[5:]
-
-            logger.info(f"生成复杂场景测试用例: {har_file}")
-            logger.info(f"任务ID: {task_id}")
-            logger.info(f"目标接口: {target_url or '(自动选择第一个)'}")
-            logger.info("-" * 50)
-
-            generator = TestCaseGenerator(api_dir="apis", output_dir="testcases")
-            test_file = generator.generate_scenario_testcase(har_file, target_url, task_id)
-
-            logger.info("-" * 50)
-            if test_file:
-                logger.info(f"成功生成测试用例文件: {test_file.replace('\\', '/')}")
-            else:
-                logger.info("生成测试用例文件失败")
-
+        if test_file:
+            logger.info(f"成功生成测试用例文件: {test_file.replace('\\', '/')}")
         else:
-            if len(sys.argv) > 2:
-                har_file = sys.argv[2]
-            if len(sys.argv) > 3:
-                output_dir = sys.argv[3]
+            logger.info("生成测试用例文件失败")
 
-            logger.info(f"从HAR文件生成pytest用例: {har_file}")
-            logger.info(f"输出目录: {output_dir}")
-            logger.info("-" * 50)
+    elif pattern == "list_query":
+        logger.info(f"生成查询类参数化测试用例: {har_file}")
+        logger.info(f"任务ID: {task_id}")
+        logger.info("-" * 50)
 
-            generator = TestCaseGenerator(api_dir="apis", output_dir=output_dir)
-            test_file = generator.generate_test_case_from_har(har_file)
+        generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
+        test_files = generator.generate_parametrized_list_testcases(har_file, task_id)
 
-            logger.info("-" * 50)
-            if test_file:
-                logger.info(f"成功生成测试用例文件: {test_file.replace('\\', '/')}")
-            else:
-                logger.info("生成测试用例文件失败")
+        logger.info("-" * 50)
+        if test_files:
+            logger.info(f"成功生成 {len(test_files)} 个测试用例文件:")
+            for test_file in test_files:
+                logger.info(f"  - {test_file}")
+        else:
+            logger.info("生成测试用例文件失败")
 
-    elif command == "swagger":
-        swagger_url = None
-        output_dir = APIConfig.DEFAULT_SERVICE_PACKAGE()
-        force_overwrite = False
-        specific_path = None
-
-        # 解析参数：har2pytest swagger <swagger_url> [output_dir] [--overwrite] [--path <path>]
-        args = sys.argv[2:]
-
-        i = 0
-        while i < len(args):
-            arg = args[i]
-            if arg in ["--overwrite", "-f"]:
-                force_overwrite = True
-            elif arg in ["--path", "-p"]:
-                if i + 1 < len(args):
-                    specific_path = args[i + 1]
-                    i += 1
-                else:
-                    logger.error("错误: --path 参数需要指定路径值")
-                    logger.info("使用 'har2pytest help' 查看帮助信息")
-                    return
-            elif not swagger_url:
-                swagger_url = arg
-            else:
-                output_dir = arg
-            i += 1
-
-        if not swagger_url:
-            logger.error("错误: 必须提供Swagger文档URL")
-            logger.info("使用 'har2pytest help' 查看帮助信息")
+    elif pattern == "complex_scenario":
+        # 验证必填参数
+        if not target_url:
+            logger.error("错误: complex_scenario 模式必须指定 --url 参数")
+            logger.error("使用示例: har2pytest testcase api.har --pattern complex_scenario --url /api/user/login")
             return
 
-        logger.info(f"从Swagger文档生成API接口文件: {swagger_url}")
-        logger.info(f"输出目录: {output_dir}")
-        logger.info(f"强制覆盖: {force_overwrite}")
-        if specific_path:
-            logger.info(f"特定路径: {specific_path}")
+        logger.info(f"生成复杂场景测试用例: {har_file}")
+        logger.info(f"任务ID: {task_id}")
+        logger.info(f"目标接口: {target_url}")
         logger.info("-" * 50)
 
-        swagger_handler = SwaggerHandler()
-        generated_files = swagger_handler.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)
+        generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
+        test_file = generator.generate_scenario_testcase(har_file, target_url, task_id)
 
         logger.info("-" * 50)
-        logger.info(f"共生成 {len(generated_files)} 个API接口文件")
-
-        if generated_files:
-            # 生成索引文件
-            api_generator = APIGenerator(output_dir)
-            api_generator.generate_index_file(generated_files)
-
-    elif command == "summary":
-        har_file = "api_request.har"
-        if len(sys.argv) > 2:
-            har_file = sys.argv[2]
-
-        parser = HARParser()
-        parser.print_api_summary(har_file)
-
-    elif command == "help":
-        logger.info("har2pytest - API生成和更新工具")
-        logger.info("=" * 50)
-        logger.info("")
-        logger.info("基本用法:")
-        logger.info("  har2pytest <command> [arguments]")
-        logger.info("")
-        logger.info("支持的命令:")
-        logger.info("  generate [har_file] [output_dir] [--overwrite]      从HAR文件生成API接口")
-        logger.info("  testcase [har_file] [output_dir]                  从HAR文件生成步骤化pytest用例")
-        logger.info("  testcase list_query [task_id] [har_file]           生成查询类参数化测试用例")
-        logger.info("  testcase complex_scenario [task_id] [url] [har]  生成复杂场景流程测试用例")
-        logger.info("  update [api_dir]                                  更新API文档信息")
-        logger.info("  swagger <swagger_url> [output_dir] [--overwrite]  从Swagger文档生成API接口")
-        logger.info("  summary [har_file]                                显示HAR文件摘要")
-        logger.info("  help                                             显示此帮助信息")
-        logger.info("  --help                                          显示此帮助信息")
-        logger.info("")
-        logger.info("参数说明:")
-        logger.info("  --overwrite, -f                                 强制覆盖已存在的API文件")
-        logger.info("")
-        logger.info("示例:")
-        logger.info("  har2pytest generate api_request.har api")
-        logger.info("  har2pytest generate api_request.har api --overwrite  # 强制覆盖")
-        logger.info("  har2pytest testcase api_request.har testcases")
-        logger.info("  har2pytest update api")
-        logger.info("  har2pytest swagger https://petstore.swagger.io/v2/api-docs api")
-        logger.info("  har2pytest swagger https://petstore.swagger.io/v2/api-docs api --overwrite  # 强制覆盖")
-        logger.info("  har2pytest summary api_request.har")
-        logger.info("")
-        logger.info("默认值:")
-        logger.info("  HAR文件: api_request.har")
-        logger.info("  输出目录: api")
-
-    else:
-        logger.info(f"未知命令: {command}")
-        logger.info("使用 'har2pytest help' 查看帮助信息")
+        if test_file:
+            logger.info(f"成功生成测试用例文件: {test_file.replace('\\', '/')}")
+        else:
+            logger.info("生成测试用例文件失败")
 
 
 if __name__ == "__main__":

@@ -31,6 +31,19 @@ class TestCaseGenerator:
         self.filter_duplicate_url = filter_duplicate_url
         self.har_parser = HARParser(base_urls=base_urls, kill_urls=kill_urls)
 
+    def _get_output_dir(self, task_id: str = None) -> str:
+        """
+        获取输出目录路径
+        :param task_id: 任务ID，如果提供则创建子目录 {output_dir}/{task_id}
+        :return: 输出目录路径
+        """
+        if task_id:
+            output_dir = os.path.join(self.output_dir, task_id)
+        else:
+            output_dir = self.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        return output_dir
+
     def match_api_files_for_har(self, har_file_path: str) -> list[str]:
         """
         根据HAR文件查找对应的API文件
@@ -277,15 +290,16 @@ class TestCaseGenerator:
             content.append("")
 
         # 提取接口信息
-        feature_name = "请填写被测试接口所属的微服务名称，如 mall_store_application"
-        story_name = "请填写被测试接口，如 /appStore/order/orderSign/signCommit"
-        title_name = "请填写测试用例名称，如 提交订单"
+        epic_name = "建议输入被测接口所属的微服务，如 mall_store_application"
+        feature_name = "建议输入被测业务功能模块，如 订单管理"
+        story_name = "建议输入被测接口，如 /appStore/order/orderSign/signCommit"
+        title_name = "建议输入测试用例名称，如 提交订单"
 
         if target_api_file:
             # 提取服务名称
             module_path = target_api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
             if len(module_path.split(".")) > 1:
-                feature_name = module_path.split(".")[1]
+                epic_name = module_path.split(".")[1]
 
             # 提取接口描述和URL
             api_description, api_url = extract_url_from_file(target_api_file)
@@ -301,6 +315,7 @@ class TestCaseGenerator:
         content.extend(
             [
                 "@allure.severity(Severity.CRITICAL)",
+                f"@allure.epic('{epic_name}')",
                 f"@allure.feature('{feature_name}')",
                 f"@allure.story('{story_name}')",
                 f"@allure.title('{title_name}')",
@@ -511,9 +526,8 @@ class TestCaseGenerator:
         if task_id and task_id.startswith("test_"):
             task_id = task_id[5:]
 
-        # 创建输出目录
-        output_dir = os.path.join(self.output_dir, "版本接口测试", task_id)
-        os.makedirs(output_dir, exist_ok=True)
+        # 获取输出目录
+        output_dir = self._get_output_dir(task_id)
 
         generated_files = []
 
@@ -685,13 +699,20 @@ class TestCaseGenerator:
             "",
             f"from apis.{service_package} import {function_name}",
             "",
-            f"@allure.feature('{service_package}')",
-            f"@allure.story('{api_url}')",
-            f'@allure.description("""接口说明：\n- 接口名称：{api_description}',
-            f"- 接口地址：{api_url}",
-            "",
-            "主要参数说明：",
         ]
+        if task_id:
+            content.append(f"@pytest.mark.test_{task_id}")
+        content.extend(
+            [
+                f"@allure.epic('{service_package}')",
+                "@allure.feature('建议输入被测业务功能模块，如订单管理')",
+                f"@allure.story('{api_url}')",
+                f'@allure.description("""接口说明：\n- 接口名称：{api_description}',
+                f"- 接口地址：{api_url}",
+                "",
+                "主要参数说明：",
+            ]
+        )
 
         # 添加参数说明
         logger.debug(f"参数备注: {param_remarks}")
@@ -703,18 +724,22 @@ class TestCaseGenerator:
                 remark = "# TODO 请填写参数备注"
             content.append(f"- {param_name}：{remark}")
 
-        content.append('""")')
-        content.append("class TestClass:")
-        content.append("")
-        content.append("    # 初始化测试数据字典，用于在步骤间传递数据")
-        content.append("    def setup_class(self):")
-        content.append("        self.headers = {")
-        content.append('            "channel": "pc",')
-        content.append('            "client": "op",')
-        content.append('            "content-type": "application/json;charset=UTF-8",')
-        content.append('            "authorization": f"bearer {os.environ[\'access_token\']}",')
-        content.append("        }")
-        content.append("")
+        content.extend(
+            [
+                '""")',
+                "class TestClass:",
+                "",
+                "    # 初始化测试数据字典，用于在步骤间传递数据",
+                "    def setup_class(self):",
+                "        self.headers = {",
+                '            "channel": "pc",',
+                '            "client": "op",',
+                '            "content-type": "application/json;charset=UTF-8",',
+                '            "authorization": f"bearer {os.environ[\'access_token\']}",',
+                "        }",
+                "",
+            ]
+        )
 
         # 生成参数化测试方法
         param_count = 0
@@ -741,19 +766,9 @@ class TestCaseGenerator:
             # 生成参数化装饰器
             if is_combination:
                 param_names = param_name.split(",")
-                content.extend(
-                    [
-                        f"    @pytest.mark.test_{task_id}",
-                        f'    @pytest.mark.parametrize("{", ".join(param_names)}, p", [',
-                    ]
-                )
+                content.append(f'    @pytest.mark.parametrize("{", ".join(param_names)}, p", [')
             else:
-                content.extend(
-                    [
-                        f"    @pytest.mark.test_{task_id}",
-                        f'    @pytest.mark.parametrize("{param_name}, p", [',
-                    ]
-                )
+                content.append(f'    @pytest.mark.parametrize("{param_name}, p", [')
 
             for i, value in enumerate(parametrize_values):
                 if i == len(parametrize_values) - 1:
@@ -835,6 +850,9 @@ class TestCaseGenerator:
         if task_id and task_id.startswith("test_"):
             task_id = task_id[5:]
 
+        # 获取输出目录
+        output_dir = self._get_output_dir(task_id)
+
         # 查找目标接口文件，用于生成文件名
         target_api_file = None
         if target_url:
@@ -850,10 +868,6 @@ class TestCaseGenerator:
         else:
             # 没有指定目标接口，退出
             return None
-
-        # 创建输出目录
-        output_dir = os.path.join(self.output_dir, "版本接口测试", task_id)
-        os.makedirs(output_dir, exist_ok=True)
 
         # 生成测试用例文件
         function_name = self.get_function_name_from_api_file(target_api_file)
