@@ -24,9 +24,7 @@ class APIConfig:
         # 无效参数集合，这些参数将在生成测试用例时被过滤掉
         "INVALID_PARAMS": set(),
         # 需要收录的headers参数及其默认值，用于生成测试用例时的headers
-        "HEADERS_TO_INCLUDE": {
-            "authorization": "bearer {os.environ['access_token']}",
-        },
+        "HEADERS_TO_INCLUDE": {},
         # 必须包含的headers字段及其默认值
         "REQUIRED_HEADERS": {},
         # 列表查询用例，这些参数不进行参数化处理

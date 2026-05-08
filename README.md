@@ -106,14 +106,20 @@ har2pytest api api_request.har --output apis --overwrite
 #### 2. 从Swagger文档生成API文件
 
 ```bash
-# 从Swagger文档生成API文件
-har2pytest swagger https://petstore.swagger.io/v2/api-docs api
+# 从Swagger文档生成API文件（默认输出到apis目录）
+har2pytest swagger https://petstore.swagger.io/v2/api-docs
+
+# 指定输出目录
+har2pytest swagger https://petstore.swagger.io/v2/api-docs --output apis
 
 # 强制覆盖已存在的文件
-har2pytest swagger https://petstore.swagger.io/v2/api-docs api --overwrite
+har2pytest swagger https://petstore.swagger.io/v2/api-docs --overwrite
 
 # 只生成指定路径的API文件
-har2pytest swagger https://petstore.swagger.io/v2/api-docs api --path /pet/{petId}
+har2pytest swagger https://petstore.swagger.io/v2/api-docs --path /pet/{petId}
+
+# 组合使用
+har2pytest swagger https://petstore.swagger.io/v2/api-docs --output apis --overwrite --path /pet/{petId}
 ```
 
 #### 3. 生成测试用例
@@ -306,7 +312,7 @@ class TestCaseGenerator:
     def extract_function_name_from_file(self, filepath: str) -> Optional[str]:
         # 从API文件中提取函数名
 
-    def extract_url_from_file(self, filepath: str) -> Optional[str]:
+    def get_url_from_api_file(self, filepath: str) -> Optional[str]:
         # 从API文件中提取URL路径，支持{params['cardNo']}替换
 
     def format_test_case_params(self, params_dict: Dict[str, Any]) -> str:
@@ -334,7 +340,7 @@ class SwaggerHandler:
     def set_api_generator(self, api_generator):
         # 设置API生成器实例
 
-    def extract_url_from_file(self, filepath: str) -> Optional[str]:
+    def get_url_from_api_file(self, filepath: str) -> Optional[str]:
         # 从API文件中提取URL，支持{params['cardNo']}替换
 
     def get_swagger_doc(self, service_base_url: str) -> Optional[Dict[str, Any]]:

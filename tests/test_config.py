@@ -14,24 +14,41 @@ from har2pytest.config import APIConfig
 @allure.story("默认配置")
 def test_default_config():
     """测试默认配置"""
-    # 测试默认配置值
-    assert APIConfig.BASE_URLS() == ["https://uc-test.perfect99.com/api", "https://uc-uat.perfect99.com/api"]
-    assert APIConfig.KILL_URLS() == ["aliyuncs.com"]
-    assert APIConfig.DEFAULT_SERVICE_PACKAGE() == "apis"
-    assert APIConfig.DEFAULT_TESTCASE_DIR() == "testcases"
-    assert APIConfig.INVALID_PARAMS() == {"partnerKey", "sign", "timestamp", "nonce", "rnd"}
-    assert APIConfig.HEADERS_TO_INCLUDE() == {
-        "authorization": "bearer {os.environ['access_token']}",
-        "channel": "pc",
-        "content-type": "application/json;charset=UTF-8",
-        "client": "op",
-    }
-    assert APIConfig.REQUIRED_HEADERS() == {"authorization": "请输入认证令牌"}
-    assert APIConfig.SWAGGER_FILE() == "swagger.json"
-    assert APIConfig.SWAGGER_HOST() == "https://api.example.com"
-    assert APIConfig.SWAGGER_BASE_PATH() == "/api"
-    assert APIConfig.SWAGGER_TITLE() == "API Documentation"
-    assert APIConfig.SWAGGER_VERSION() == "1.0.0"
+    # 使用测试专用的配置文件，避免受主配置文件修改影响
+    test_config_path = os.path.join(os.path.dirname(__file__), "har2pytest_config_test.json")
+    original_config = os.environ.get("HAR2PYTEST_CONFIG")
+
+    try:
+        os.environ["HAR2PYTEST_CONFIG"] = test_config_path
+        APIConfig._config = None
+        APIConfig._load_config()
+
+        # 测试默认配置值
+        assert APIConfig.BASE_URLS() == ["https://uc-test.perfect99.com/api", "https://uc-uat.perfect99.com/api"]
+        assert APIConfig.KILL_URLS() == ["aliyuncs.com"]
+        assert APIConfig.DEFAULT_SERVICE_PACKAGE() == "apis"
+        assert APIConfig.DEFAULT_TESTCASE_DIR() == "testcases"
+        assert APIConfig.INVALID_PARAMS() == {"partnerKey", "sign", "timestamp", "nonce", "rnd"}
+        assert APIConfig.HEADERS_TO_INCLUDE() == {
+            "authorization": "bearer {os.environ['access_token']}",
+            "channel": "pc",
+            "content-type": "application/json;charset=UTF-8",
+            "client": "op",
+        }
+        assert APIConfig.REQUIRED_HEADERS() == {"authorization": "f\"bearer {os.environ['access_token']}\""}
+        assert APIConfig.SWAGGER_FILE() == "swagger.json"
+        assert APIConfig.SWAGGER_HOST() == "https://api.example.com"
+        assert APIConfig.SWAGGER_BASE_PATH() == "/api"
+        assert APIConfig.SWAGGER_TITLE() == "API Documentation"
+        assert APIConfig.SWAGGER_VERSION() == "1.0.0"
+    finally:
+        # 恢复原始配置
+        if original_config:
+            os.environ["HAR2PYTEST_CONFIG"] = original_config
+        else:
+            if "HAR2PYTEST_CONFIG" in os.environ:
+                del os.environ["HAR2PYTEST_CONFIG"]
+        APIConfig._config = None
 
 
 @allure.feature("配置管理")

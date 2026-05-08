@@ -16,8 +16,13 @@ from .swagger_handler import SwaggerHandler
 from .testcase_generator import TestCaseGenerator
 from .utils import (
     escape_string_for_python,
-    extract_url_from_file,
+    format_dict_for_python,
+    format_headers_for_python,
     format_parameter_value,
+    get_function_name_from_api_file,
+    get_headers_from_api_file,
+    get_param_remarks_from_api_file,
+    get_url_from_api_file,
 )
 
 __all__ = [
@@ -28,7 +33,12 @@ __all__ = [
     "SwaggerHandler",
     "get_logger",
     "logger",
-    "extract_url_from_file",
+    "get_url_from_api_file",
     "format_parameter_value",
     "escape_string_for_python",
+    "get_function_name_from_api_file",
+    "get_param_remarks_from_api_file",
+    "get_headers_from_api_file",
+    "format_headers_for_python",
+    "format_dict_for_python",
 ]

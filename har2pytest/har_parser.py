@@ -1,5 +1,6 @@
 import json
 from typing import Any
+from urllib.parse import unquote
 
 from .config import APIConfig
 from .logger import logger
@@ -69,7 +70,7 @@ class HARParser:
 
             query_params = {}
             for param in request.get("queryString", []):
-                query_params[param["name"]] = param["value"]
+                query_params[param["name"]] = unquote(param["value"]) if isinstance(param["value"], str) else param["value"]
 
             # 过滤 query参数
             query_params = self._filter_invalid_params(query_params)
@@ -85,7 +86,7 @@ class HARParser:
                     params = request["postData"].get("params", [])
                     post_data = {}
                     for param in params:
-                        post_data[param["name"]] = param.get("value", "")
+                        post_data[param["name"]] = unquote(param.get("value", "")) if isinstance(param.get("value"), str) else param.get("value", "")
                     post_data = self._filter_invalid_params(post_data)
                 elif content_type.startswith("application/json"):
                     try:
@@ -188,9 +189,16 @@ class HARParser:
         if isinstance(headers_to_include, dict):
             headers_to_include = set(headers_to_include.keys())
 
-        # 需要保留的关键 headers，用于后续处理
-        required_headers = {"content-type", "content-length", "authorization", "origin"}
-        # 合并需要保留的 headers
+        # 基础关键 headers，用于后续处理
+        base_required_headers = {"content-type", "content-length", "origin"}
+        # 从配置中获取 REQUIRED_HEADERS
+        config_required_headers = APIConfig.REQUIRED_HEADERS()
+        if isinstance(config_required_headers, dict):
+            config_required_headers = set(config_required_headers.keys())
+        else:
+            config_required_headers = set()
+        # 合并所有需要保留的 headers
+        required_headers = base_required_headers | config_required_headers
         headers_to_keep = set([h.lower() for h in headers_to_include] + list(required_headers))
 
         filtered_headers = {}

@@ -284,7 +284,7 @@ class TestCaseGenerator:
     def extract_function_name_from_file(self, filepath: str) -> Optional[str]:
         # 从API文件中提取函数名
 
-    def extract_url_from_file(self, filepath: str) -> Optional[str]:
+    def get_url_from_api_file(self, filepath: str) -> Optional[str]:
         # 从API文件中提取URL路径，支持{params['cardNo']}替换
 
     def format_params_for_test_case(self, params_dict: Dict[str, Any]) -> str:
@@ -312,7 +312,7 @@ class SwaggerDocUpdater:
     def set_api_generator(self, api_generator):
         # 设置API生成器实例
 
-    def extract_url_from_file(self, filepath: str) -> Optional[str]:
+    def get_url_from_api_file(self, filepath: str) -> Optional[str]:
         # 从API文件中提取URL，支持{params['cardNo']}替换
 
     def get_swagger_doc(self, service_base_url: str) -> Optional[Dict[str, Any]]:

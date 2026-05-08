@@ -66,6 +66,19 @@ def match_path_template(url: str, swagger_data: dict[str, Any] = None) -> tuple:
     clean_url = url.lstrip("/")
     url_parts = clean_url.split("/")
 
+    # 如果URL已经是模板格式（包含 {param}），直接提取路径参数
+    if "{" in url and "}" in url:
+        path_params = {}
+        result_parts = []
+        for part in url_parts:
+            if part.startswith("{") and part.endswith("}"):
+                param_name = part[1:-1]
+                result_parts.append(param_name)
+                path_params[param_name] = ""  # 模板格式，参数值为空
+            else:
+                result_parts.append(part)
+        return url, path_params, result_parts
+
     # 先尝试从配置的PATH_URLS中匹配
     for path_pattern in APIConfig.PATH_URLS():
         pattern_parts = path_pattern.lstrip("/").split("/")
@@ -143,7 +156,11 @@ def match_path_template(url: str, swagger_data: dict[str, Any] = None) -> tuple:
 
             if matched:
                 logger.info(f"从Swagger文档中匹配到路径模板: {swagger_path}")
-                return swagger_path, path_params, result_parts
+                # 将basePath加回到返回的URL中，确保完整路径
+                full_path = swagger_path
+                if base_path and base_path != "/":
+                    full_path = base_path.rstrip("/") + "/" + swagger_path.lstrip("/")
+                return full_path, path_params, result_parts
         logger.info("未能从Swagger文档中匹配到路径模板")
 
     # 如果没有匹配到模板，直接返回原始URL
@@ -154,7 +171,7 @@ def extract_function_name(url: str) -> str:
     """
     从URL中提取测试方法函数名
     优先匹配 APIConfig.PATH_URLS 中的路径模板，处理路径参数 {xxx}
-    无匹配时，直接将URL路径用下划线连接并清理非法字符
+    无匹配时，直接将URL路径用下划线连接并清理非法字符（将-替换为_）
 
     Args:
         url: 原始接口URL，如 /mobile/trade/orderCommit
@@ -165,6 +182,7 @@ def extract_function_name(url: str) -> str:
     Example:
         URL: /mobile/trade/orderCommit → 返回 _mobile_trade_orderCommit
         URL: /user/{userId}/info → 返回 _user_userId_info
+        URL: /appStore/dis-inventory/settled-scope → 返回 _appStore_dis_inventory_settled_scope
     """
     # 先处理URL中的花括号参数，将 {param} 转换为 param
     processed_url = url
@@ -192,19 +210,24 @@ def extract_function_name(url: str) -> str:
             if pattern_part.startswith("{") and pattern_part.endswith("}"):
                 # 如果pattern_part是参数（带{}），使用参数名
                 param_name = pattern_part[1:-1]
+                # 将参数名中的非法字符替换为下划线
+                param_name = re.sub(r"[^a-zA-Z0-9_]", "_", param_name)
                 result_parts.append(param_name)
             else:
                 # 非参数部分必须完全匹配
                 if url_part != pattern_part:
                     matched = False
                     break
-                result_parts.append(url_part)
+                # 将路径部分中的非法字符替换为下划线
+                url_part_clean = re.sub(r"[^a-zA-Z0-9_]", "_", url_part)
+                result_parts.append(url_part_clean)
 
         if matched:
             return f"_{'_'.join(result_parts)}"
 
-    # 如果没有匹配到PATH_URLS，直接使用URL路径部分
-    return f"_{'_'.join(url_parts)}"
+    # 如果没有匹配到PATH_URLS，直接使用URL路径部分，清理非法字符
+    cleaned_parts = [re.sub(r"[^a-zA-Z0-9_]", "_", part) for part in url_parts]
+    return f"_{'_'.join(cleaned_parts)}"
 
 
 def determine_service_package(url: str) -> str:
@@ -222,54 +245,6 @@ def determine_service_package(url: str) -> str:
         URL: /member/info → 返回 mall_center_member
     """
     return APIConfig.determine_service_package(url)
-
-
-def extract_url_from_file(filepath: str) -> tuple | None:
-    """
-    从API文件中提取URL路径
-
-    从API文件的函数描述中提取接口名称和URL路径，优先从函数描述的最后一行获取URL
-
-    Args:
-        filepath: API文件路径，如 "api/mall_mobile_application/_mobile_trade_orderCommit.py"
-
-    Returns:
-        Optional[tuple]: 如果成功提取返回(api_name, url)元组，否则返回None
-            - api_name: 接口名称，如 "提交订单"
-            - url: URL路径，如 "/mobile/trade/orderCommit"
-
-    Example:
-        result = extract_url_from_file("api/mall_mobile_application/_mobile_trade_orderCommit.py")
-        # 返回 ("提交订单", "/mobile/trade/orderCommit")
-    """
-    try:
-        with open(filepath, encoding="utf-8") as f:
-            content = f.read()
-
-        # 先尝试从函数文档字符串中提取
-        pattern = r'def\s+\w+\s*\([^)]*\):\s*"""\s*(.*?)\s*"""'
-        matches = re.findall(pattern, content, re.DOTALL)
-
-        if matches:
-            doc_content = matches[0]
-            lines = [line.strip() for line in doc_content.split("\n") if line.strip()]
-            if len(lines) >= 2:
-                api_name = lines[0]
-                # 从第二行开始查找第一个以 / 开头的行作为 URL
-                for line in lines[1:]:
-                    if line.startswith("/"):
-                        return api_name, line
-
-        # 如果从文档字符串中提取失败，尝试从整个文件内容中提取URL
-        url_pattern = r"https?://[^\s]+"
-        url_matches = re.findall(url_pattern, content)
-        if url_matches:
-            return "", url_matches[0]
-
-    except Exception as e:
-        logger.error(f"读取文件 {filepath} 失败: {str(e)}")
-
-    return None
 
 
 def format_parameter_value(value: Any) -> str:
@@ -404,7 +379,9 @@ def get_output_dir(base_output_dir: str, task_id: str = None) -> str:
 
 def write_test_file(filepath: str, content: str):
     """
-    写入测试API/用例文件并格式化
+    写入Python文件并格式化
+
+    用于生成API文件和测试用例文件
 
     :param filepath: 文件路径
     :param content: 文件内容
@@ -412,3 +389,206 @@ def write_test_file(filepath: str, content: str):
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(content)
     format_python_file(filepath)
+
+
+def get_function_name_from_api_file(filepath: str) -> str | None:
+    """
+    从API文件路径中提取函数名
+
+    由于API文件名就是函数名（如 _user_mgmt_order_page.py），
+    直接从文件名提取，无需读取文件内容
+
+    Args:
+        filepath: API文件路径
+
+    Returns:
+        Optional[str]: 函数名，如果提取失败返回None
+
+    Example:
+        result = get_function_name_from_api_file("apis/_user_login.py")
+        # 返回 "_user_login"
+    """
+    try:
+        basename = os.path.basename(filepath)
+        function_name = os.path.splitext(basename)[0]
+        return function_name
+    except Exception as e:
+        logger.error(f"从文件路径提取函数名失败 {filepath}: {str(e)}")
+        return None
+
+
+def get_url_from_api_file(filepath: str) -> tuple | None:
+    """
+    从API文件中提取URL路径
+
+    从API文件的函数描述中提取接口名称和URL路径，优先从函数描述的最后一行获取URL
+
+    Args:
+        filepath: API文件路径，如 "api/mall_mobile_application/_mobile_trade_orderCommit.py"
+
+    Returns:
+        Optional[tuple]: 如果成功提取返回(api_name, url)元组，否则返回None
+            - api_name: 接口名称，如 "提交订单"
+            - url: URL路径，如 "/mobile/trade/orderCommit"
+
+    Example:
+        result = get_url_from_api_file("api/mall_mobile_application/_mobile_trade_orderCommit.py")
+        # 返回 ("提交订单", "/mobile/trade/orderCommit")
+    """
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            content = f.read()
+
+        # 先尝试从函数文档字符串中提取
+        pattern = r'def\s+\w+\s*\([^)]*\):\s*"""\s*(.*?)\s*"""'
+        matches = re.findall(pattern, content, re.DOTALL)
+
+        if matches:
+            doc_content = matches[0]
+            lines = [line.strip() for line in doc_content.split("\n") if line.strip()]
+            if len(lines) >= 2:
+                api_name = lines[0]
+                # 从第二行开始查找第一个以 / 开头的行作为 URL
+                for line in lines[1:]:
+                    if line.startswith("/"):
+                        return api_name, line
+
+        # 如果从文档字符串中提取失败，尝试从整个文件内容中提取URL
+        url_pattern = r"https?://[^\s]+"
+        url_matches = re.findall(url_pattern, content)
+        if url_matches:
+            return "", url_matches[0]
+
+    except Exception as e:
+        logger.error(f"读取文件 {filepath} 失败: {str(e)}")
+
+    return None
+
+
+def get_param_remarks_from_api_file(api_file: str) -> dict[str, str]:
+    """
+    从API文件中提取参数备注
+
+    Args:
+        api_file: API文件路径
+
+    Returns:
+        dict[str, str]: 参数名到备注的映射字典
+
+    Example:
+        result = get_param_remarks_from_api_file("apis/_user_login.py")
+        # 返回 {"username": "用户名", "password": "密码"}
+    """
+    param_remarks = {}
+    try:
+        with open(api_file, encoding="utf-8") as f:
+            content = f.read()
+
+        # 查找data字典定义
+        data_match = re.search(r"data\s*=\s*\{[^}]*\}", content, re.DOTALL)
+        if data_match:
+            data_block = data_match.group(0)
+            # 提取每个参数和备注
+            param_matches = re.findall(r'"(\w+)"\s*:\s*([^#]+)\s*#\s*(.+?)\n', data_block)
+            for param_name, _, remark in param_matches:
+                # 提取备注中的参数名称
+                # 例如："兑换流水号" 或 "顾客手机号"
+                param_remarks[param_name] = remark.strip()
+    except Exception as e:
+        logger.error(f"读取API文件 {api_file} 失败: {str(e)}")
+
+    return param_remarks
+
+
+def get_headers_from_api_file(api_file: str) -> dict[str, str]:
+    """
+    从API文件中提取headers配置
+
+    Args:
+        api_file: API文件路径
+
+    Returns:
+        dict[str, str]: headers配置字典
+
+    Example:
+        result = get_headers_from_api_file("apis/_user_login.py")
+        # 返回 {"channel": "pc", "content-type": "application/json"}
+    """
+    headers = {}
+    try:
+        with open(api_file, encoding="utf-8") as f:
+            content = f.read()
+
+        # 查找headers字典定义
+        headers_match = re.search(r'headers\s*=\s*\{[^}]*\}', content, re.DOTALL)
+        if headers_match:
+            headers_block = headers_match.group(0)
+            # 提取每个header键值对
+            header_matches = re.findall(r'"(\w+[-]?\w+)"\s*:\s*("[^"]*"|f"[^"]*")', headers_block)
+            for key, value in header_matches:
+                headers[key] = value.strip()
+    except Exception as e:
+        logger.error(f"读取API文件 {api_file} 失败: {str(e)}")
+
+    return headers
+
+
+def format_dict_for_python(
+    data: dict,
+    value_formatter: callable = None,
+    comments: dict = None
+) -> str:
+    """
+    通用的字典格式化函数，将字典转换为Python代码字符串
+
+    Args:
+        data: 要格式化的字典
+        value_formatter: 值格式化函数，接受值返回格式化后的字符串
+        comments: 注释字典，key为字典key，value为注释内容
+
+    Returns:
+        格式化后的Python字典字符串
+    """
+    if not data:
+        return "{}"
+    
+    if value_formatter is None:
+        def value_formatter(v):
+            return repr(v)
+    
+    if comments is None:
+        comments = {}
+    
+    items = []
+    for key, value in data.items():
+        formatted_value = value_formatter(value)
+        comment = comments.get(key, "")
+        if comment:
+            items.append(f'"{key}": {formatted_value},  # {comment}')
+        else:
+            items.append(f'"{key}": {formatted_value},')
+    
+    return "{\n" + "\n".join(items) + "\n}"
+
+
+def format_headers_for_python(headers: dict[str, str]) -> str:
+    """
+    格式化headers字典为Python代码字符串
+
+    处理f-string格式的值，确保生成正确的Python代码。
+    生成单行格式，由ruff等格式化工具处理最终格式。
+
+    Args:
+        headers: headers字典
+
+    Returns:
+        格式化后的headers字符串
+    """
+    def header_value_formatter(value):
+        # 值已经是带引号的字符串（包括 f-string）
+        if isinstance(value, str) and value.startswith(('"', 'f"')):
+            return value
+        # 添加引号
+        return f'"{value}"'
+    
+    return format_dict_for_python(headers, header_value_formatter)

@@ -6,14 +6,15 @@ import allure
 
 from har2pytest.utils import (
     escape_string_for_python,
-    extract_url_from_file,
     format_parameter_value,
+    get_headers_from_api_file,
+    get_url_from_api_file,
 )
 
 
 @allure.feature("工具函数")
 @allure.story("URL提取")
-def test_extract_url_from_file():
+def test_get_url_from_api_file():
     """测试从文件中提取URL"""
     # 测试从文件中提取URL
     test_content = "some content https://example.com/api/test some more content"
@@ -21,7 +22,7 @@ def test_extract_url_from_file():
         f.write(test_content)
 
     try:
-        result = extract_url_from_file("test_url.txt")
+        result = get_url_from_api_file("test_url.txt")
         assert result is not None
         assert result[1] == "https://example.com/api/test"
     finally:
@@ -55,7 +56,7 @@ def _user_order_getStoreAgentOrderList(data=data, headers=headers):
         f.write(test_content)
 
     try:
-        result = extract_url_from_file("test_api.py")
+        result = get_url_from_api_file("test_api.py")
         assert result is not None
         assert result[0] == "PC店铺查询兑换订单列表"
         assert result[1] == "/user/order/getStoreAgentOrderList"
@@ -107,3 +108,43 @@ def test_escape_string_for_python():
 
     # 测试包含制表符的字符串
     assert escape_string_for_python("test\ttab") == "test\\ttab"
+
+
+@allure.feature("工具函数")
+@allure.story("Headers提取")
+def test_get_headers_from_api_file():
+    """测试从API文件中提取headers配置"""
+    # 测试真实的API文件格式
+    test_content = '''from util.client import client
+
+headers = {
+    "channel": "pc",
+    "client": "op",
+    "content-type": "application/json;charset=UTF-8",
+    "authorization": f"bearer {os.environ['access_token']}",
+}
+
+def _user_login(data=data, headers=headers):
+    """
+    用户登录
+    /user/login
+    """
+
+    url = "/user/login"
+'''
+
+    with open("test_api_headers.py", "w", encoding="utf-8") as f:
+        f.write(test_content)
+
+    try:
+        result = get_headers_from_api_file("test_api_headers.py")
+        assert result is not None
+        assert "channel" in result
+        assert result["channel"] == '"pc"'
+        assert "content-type" in result
+        assert result["content-type"] == '"application/json;charset=UTF-8"'
+    finally:
+        import os
+
+        if os.path.exists("test_api_headers.py"):
+            os.remove("test_api_headers.py")

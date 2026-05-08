@@ -9,6 +9,7 @@ from .config import APIConfig
 from .har_generator import HARGenerator
 from .har_parser import HARParser
 from .logger import logger
+from .swagger_handler import SwaggerHandler
 from .testcase_generator import TestCaseGenerator
 
 
@@ -16,8 +17,8 @@ def main():
     """
     主函数 - 支持多种命令行操作模式
     """
-    # 初始化配置
-    APIConfig._load_config()
+    # 初始化配置（通过 get_config 触发，会自动缓存）
+    APIConfig.get_config("BASE_URLS")
 
     # 创建主解析器
     parser = argparse.ArgumentParser(
@@ -96,6 +97,31 @@ def main():
     tc_parser.add_argument("--output", "-o", default="testcases", help="输出目录")
     tc_parser.add_argument("--api-dir", default="apis", help="API文件目录")
 
+    # swagger 子命令
+    swagger_parser = subparsers.add_parser(
+        "swagger",
+        help="从Swagger文档生成API接口文件",
+        description="从Swagger文档生成API接口文件",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""示例用法:
+  # 从Swagger文档生成所有API文件
+  har2pytest swagger https://petstore.swagger.io/v2/api-docs
+
+  # 从Swagger文档生成API文件，指定输出目录
+  har2pytest swagger https://petstore.swagger.io/v2/api-docs --output apis
+
+  # 从Swagger文档生成API文件，强制覆盖
+  har2pytest swagger https://petstore.swagger.io/v2/api-docs --overwrite
+
+  # 从Swagger文档生成指定路径的API文件
+  har2pytest swagger https://petstore.swagger.io/v2/api-docs --path /pet/{petId}
+""",
+    )
+    swagger_parser.add_argument("swagger_url", help="Swagger文档URL")
+    swagger_parser.add_argument("--output", "-o", default=APIConfig.DEFAULT_SERVICE_PACKAGE(), help="输出目录")
+    swagger_parser.add_argument("--overwrite", "-f", action="store_true", help="强制覆盖现有文件")
+    swagger_parser.add_argument("--path", "-p", help="只生成指定的API路径（如 /pet/{petId}）")
+
     # 解析参数
     args = parser.parse_args()
 
@@ -115,6 +141,8 @@ def main():
         handle_update(args)
     elif args.command == "testcase":
         handle_testcase(args)
+    elif args.command == "swagger":
+        handle_swagger(args)
     elif args.command == "help":
         parser.print_help()
     else:
@@ -164,6 +192,31 @@ def handle_update(args):
 
     logger.info("-" * 50)
     logger.info(f"共更新 {updated_count} 个API文件")
+
+
+def handle_swagger(args):
+    """处理 swagger 命令"""
+    swagger_url = args.swagger_url
+    output_dir = args.output
+    force_overwrite = args.overwrite
+    specific_path = args.path
+
+    logger.info(f"从Swagger文档生成API接口文件: {swagger_url}")
+    logger.info(f"输出目录: {output_dir}")
+    logger.info(f"强制覆盖: {force_overwrite}")
+    if specific_path:
+        logger.info(f"只生成指定路径: {specific_path}")
+    logger.info("-" * 50)
+
+    api_generator = APIGenerator(output_dir)
+    swagger_handler = SwaggerHandler(api_generator=api_generator)
+    generated_files = swagger_handler.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)
+
+    logger.info("-" * 50)
+    logger.info(f"共生成 {len(generated_files)} 个API接口文件")
+
+    if generated_files:
+        api_generator.generate_index_file(generated_files)
 
 
 def handle_testcase(args):

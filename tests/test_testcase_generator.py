@@ -7,6 +7,7 @@ import os
 import allure
 
 from har2pytest.testcase_generator import TestCaseGenerator
+from har2pytest.utils import get_function_name_from_api_file, get_param_remarks_from_api_file
 
 
 @allure.feature("测试用例生成器")
@@ -33,8 +34,7 @@ def _user_login(data=data, access_token=access_token):
         f.write(test_content)
 
     try:
-        generator = TestCaseGenerator()
-        function_name = generator.get_function_name_from_api_file("_user_login.py")
+        function_name = get_function_name_from_api_file("_user_login.py")
         assert function_name == "_user_login"
     finally:
         if os.path.exists("_user_login.py"):
@@ -248,8 +248,7 @@ def _user_login(data=data, access_token=access_token):
         f.write(test_content)
 
     try:
-        generator = TestCaseGenerator()
-        remarks = generator.get_param_remarks_from_api_file("test_api.py")
+        remarks = get_param_remarks_from_api_file("test_api.py")
         assert remarks.get("username") == "用户名"
         assert remarks.get("password") == "密码"
     finally:
@@ -625,8 +624,7 @@ def _user_login(data=data, access_token=access_token):
 @allure.story("提取参数备注-文件不存在")
 def test_get_param_remarks_from_api_file_not_found():
     """测试从不存在的API文件提取参数备注"""
-    generator = TestCaseGenerator()
-    remarks = generator.get_param_remarks_from_api_file("nonexistent.py")
+    remarks = get_param_remarks_from_api_file("nonexistent.py")
     assert remarks == {}
 
 
@@ -644,8 +642,7 @@ def test_func():
         f.write(test_content)
 
     try:
-        generator = TestCaseGenerator()
-        remarks = generator.get_param_remarks_from_api_file("invalid_api.py")
+        remarks = get_param_remarks_from_api_file("invalid_api.py")
         assert remarks == {}
     finally:
         if os.path.exists("invalid_api.py"):

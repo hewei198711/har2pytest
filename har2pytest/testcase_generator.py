@@ -1,5 +1,4 @@
 import os
-import re
 from typing import Any
 
 from .config import APIConfig
@@ -7,9 +6,13 @@ from .har_parser import HARParser
 from .logger import logger
 from .utils import (
     deduplicate_values,
-    extract_url_from_file,
+    format_headers_for_python,
     format_parameter_value,
+    get_function_name_from_api_file,
+    get_headers_from_api_file,
     get_output_dir,
+    get_param_remarks_from_api_file,
+    get_url_from_api_file,
     write_test_file,
 )
 
@@ -41,31 +44,32 @@ class TestCaseGenerator:
         """
         获取清理后的函数名
         """
-        function_name = self.get_function_name_from_api_file(filepath)
+        function_name = get_function_name_from_api_file(filepath)
         if function_name:
             return function_name.lstrip("_").strip()
         return os.path.splitext(os.path.basename(filepath))[0].lstrip("_").strip()
 
-    def _get_headers_str(self) -> str:
+    def _get_headers_str(self, api_file: str = None) -> str:
         """
-        从配置文件中获取需要包含的 headers，生成测试用例中的 headers 字符串
-        使用 HEADERS_TO_INCLUDE 配置中的 header 及其默认值
+        从API文件或配置文件中获取需要包含的 headers，生成测试用例中的 headers 字符串
+        
+        优先从API文件中提取 headers，如果没有提供API文件或提取失败，则使用配置文件中的默认值
+
+        Args:
+            api_file: API文件路径，可选
+
+        Returns:
+            headers 字符串，用于测试用例中
         """
-        # 从配置中获取需要包含的 headers（字典格式）
-        headers_config = APIConfig.HEADERS_TO_INCLUDE()
+        api_headers = {}
+        if api_file:
+            api_headers = get_headers_from_api_file(api_file)
 
-        # 生成 headers 字符串
-        header_lines = []
-        for header_name, default_value in headers_config.items():
-            # 判断值是否包含 os.environ，需要特殊处理
-            if "{os.environ[" in default_value:
-                # 保留 f-string 格式
-                header_lines.append(f'            "{header_name}": {default_value},')
-            else:
-                # 添加引号
-                header_lines.append(f'            "{header_name}": "{default_value}",')
+        default_headers = APIConfig.HEADERS_TO_INCLUDE()
 
-        return "\n".join(header_lines)
+        headers_config = {**default_headers, **api_headers}
+
+        return format_headers_for_python(headers_config)
 
     def match_api_files_for_har(self, har_file_path: str) -> list[str]:
         """
@@ -80,7 +84,7 @@ class TestCaseGenerator:
                 if file.endswith(".py") and file != "__init__.py":
                     filepath = os.path.join(root, file)
 
-                    result = extract_url_from_file(filepath)
+                    result = get_url_from_api_file(filepath)
                     if result:
                         _, file_url = result
                         for request in requests:
@@ -93,45 +97,6 @@ class TestCaseGenerator:
                                 break
 
         return api_files
-
-    def get_function_name_from_api_file(self, filepath: str) -> str | None:
-        """
-        从API文件路径中提取函数名
-
-        由于API文件名就是函数名（如 _user_mgmt_order_page.py），
-        直接从文件名提取，无需读取文件内容
-        """
-        try:
-            basename = os.path.basename(filepath)
-            function_name = os.path.splitext(basename)[0]
-            return function_name
-        except Exception as e:
-            logger.error(f"从文件路径提取函数名失败 {filepath}: {str(e)}")
-            return None
-
-    def get_param_remarks_from_api_file(self, api_file: str) -> dict[str, str]:
-        """
-        从API文件中提取参数备注
-        """
-        param_remarks = {}
-        try:
-            with open(api_file, encoding="utf-8") as f:
-                content = f.read()
-
-            # 查找data字典定义
-            data_match = re.search(r"data\s*=\s*\{[^}]*\}", content, re.DOTALL)
-            if data_match:
-                data_block = data_match.group(0)
-                # 提取每个参数和备注
-                param_matches = re.findall(r'"(\w+)"\s*:\s*([^#]+)\s*#\s*(.+?)\n', data_block)
-                for param_name, _, remark in param_matches:
-                    # 提取备注中的参数名称
-                    # 例如："兑换流水号" 或 "顾客手机号"
-                    param_remarks[param_name] = remark.strip()
-        except Exception as e:
-            logger.error(f"读取API文件 {api_file} 失败: {str(e)}")
-
-        return param_remarks
 
     def extract_params_from_har_request(self, request_info: dict[str, Any]) -> dict[str, Any] | None:
         """
@@ -298,7 +263,7 @@ class TestCaseGenerator:
         imports = []
         for api_file in api_files:
             module_path = api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
-            function_name = self.get_function_name_from_api_file(api_file)
+            function_name = get_function_name_from_api_file(api_file)
             if function_name:
                 # 提取服务包名称（apis.mall_center_user._xxx -> mall_center_user）
                 parts = module_path.split(".")
@@ -313,8 +278,7 @@ class TestCaseGenerator:
             content.append("")
 
         # 提取接口信息
-        epic_name = "建议输入被测接口所属的微服务，如 mall_store_application"
-        feature_name = "建议输入被测业务功能模块，如 订单管理"
+        feature_name = "建议输入被测接口所属的微服务，如 mall_store_application"
         story_name = "建议输入被测接口，如 /appStore/order/orderSign/signCommit"
         title_name = "建议输入测试用例名称，如 提交订单"
 
@@ -322,10 +286,10 @@ class TestCaseGenerator:
             # 提取服务名称
             module_path = target_api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
             if len(module_path.split(".")) > 1:
-                epic_name = module_path.split(".")[1]
+                feature_name = module_path.split(".")[1]
 
             # 提取接口描述和URL
-            api_description, api_url = extract_url_from_file(target_api_file)
+            api_description, api_url = get_url_from_api_file(target_api_file)
             if api_description:
                 title_name = api_description
             if api_url:
@@ -338,7 +302,6 @@ class TestCaseGenerator:
         content.extend(
             [
                 "@allure.severity(Severity.CRITICAL)",
-                f"@allure.epic('{epic_name}')",
                 f"@allure.feature('{feature_name}')",
                 f"@allure.story('{story_name}')",
                 f"@allure.title('{title_name}')",
@@ -377,13 +340,13 @@ class TestCaseGenerator:
 
             api_function = None
             for api_file in api_files:
-                _, file_url = extract_url_from_file(api_file)
+                _, file_url = get_url_from_api_file(api_file)
                 if file_url == url:
-                    api_function = self.get_function_name_from_api_file(api_file)
+                    api_function = get_function_name_from_api_file(api_file)
                     break
 
             if api_function:
-                api_description, _ = extract_url_from_file(api_file)
+                api_description, _ = get_url_from_api_file(api_file)
 
                 clean_function_name = api_function.lstrip("_")
 
@@ -639,14 +602,14 @@ class TestCaseGenerator:
         """
         生成参数化测试用例内容
         """
-        function_name = self.get_function_name_from_api_file(api_file)
+        function_name = get_function_name_from_api_file(api_file)
         if not function_name:
             return None
 
         clean_function_name = function_name.lstrip("_").strip()
 
         # 提取API信息
-        api_description, api_url = extract_url_from_file(api_file)
+        api_description, api_url = get_url_from_api_file(api_file)
         module_path = api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
 
         # 解析HAR文件获取请求信息
@@ -680,7 +643,7 @@ class TestCaseGenerator:
             return None
 
         # 从API文件中提取参数备注
-        param_remarks = self.get_param_remarks_from_api_file(api_file)
+        param_remarks = get_param_remarks_from_api_file(api_file)
         if not param_remarks:
             param_remarks = {}
 
@@ -701,8 +664,7 @@ class TestCaseGenerator:
             content.append(f"@pytest.mark.test_{task_id}")
         content.extend(
             [
-                f"@allure.epic('{service_package}')",
-                "@allure.feature('建议输入被测业务功能模块，如订单管理')",
+                f"@allure.feature('{service_package}')",
                 f"@allure.story('{api_url}')",
                 f'@allure.description("""接口说明：\n- 接口名称：{api_description}',
                 f"- 接口地址：{api_url}",
@@ -854,7 +816,7 @@ class TestCaseGenerator:
         target_api_file = None
         if target_url:
             for api_file in api_files:
-                _, file_url = extract_url_from_file(api_file)
+                _, file_url = get_url_from_api_file(api_file)
                 if file_url == target_url:
                     target_api_file = api_file
                     break

@@ -8,6 +8,8 @@ from .swagger_handler import SwaggerHandler
 from .utils import (
     determine_service_package,
     extract_function_name,
+    format_dict_for_python,
+    format_headers_for_python,
     format_parameter_value,
     match_path_template,
     write_test_file,
@@ -34,8 +36,6 @@ class APIGenerator:
             output_dir = APIConfig.DEFAULT_SERVICE_PACKAGE()
         self.output_dir = output_dir
         self.swagger_handler = SwaggerHandler(api_generator=self)
-
-        # 初始化子生成器
         self.har_generator = HARGenerator(output_dir, self)
 
     def check_api_exists(self, url: str, service_package: str) -> bool:
@@ -56,11 +56,13 @@ class APIGenerator:
         function_name = extract_function_name(url)
         filename = f"{function_name}.py"
 
+        # 检查根目录是否存在
         root_filepath = os.path.join(self.output_dir, filename)
         if os.path.exists(root_filepath):
             return True
 
-        if service_package != "api":
+        # 检查服务包目录是否存在
+        if service_package != "apis":
             package_filepath = os.path.join(self.output_dir, service_package, filename)
             if os.path.exists(package_filepath):
                 return True
@@ -90,17 +92,16 @@ class APIGenerator:
         if not params_dict:
             return "{}"
 
-        items = []
-        for key, value in params_dict.items():
-            formatted_value = format_parameter_value(value)
-            # 从Swagger文档中获取参数说明
+        # 构建注释字典
+        comments = {}
+        for key in params_dict.keys():
             param_desc = swagger_info.get("parameters", {}).get(key, "")
             if param_desc:
-                items.append(f'"{key}": {formatted_value},  # {param_desc}')
+                comments[key] = param_desc
             else:
-                items.append(f'"{key}": {formatted_value},  # TODO: 添加参数说明')
+                comments[key] = "TODO: 添加参数说明"
 
-        return "{\n" + "\n".join(items) + "\n}"
+        return format_dict_for_python(params_dict, format_parameter_value, comments)
 
     def _parse_request_info(self, request_info: dict[str, Any], swagger_data: dict[str, Any] = None) -> dict[str, Any]:
         """
@@ -151,10 +152,6 @@ class APIGenerator:
         # 使用辅助方法匹配路径模板
         url_pattern, path_params, _ = match_path_template(url, swagger_data)
 
-        # 如果 request_info 中包含路径参数，使用它
-        if "path_params" in request_info and request_info["path_params"]:
-            path_params = request_info["path_params"]
-
         if url_pattern:
             url = url_pattern
 
@@ -186,8 +183,8 @@ class APIGenerator:
         is_file_upload = parsed_info["is_file_upload"]
         is_need_urlencode = parsed_info["is_need_urlencode"]
 
+        imports.append("import os")
         if is_file_upload:
-            imports.append("import os")
             imports.append("from requests_toolbelt import MultipartEncoder")
 
         if is_need_urlencode:
@@ -254,12 +251,14 @@ class APIGenerator:
             params_section.append("")
 
         # 添加 headers 参数定义
+        formatted_headers = format_headers_for_python(headers)
         if is_need_urlencode:
             is_need_urlencode_headers = headers.copy()
             is_need_urlencode_headers["content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
-            params_section.append(f"headers = {headers}")
+            formatted_urlencode_headers = format_headers_for_python(is_need_urlencode_headers)
+            params_section.append(f"headers = {formatted_urlencode_headers}")
         else:
-            params_section.append(f"headers = {headers}")
+            params_section.append(f"headers = {formatted_headers}")
 
         return params_section
 
@@ -331,7 +330,9 @@ class APIGenerator:
             else:
                 function_def.append("    with client.get(url=url, headers=headers) as r:")
         elif method == "POST":
-            if param_name:
+            if path_params:
+                function_def.append("    with client.get(url=url, headers=headers) as r:")
+            elif param_name:
                 if is_need_urlencode:
                     function_def.append(
                         "    data = urlencode(data) # application/x-www-form-urlencoded传参需要特殊处理"
@@ -532,7 +533,7 @@ class APIGenerator:
                     else:
                         logger.warning(f"无法获取Swagger文档: {doc_base_url}")
             except Exception as e:
-                logger.debug(f"获取Swagger文档信息失败: {str(e)}")
+                logger.error(f"获取Swagger文档信息失败: {str(e)}")
 
         # 解析请求信息，传递Swagger文档数据用于匹配路径模板
         parsed_info = self._parse_request_info(request_info, swagger_data)
