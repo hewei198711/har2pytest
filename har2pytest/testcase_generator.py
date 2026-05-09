@@ -4,6 +4,7 @@ from typing import Any
 from .config import APIConfig
 from .har_parser import HARParser
 from .logger import logger
+from .swagger_handler import SwaggerHandler
 from .utils import (
     deduplicate_values,
     format_headers_for_python,
@@ -13,6 +14,7 @@ from .utils import (
     get_output_dir,
     get_param_remarks_from_api_file,
     get_url_from_api_file,
+    match_path_template,
     write_test_file,
 )
 
@@ -39,6 +41,7 @@ class TestCaseGenerator:
         self.output_dir = output_dir
         self.filter_duplicate_url = filter_duplicate_url
         self.har_parser = HARParser(base_urls=base_urls, kill_urls=kill_urls)
+        self.swagger_handler = SwaggerHandler()
 
     def _get_clean_function_name(self, filepath: str) -> str:
         """
@@ -52,7 +55,7 @@ class TestCaseGenerator:
     def _get_headers_str(self, api_file: str = None) -> str:
         """
         从API文件或配置文件中获取需要包含的 headers，生成测试用例中的 headers 字符串
-        
+
         优先从API文件中提取 headers，如果没有提供API文件或提取失败，则使用配置文件中的默认值
 
         Args:
@@ -79,6 +82,16 @@ class TestCaseGenerator:
 
         api_files = []
 
+        # 预先处理所有请求的URL，获取对应的转换后的URL
+        # 这样可以避免在嵌套循环中重复调用get_swagger_data_for_url
+        request_url_map = {}
+        for request in requests:
+            request_url = request["url"]
+            swagger_data = self.swagger_handler.get_swagger_data_for_url(request_url)
+            url_pattern, _, _ = match_path_template(request_url, swagger_data)
+            transformed_url = url_pattern if url_pattern else request_url
+            request_url_map[request_url] = transformed_url
+
         for root, dirs, files in os.walk(self.api_dir):
             for file in files:
                 if file.endswith(".py") and file != "__init__.py":
@@ -89,34 +102,46 @@ class TestCaseGenerator:
                         _, file_url = result
                         for request in requests:
                             request_url = request["url"]
-                            # 支持两种匹配方式：
+                            transformed_url = request_url_map.get(request_url, request_url)
+
+                            # 支持多种匹配方式：
                             # 1. 直接相等
                             # 2. request_url 以 file_url 结尾（处理完整URL的情况）
-                            if request_url == file_url or request_url.endswith(file_url):
+                            # 3. 转换后的模板URL与API文件URL相等
+                            if request_url == file_url or request_url.endswith(file_url) or transformed_url == file_url:
                                 api_files.append(filepath)
                                 break
 
+        logger.debug(f"匹配到的API文件: {api_files}")
         return api_files
 
     def extract_params_from_har_request(self, request_info: dict[str, Any]) -> dict[str, Any] | None:
         """
-        从HAR请求信息中提取参数字典
+        从HAR请求信息中提取参数字典（包括路径参数）
         """
         method = request_info["method"].upper()
+        url = request_info["url"]
         post_data = request_info.get("post_data")
         query_params = request_info.get("query_params", {})
 
-        if method == "POST" and post_data:
-            if isinstance(post_data, dict):
-                return post_data or None
-            else:
-                return None
-        elif method == "POST" and query_params:
-            return query_params or None
-        elif method == "GET" and query_params:
-            return query_params
+        # 合并所有参数
+        params = {}
 
-        return None
+        # 添加查询参数
+        if query_params:
+            params.update(query_params)
+
+        # 添加POST数据
+        if method == "POST" and post_data and isinstance(post_data, dict):
+            params.update(post_data)
+
+        # 从URL中提取路径参数（使用Swagger文档）
+        swagger_data = self.swagger_handler.get_swagger_data_for_url(url)
+        _, path_params, _ = match_path_template(url, swagger_data)
+        if path_params:
+            params.update(path_params)
+
+        return params if params else None
 
     def format_test_case_params(self, params_dict: dict[str, Any]) -> str:
         """
@@ -341,9 +366,16 @@ class TestCaseGenerator:
             api_function = None
             for api_file in api_files:
                 _, file_url = get_url_from_api_file(api_file)
+                # 1. 直接相等匹配
                 if file_url == url:
                     api_function = get_function_name_from_api_file(api_file)
                     break
+                # 2. 如果API文件URL包含路径参数模板，尝试匹配
+                elif file_url and "{" in file_url and "}" in file_url:
+                    url_pattern, _, _ = match_path_template(url, {"paths": {file_url: {}}})
+                    if url_pattern == file_url:
+                        api_function = get_function_name_from_api_file(api_file)
+                        break
 
             if api_function:
                 api_description, _ = get_url_from_api_file(api_file)
@@ -817,9 +849,45 @@ class TestCaseGenerator:
         if target_url:
             for api_file in api_files:
                 _, file_url = get_url_from_api_file(api_file)
+                # 1. 直接相等匹配
                 if file_url == target_url:
                     target_api_file = api_file
                     break
+                # 2. 如果target_url包含路径参数模板，尝试匹配
+                elif "{" in target_url and "}" in target_url:
+                    # 手动匹配逻辑：比较除了路径参数部分之外的所有部分
+                    target_url_parts = target_url.lstrip("/").split("/")
+                    file_url_parts = file_url.lstrip("/").split("/")
+                    if len(target_url_parts) == len(file_url_parts):
+                        matched = True
+                        for target_part, file_part in zip(target_url_parts, file_url_parts):
+                            # 路径参数部分跳过比较
+                            if (target_part.startswith("{") and target_part.endswith("}")) or (
+                                file_part.startswith("{") and file_part.endswith("}")
+                            ):
+                                continue
+                            if target_part != file_part:
+                                matched = False
+                                break
+                        if matched:
+                            target_api_file = api_file
+                            break
+                # 3. 如果file_url包含路径参数模板，尝试匹配
+                elif "{" in file_url and "}" in file_url:
+                    # 手动匹配逻辑：比较除了路径参数部分之外的所有部分
+                    target_url_parts = target_url.lstrip("/").split("/")
+                    file_url_parts = file_url.lstrip("/").split("/")
+                    if len(target_url_parts) == len(file_url_parts):
+                        matched = True
+                        for target_part, file_part in zip(target_url_parts, file_url_parts):
+                            if file_part.startswith("{") and file_part.endswith("}"):
+                                continue  # 路径参数，跳过比较
+                            if target_part != file_part:
+                                matched = False
+                                break
+                        if matched:
+                            target_api_file = api_file
+                            break
 
             if not target_api_file:
                 logger.info(f"未找到指定URL对应的API文件: {target_url}")

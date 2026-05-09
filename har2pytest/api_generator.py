@@ -510,30 +510,15 @@ class APIGenerator:
         method = request_info["method"].upper()
         url = request_info["url"]
 
+        # 根据URL确定服务包
         service_package = determine_service_package(url)
 
-        # 先获取Swagger文档数据
-        swagger_data = None
-        if swagger_info is None:
-            swagger_info = self.DEFAULT_SWAGGER_INFO.copy()
-            try:
-                # 检查服务包是否有对应的Swagger文档URL
-                if service_package in APIConfig.SWAGGER_DOC_URLS():
-                    # 获取Swagger文档URL
-                    doc_base_url = APIConfig.SWAGGER_DOC_URLS()[service_package]
-                    logger.info(f"服务包: {service_package}, Swagger文档URL: {doc_base_url}")
+        # 设置默认的Swagger信息
+        swagger_info = swagger_info or self.DEFAULT_SWAGGER_INFO.copy()
 
-                    # 获取Swagger文档
-                    swagger_data = self.swagger_handler.get_swagger_doc(doc_base_url)
-                    if swagger_data:
-                        logger.info(f"成功获取Swagger文档，路径数量: {len(swagger_data.get('paths', {}))}")
-                        # 查找API信息（先使用原始URL查找）
-                        swagger_info = self.swagger_handler.find_api_info_in_swagger(swagger_data, url, method)
-                        logger.info(f"使用原始URL查找Swagger信息: {url}, 结果: {swagger_info}")
-                    else:
-                        logger.warning(f"无法获取Swagger文档: {doc_base_url}")
-            except Exception as e:
-                logger.error(f"获取Swagger文档信息失败: {str(e)}")
+        # 获取Swagger文档数据（用于路径模板匹配）
+        swagger_data = None
+        swagger_data = self.swagger_handler.get_swagger_data_for_url(url)
 
         # 解析请求信息，传递Swagger文档数据用于匹配路径模板
         parsed_info = self._parse_request_info(request_info, swagger_data)
@@ -568,7 +553,6 @@ class APIGenerator:
 
         write_test_file(filepath, content)
 
-        logger.info(f"生成API文件: {filepath} (服务包: {service_package})")
         return filepath
 
     def generate_index_file(self, generated_files: list[str]):

@@ -70,7 +70,9 @@ class HARParser:
 
             query_params = {}
             for param in request.get("queryString", []):
-                query_params[param["name"]] = unquote(param["value"]) if isinstance(param["value"], str) else param["value"]
+                query_params[param["name"]] = (
+                    unquote(param["value"]) if isinstance(param["value"], str) else param["value"]
+                )
 
             # 过滤 query参数
             query_params = self._filter_invalid_params(query_params)
@@ -86,7 +88,11 @@ class HARParser:
                     params = request["postData"].get("params", [])
                     post_data = {}
                     for param in params:
-                        post_data[param["name"]] = unquote(param.get("value", "")) if isinstance(param.get("value"), str) else param.get("value", "")
+                        post_data[param["name"]] = (
+                            unquote(param.get("value", ""))
+                            if isinstance(param.get("value"), str)
+                            else param.get("value", "")
+                        )
                     post_data = self._filter_invalid_params(post_data)
                 elif content_type.startswith("application/json"):
                     try:

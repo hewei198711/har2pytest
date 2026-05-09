@@ -186,7 +186,6 @@ def extract_function_name(url: str) -> str:
     """
     # 先处理URL中的花括号参数，将 {param} 转换为 param
     processed_url = url
-    import re
 
     # 匹配 {param} 格式的参数
     param_pattern = r"\{([^\}]+)\}"
@@ -520,7 +519,7 @@ def get_headers_from_api_file(api_file: str) -> dict[str, str]:
             content = f.read()
 
         # 查找headers字典定义
-        headers_match = re.search(r'headers\s*=\s*\{[^}]*\}', content, re.DOTALL)
+        headers_match = re.search(r"headers\s*=\s*\{[^}]*\}", content, re.DOTALL)
         if headers_match:
             headers_block = headers_match.group(0)
             # 提取每个header键值对
@@ -533,11 +532,7 @@ def get_headers_from_api_file(api_file: str) -> dict[str, str]:
     return headers
 
 
-def format_dict_for_python(
-    data: dict,
-    value_formatter: callable = None,
-    comments: dict = None
-) -> str:
+def format_dict_for_python(data: dict, value_formatter: callable = None, comments: dict = None) -> str:
     """
     通用的字典格式化函数，将字典转换为Python代码字符串
 
@@ -551,14 +546,15 @@ def format_dict_for_python(
     """
     if not data:
         return "{}"
-    
+
     if value_formatter is None:
+
         def value_formatter(v):
             return repr(v)
-    
+
     if comments is None:
         comments = {}
-    
+
     items = []
     for key, value in data.items():
         formatted_value = value_formatter(value)
@@ -567,7 +563,7 @@ def format_dict_for_python(
             items.append(f'"{key}": {formatted_value},  # {comment}')
         else:
             items.append(f'"{key}": {formatted_value},')
-    
+
     return "{\n" + "\n".join(items) + "\n}"
 
 
@@ -584,11 +580,12 @@ def format_headers_for_python(headers: dict[str, str]) -> str:
     Returns:
         格式化后的headers字符串
     """
+
     def header_value_formatter(value):
         # 值已经是带引号的字符串（包括 f-string）
         if isinstance(value, str) and value.startswith(('"', 'f"')):
             return value
         # 添加引号
         return f'"{value}"'
-    
+
     return format_dict_for_python(headers, header_value_formatter)

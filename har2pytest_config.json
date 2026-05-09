@@ -6,14 +6,6 @@
   "KILL_URLS": [
     "aliyuncs.com"
   ],
-  "PATH_URLS": [
-    "/mobile/msg/manage/letter/dashbord/{usrId}",
-    "/mobile/msg/manage/letter/dashbord/{usrId}/{systemId}",
-    "/mobile/order/carts/getRecommendProduct/{serialNo}",
-    "/mobile/order/before/by/store/{cardNo}",
-    "/mobile/order/before/by/{cardNo}",
-    "/mobile/order/before/by/{cardNo}/{systemId}"
-  ],
   "SERVICE_MAPPING": {
     "appstore": "mall_store_application",
     "store": "mall_center_store",

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from .config import APIConfig
 from .logger import logger
-from .utils import handle_base_path
+from .utils import determine_service_package, handle_base_path
 
 # 仅在类型检查时导入，运行时不会执行
 if TYPE_CHECKING:
@@ -378,3 +378,42 @@ class SwaggerHandler:
             logger.error(f"❌ 从Swagger文档生成API文件失败: {str(e)}")
 
         return generated_files
+
+    def get_swagger_data_for_url(self, url: str) -> dict[str, Any] | None:
+        """
+        根据URL获取对应的Swagger文档数据
+
+        Args:
+            url: 原始接口URL，如 /appStore/store/dis/mortgageOrder/detail/96453
+
+        Returns:
+            dict: Swagger文档数据，如果获取失败则返回None
+
+        Example:
+            swagger_data = swagger_handler.get_swagger_data_for_url("/appStore/store/dis/mortgageOrder/detail/96453")
+            if swagger_data:
+                # 使用Swagger数据进行路径模板匹配
+                url_pattern, path_params, _ = match_path_template(url, swagger_data)
+        """
+
+        # 根据URL确定服务包
+        service_package = determine_service_package(url)
+
+        # 检查服务包是否有对应的Swagger文档URL
+        if service_package in APIConfig.SWAGGER_DOC_URLS():
+            try:
+                # 获取Swagger文档URL
+                doc_base_url = APIConfig.SWAGGER_DOC_URLS()[service_package]
+                logger.debug(f"服务包: {service_package}, Swagger文档URL: {doc_base_url}")
+
+                # 获取Swagger文档（使用缓存）
+                swagger_data = self.get_swagger_doc(doc_base_url)
+                if swagger_data:
+                    logger.debug(f"成功获取Swagger文档，路径数量: {len(swagger_data.get('paths', {}))}")
+                    return swagger_data
+                else:
+                    logger.debug(f"无法获取Swagger文档: {doc_base_url}")
+            except Exception as e:
+                logger.error(f"获取Swagger文档信息失败: {str(e)}")
+
+        return None
