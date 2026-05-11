@@ -6,7 +6,7 @@ import argparse
 
 from .api_generator import APIGenerator
 from .config import APIConfig
-from .har_generator import HARGenerator
+from .har_generator import generate_api_files_from_har
 from .har_parser import HARParser
 from .logger import logger
 from .swagger_handler import SwaggerHandler
@@ -49,7 +49,7 @@ def main():
     # api 子命令
     api_parser = subparsers.add_parser("api", help="从HAR文件生成API接口文件", description="从HAR文件生成API接口文件")
     api_parser.add_argument("har_file", nargs="?", default="api_request.har", help="HAR文件路径")
-    api_parser.add_argument("--output", "-o", default=APIConfig.DEFAULT_SERVICE_PACKAGE(), help="输出目录")
+    api_parser.add_argument("--output", "-o", default=APIConfig.DEFAULT_API_DIR(), help="输出目录")
     api_parser.add_argument("--overwrite", "-f", action="store_true", help="强制覆盖现有文件")
 
     # summary 子命令
@@ -62,7 +62,7 @@ def main():
     upd_parser = subparsers.add_parser(
         "update", help="更新现有API文件的文档信息", description="更新现有API文件的文档信息"
     )
-    upd_parser.add_argument("api_dir", nargs="?", default=APIConfig.DEFAULT_SERVICE_PACKAGE(), help="API文件目录")
+    upd_parser.add_argument("api_dir", nargs="?", default=APIConfig.DEFAULT_API_DIR(), help="API文件目录")
 
     # testcase 子命令
     tc_parser = subparsers.add_parser(
@@ -118,7 +118,7 @@ def main():
 """,
     )
     swagger_parser.add_argument("swagger_url", help="Swagger文档URL")
-    swagger_parser.add_argument("--output", "-o", default=APIConfig.DEFAULT_SERVICE_PACKAGE(), help="输出目录")
+    swagger_parser.add_argument("--output", "-o", default=APIConfig.DEFAULT_API_DIR(), help="输出目录")
     swagger_parser.add_argument("--overwrite", "-f", action="store_true", help="强制覆盖现有文件")
     swagger_parser.add_argument("--path", "-p", help="只生成指定的API路径（如 /pet/{petId}）")
 
@@ -129,7 +129,7 @@ def main():
     if args.command is None:
         args.command = "generate"
         args.har_file = "api_request.har"
-        args.output = APIConfig.DEFAULT_SERVICE_PACKAGE()
+        args.output = APIConfig.DEFAULT_API_DIR()
         args.overwrite = False
 
     # 执行对应的命令
@@ -162,8 +162,7 @@ def handle_api(args):
     logger.info("-" * 50)
 
     api_generator = APIGenerator(output_dir)
-    har_generator = HARGenerator(output_dir=output_dir, api_generator=api_generator)
-    generated_files = har_generator.generate_api_files_from_har(har_file, force_overwrite=force_overwrite)
+    generated_files = generate_api_files_from_har(har_file, force_overwrite=force_overwrite, api_generator=api_generator)
 
     logger.info("-" * 50)
     logger.info(f"共生成 {len(generated_files)} 个API接口文件")

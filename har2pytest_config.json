@@ -20,7 +20,6 @@
     "storage": "basic_services",
     "oss": "oss_json"
   },
-  "DEFAULT_SERVICE_PACKAGE": "apis",
   "SWAGGER_DOC_URLS": {
     "mall_mgmt_application": "https://uc-test.perfect99.com/sw/mall-mgmt-application",
     "mall_center_inventory": "https://uc-dev.perfect99.com/sw/mall-center-inventory",
@@ -52,10 +51,6 @@
     "pageNum",
     "pageSize"
   ],
-  "TESTCASE_DIR": "testcases",
-  "SWAGGER_FILE": "swagger.json",
-  "SWAGGER_HOST": "https://api.example.com",
-  "SWAGGER_BASE_PATH": "/api",
-  "SWAGGER_TITLE": "API Documentation",
-  "SWAGGER_VERSION": "1.0.0"
+  "DEFAULT_API_DIR": "apis",
+  "TESTCASE_DIR": "testcases"
 }

@@ -10,7 +10,7 @@ import allure
 from har2pytest.api_generator import APIGenerator
 from har2pytest.config import APIConfig
 from har2pytest.swagger_handler import SwaggerHandler
-from har2pytest.utils import determine_service_package, extract_function_name
+from har2pytest.utils import extract_function_name
 
 
 @allure.feature("API生成器")
@@ -23,17 +23,11 @@ def test_extract_function_name():
     # 测试普通URL
     assert extract_function_name("/mobile/trade/orderCommit") == "_mobile_trade_orderCommit"
 
-    # 测试带路径参数的URL
-    # 临时设置 PATH_URLS 配置
-    original_path_urls = APIConfig._config.get("PATH_URLS", [])
-    APIConfig._config["PATH_URLS"] = ["/user/{id}/info"]
+    # 测试带路径参数的URL（模板格式）
+    assert extract_function_name("/user/{userId}/info") == "_user_userId_info"
 
-    try:
-        # 由于 PATH_URLS 中有匹配的模板 "/user/{id}/info"，所以使用模板中的参数名
-        assert extract_function_name("/user/123/info") == "_user_id_info"
-    finally:
-        # 恢复原始配置
-        APIConfig._config["PATH_URLS"] = original_path_urls
+    # 测试带数字的URL（非模板格式，直接转换）
+    assert extract_function_name("/user/123/info") == "_user_123_info"
 
     # 测试根路径
     assert extract_function_name("/") == "_"
@@ -52,13 +46,13 @@ def test_determine_service_package():
 
     try:
         # 测试普通URL
-        assert determine_service_package("/mobile/trade/orderCommit") == "mall_mobile_application"
+        assert APIConfig.determine_service_package("/mobile/trade/orderCommit") == "mall_mobile_application"
 
         # 测试带路径参数的URL
-        assert determine_service_package("/user/123/info") == "mall_center_user"
+        assert APIConfig.determine_service_package("/user/123/info") == "mall_center_user"
 
         # 测试空URL
-        assert determine_service_package("") == "apis"
+        assert APIConfig.determine_service_package("") == "apis"
     finally:
         # 恢复原始配置
         APIConfig._config["SERVICE_MAPPING"] = original_service_mapping

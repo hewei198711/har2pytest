@@ -1,42 +1,37 @@
+"""配置管理模块"""
 import json
 import os
+import re
+from typing import Optional, Any
 
 from .logger import logger
 
 
 class APIConfig:
-    """API配置类，包含服务包映射、默认配置和Swagger文档地址"""
+    """API配置管理类，负责加载和管理配置信息"""
 
-    # 默认配置
     _default_config = {
-        # 基础URL列表，用于解析HAR文件中的请求URL
+        # 基础配置 - 必需配置，必须在配置文件中指定
         "BASE_URLS": [],
-        # 要过滤的URL关键字列表，包含这些关键字的URL将被过滤掉
         "KILL_URLS": [],
-        # 路径URL列表，包含路径参数的URL模板
-        "PATH_URLS": [],
-        # 服务包映射字典，将URL前缀映射到对应的服务包名称
-        "SERVICE_MAPPING": {},
-        # 默认服务包名称，当无法确定服务包时使用
-        "DEFAULT_SERVICE_PACKAGE": "apis",
-        # Swagger文档URL字典，用于获取API文档信息
-        "SWAGGER_DOC_URLS": {},
-        # 无效参数集合，这些参数将在生成测试用例时被过滤掉
-        "INVALID_PARAMS": set(),
-        # 需要收录的headers参数及其默认值，用于生成测试用例时的headers
+        # 请求参数过滤配置
+        "INVALID_PARAMS": [],
+        # 请求头配置
+        "REQUIRED_HEADERS": {
+            "authorization": "f\"bearer {os.environ['access_token']}\""
+        },
         "HEADERS_TO_INCLUDE": {},
-        # 必须包含的headers字段及其默认值
-        "REQUIRED_HEADERS": {},
         # 列表查询用例，这些参数不进行参数化处理
         "PAGINATION_PARAMS": [],
-        # 测试用例目录，生成的测试用例文件将保存在此目录下
+        # 测试用例目录 - 必需配置，必须在配置文件中指定
         "TESTCASE_DIR": "testcases",
-        # Swagger文档配置
-        "SWAGGER_FILE": "swagger.json",
-        "SWAGGER_HOST": "https://api.example.com",
-        "SWAGGER_BASE_PATH": "/api",
-        "SWAGGER_TITLE": "API Documentation",
-        "SWAGGER_VERSION": "1.0.0",
+        # 服务映射配置 - 必需配置，必须在配置文件中指定
+        "SERVICE_MAPPING": None,
+        # 默认API文件目录 - 必需配置，必须在配置文件中指定
+        "DEFAULT_API_DIR": "apis",
+        "PATH_URLS": [],
+        # Swagger文档URL配置 - 必需配置，必须在配置文件中指定
+        "SWAGGER_DOC_URLS": {},
     }
 
     # 初始化配置
@@ -66,7 +61,7 @@ class APIConfig:
                 with open(config_file, encoding="utf-8") as f:
                     user_config = json.load(f)
                     config.update(user_config)
-                    logger.info(f"成功加载配置文件，DEFAULT_SERVICE_PACKAGE: {config.get('DEFAULT_SERVICE_PACKAGE')}")
+                    logger.info(f"成功加载配置文件，DEFAULT_API_DIR: {config.get('DEFAULT_API_DIR')}")
             except Exception as e:
                 # 配置文件读取失败，使用默认配置
                 config_file_exists = False
@@ -79,19 +74,37 @@ class APIConfig:
         if isinstance(config.get("INVALID_PARAMS"), list):
             config["INVALID_PARAMS"] = set(config["INVALID_PARAMS"])
 
-        # 如果 HEADERS_TO_INCLUDE 是列表格式，转换为字典格式（兼容旧配置）
+        # 检查 HEADERS_TO_INCLUDE 是否为列表，如果是则报错
         if isinstance(config.get("HEADERS_TO_INCLUDE"), list):
-            headers_dict = {}
-            for header in config["HEADERS_TO_INCLUDE"]:
-                # 使用默认值
-                default_values = {
-                    "authorization": "bearer {os.environ['access_token']}",
-                    "channel": "pc",
-                    "client": "op",
-                    "content-type": "application/json;charset=UTF-8",
-                }
-                headers_dict[header] = default_values.get(header, "")
-            config["HEADERS_TO_INCLUDE"] = headers_dict
+            raise ValueError(
+                "配置文件格式错误：HEADERS_TO_INCLUDE 不支持列表格式，请使用字典格式。\n"
+                "示例：\n"
+                '    "HEADERS_TO_INCLUDE": {\n'
+                '        "authorization": "bearer {os.environ[\'access_token\']}",\n'
+                '        "channel": "pc",\n'
+                '        "client": "op"\n'
+                "    }"
+            )
+
+        # 校验必需配置项
+        required_configs = [
+            ("BASE_URLS", "基础URL列表"),
+            ("TESTCASE_DIR", "测试用例目录"),
+            ("SERVICE_MAPPING", "服务映射配置"),
+            ("DEFAULT_API_DIR", "默认API文件目录"),
+            ("SWAGGER_DOC_URLS", "Swagger文档URL配置"),
+        ]
+        
+        missing_configs = []
+        for key, description in required_configs:
+            if config.get(key) is None:
+                missing_configs.append(f"- {key} ({description})")
+        
+        if missing_configs:
+            raise ValueError(
+                "配置文件缺少必需配置项，请在配置文件中添加以下配置：\n" + "\n".join(missing_configs) +
+                "\n\n请参考配置文件示例：har2pytest_config.json.example"
+            )
 
         return config, config_file_exists
 
@@ -112,68 +125,48 @@ class APIConfig:
         "mobile": "mall_mobile_application",
         "user": "mall_center_user"
     },
-    "DEFAULT_SERVICE_PACKAGE": "apis",
+    "DEFAULT_API_DIR": "apis",
     "PATH_URLS": ["/user/{id}/info"],
     "SWAGGER_DOC_URLS": {
         "mall-mobile-application": "https://api.example.com/swagger/mall-mobile-application"
     },
-    "INVALID_PARAMS": ["sign", "token"],
-    "HEADERS_TO_INCLUDE": ["content-type", "authorization"],
-    "REQUIRED_HEADERS": {},
-    "PAGINATION_PARAMS": ["pageNum", "pageSize"]
+    "INVALID_PARAMS": ["sign", "token"]
 }""")
         logger.warning("=" * 60)
 
-    # 类属性访问器
     @classmethod
-    def get_config(cls, key):
+    def get_config(cls, key: str) -> Any:
         """获取配置值"""
         if cls._config is None:
-            cls._config, config_file_exists = cls._load_config()
-            # 只有当配置文件不存在时才显示警告
-            if not config_file_exists:
-                cls._warn_missing_config()
-        return cls._config.get(key, cls._default_config.get(key))
+            cls._config, cls._config_file_exists = cls._load_config()
 
-    # 类属性访问方法
+        value = cls._config.get(key)
+        if value is None and not cls._config_file_exists:
+            cls._warn_missing_config()
+        return value
+
     @classmethod
-    def BASE_URLS(cls) -> list[str]:
+    def BASE_URLS(cls) -> list:
         return cls.get_config("BASE_URLS")
 
     @classmethod
-    def KILL_URLS(cls) -> list[str]:
+    def KILL_URLS(cls) -> list:
         return cls.get_config("KILL_URLS")
 
     @classmethod
-    def PATH_URLS(cls) -> list[str]:
-        return cls.get_config("PATH_URLS")
-
-    @classmethod
-    def SERVICE_MAPPING(cls) -> dict[str, str]:
-        return cls.get_config("SERVICE_MAPPING")
-
-    @classmethod
-    def DEFAULT_SERVICE_PACKAGE(cls) -> str:
-        return cls.get_config("DEFAULT_SERVICE_PACKAGE")
-
-    @classmethod
-    def SWAGGER_DOC_URLS(cls) -> dict[str, str]:
-        return cls.get_config("SWAGGER_DOC_URLS")
-
-    @classmethod
-    def INVALID_PARAMS(cls) -> set[str]:
+    def INVALID_PARAMS(cls) -> set:
         return cls.get_config("INVALID_PARAMS")
 
     @classmethod
-    def HEADERS_TO_INCLUDE(cls) -> set[str]:
-        return cls.get_config("HEADERS_TO_INCLUDE")
-
-    @classmethod
-    def REQUIRED_HEADERS(cls) -> dict[str, str]:
+    def REQUIRED_HEADERS(cls) -> dict:
         return cls.get_config("REQUIRED_HEADERS")
 
     @classmethod
-    def PAGINATION_PARAMS(cls) -> list[str]:
+    def HEADERS_TO_INCLUDE(cls) -> dict:
+        return cls.get_config("HEADERS_TO_INCLUDE")
+
+    @classmethod
+    def PAGINATION_PARAMS(cls) -> list:
         return cls.get_config("PAGINATION_PARAMS")
 
     @classmethod
@@ -185,24 +178,20 @@ class APIConfig:
         return "testcases"
 
     @classmethod
-    def SWAGGER_FILE(cls) -> str:
-        return cls.get_config("SWAGGER_FILE")
+    def SERVICE_MAPPING(cls) -> dict[str, str]:
+        return cls.get_config("SERVICE_MAPPING")
 
     @classmethod
-    def SWAGGER_HOST(cls) -> str:
-        return cls.get_config("SWAGGER_HOST")
+    def DEFAULT_API_DIR(cls) -> str:
+        return cls.get_config("DEFAULT_API_DIR")
 
     @classmethod
-    def SWAGGER_BASE_PATH(cls) -> str:
-        return cls.get_config("SWAGGER_BASE_PATH")
+    def SWAGGER_DOC_URLS(cls) -> dict[str, str]:
+        return cls.get_config("SWAGGER_DOC_URLS")
 
     @classmethod
-    def SWAGGER_TITLE(cls) -> str:
-        return cls.get_config("SWAGGER_TITLE")
-
-    @classmethod
-    def SWAGGER_VERSION(cls) -> str:
-        return cls.get_config("SWAGGER_VERSION")
+    def PATH_URLS(cls) -> list:
+        return cls.get_config("PATH_URLS")
 
     @classmethod
     def determine_service_package(cls, url: str) -> str:
@@ -219,16 +208,15 @@ class APIConfig:
             URL: /mobile/trade/orderCommit → 返回 mall_mobile_application
             URL: /member/info → 返回 mall_center_member
         """
-        import re
 
         # 处理 None 或空字符串
         if url is None or not url:
-            return cls.DEFAULT_SERVICE_PACKAGE()
+            return cls.DEFAULT_API_DIR()
 
         # 从URL中提取第一个路径段
         match = re.match(r"^/?([^/]+)", url)
         if not match:
-            return cls.DEFAULT_SERVICE_PACKAGE()
+            return cls.DEFAULT_API_DIR()
 
         first_segment = match.group(1).lower()
         # 从SERVICE_MAPPING中查找对应的服务包（不区分大小写）
@@ -238,7 +226,7 @@ class APIConfig:
                 return value
 
         # 默认服务包
-        return cls.DEFAULT_SERVICE_PACKAGE()
+        return cls.DEFAULT_API_DIR()
 
 
 # 导出配置实例

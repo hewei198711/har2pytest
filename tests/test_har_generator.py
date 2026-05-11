@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import allure
 
-from har2pytest.har_generator import HARGenerator
+from har2pytest.har_generator import generate_api_files_from_har
 
 
 @allure.feature("HAR生成器")
@@ -41,8 +41,7 @@ def test_generate_api_files_from_har():
         mock_api_generator = MagicMock()
         mock_api_generator.generate_api_file.return_value = "api/_user_login.py"
 
-        generator = HARGenerator(api_generator=mock_api_generator)
-        generated_files = generator.generate_api_files_from_har("test_har_generator.har")
+        generated_files = generate_api_files_from_har("test_har_generator.har", api_generator=mock_api_generator)
 
         assert len(generated_files) == 1
         assert generated_files[0] == "api/_user_login.py"
@@ -62,8 +61,7 @@ def test_generate_api_files_from_empty_har():
         json.dump(test_har, f)
 
     try:
-        generator = HARGenerator()
-        generated_files = generator.generate_api_files_from_har("test_empty_har.har")
+        generated_files = generate_api_files_from_har("test_empty_har.har")
 
         assert len(generated_files) == 0
     finally:
@@ -96,8 +94,7 @@ def test_generate_api_files_failure():
         mock_api_generator = MagicMock()
         mock_api_generator.generate_api_file.side_effect = Exception("生成失败")
 
-        generator = HARGenerator(api_generator=mock_api_generator)
-        generated_files = generator.generate_api_files_from_har("test_failure.har")
+        generated_files = generate_api_files_from_har("test_failure.har", api_generator=mock_api_generator)
 
         # 即使单个生成失败，也应该返回空列表（不抛出异常）
         assert len(generated_files) == 0
@@ -110,7 +107,6 @@ def test_generate_api_files_failure():
 @allure.story("不存在的HAR文件")
 def test_generate_api_files_nonexistent_har():
     """测试不存在的HAR文件"""
-    generator = HARGenerator()
-    generated_files = generator.generate_api_files_from_har("nonexistent.har")
+    generated_files = generate_api_files_from_har("nonexistent.har")
 
     assert len(generated_files) == 0

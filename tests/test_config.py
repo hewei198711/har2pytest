@@ -26,21 +26,16 @@ def test_default_config():
         # 测试默认配置值
         assert APIConfig.BASE_URLS() == ["https://uc-test.perfect99.com/api", "https://uc-uat.perfect99.com/api"]
         assert APIConfig.KILL_URLS() == ["aliyuncs.com"]
-        assert APIConfig.DEFAULT_SERVICE_PACKAGE() == "apis"
+        assert APIConfig.DEFAULT_API_DIR() == "apis"
         assert APIConfig.DEFAULT_TESTCASE_DIR() == "testcases"
         assert APIConfig.INVALID_PARAMS() == {"partnerKey", "sign", "timestamp", "nonce", "rnd"}
         assert APIConfig.HEADERS_TO_INCLUDE() == {
-            "authorization": "bearer {os.environ['access_token']}",
+            "authorization": "f\"bearer {os.environ['access_token']}\"",
             "channel": "pc",
             "content-type": "application/json;charset=UTF-8",
             "client": "op",
         }
         assert APIConfig.REQUIRED_HEADERS() == {"authorization": "f\"bearer {os.environ['access_token']}\""}
-        assert APIConfig.SWAGGER_FILE() == "swagger.json"
-        assert APIConfig.SWAGGER_HOST() == "https://api.example.com"
-        assert APIConfig.SWAGGER_BASE_PATH() == "/api"
-        assert APIConfig.SWAGGER_TITLE() == "API Documentation"
-        assert APIConfig.SWAGGER_VERSION() == "1.0.0"
     finally:
         # 恢复原始配置
         if original_config:
@@ -55,8 +50,14 @@ def test_default_config():
 @allure.story("配置文件加载")
 def test_config_file_loading():
     """测试配置文件加载"""
-    # 创建临时配置文件
-    test_config = {"BASE_URLS": ["https://test.example.com/api"], "DEFAULT_SERVICE_PACKAGE": "test_api"}
+    # 创建临时配置文件 - 包含所有必需配置项
+    test_config = {
+        "BASE_URLS": ["https://test.example.com/api"],
+        "DEFAULT_API_DIR": "test_api",
+        "TESTCASE_DIR": "test_testcases",
+        "SERVICE_MAPPING": {"api": "test_service"},
+        "SWAGGER_DOC_URLS": {"test_service": "https://test.example.com/swagger"}
+    }
 
     with open("test_config.json", "w", encoding="utf-8") as f:
         json.dump(test_config, f)
@@ -71,7 +72,8 @@ def test_config_file_loading():
 
         # 测试配置是否正确加载
         assert config.get("BASE_URLS") == ["https://test.example.com/api"]
-        assert config.get("DEFAULT_SERVICE_PACKAGE") == "test_api"
+        assert config.get("DEFAULT_API_DIR") == "test_api"
+        assert config.get("TESTCASE_DIR") == "test_testcases"
         assert config_file_exists is True
     finally:
         # 清理

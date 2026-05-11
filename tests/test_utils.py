@@ -4,11 +4,11 @@
 
 import allure
 
+from har2pytest.url_matcher import get_url_from_api_file
 from har2pytest.utils import (
     escape_string_for_python,
     format_parameter_value,
     get_headers_from_api_file,
-    get_url_from_api_file,
 )
 
 

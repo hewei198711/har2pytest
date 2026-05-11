@@ -2,16 +2,14 @@ import os
 from typing import Any
 
 from .config import APIConfig
-from .har_generator import HARGenerator
 from .logger import logger
 from .swagger_handler import SwaggerHandler
+from .url_matcher import match_path_template
 from .utils import (
-    determine_service_package,
     extract_function_name,
-    format_dict_for_python,
     format_headers_for_python,
     format_parameter_value,
-    match_path_template,
+    format_params_for_python,
     write_test_file,
 )
 
@@ -27,16 +25,15 @@ class APIGenerator:
         初始化API生成器
 
         Args:
-            output_dir: API文件输出目录，默认为APIConfig.DEFAULT_SERVICE_PACKAGE
+            output_dir: API文件输出目录，默认为APIConfig.DEFAULT_API_DIR
 
         Example:
             generator = APIGenerator(output_dir="api")
         """
         if output_dir is None:
-            output_dir = APIConfig.DEFAULT_SERVICE_PACKAGE()
+            output_dir = APIConfig.DEFAULT_API_DIR()
         self.output_dir = output_dir
         self.swagger_handler = SwaggerHandler(api_generator=self)
-        self.har_generator = HARGenerator(output_dir, self)
 
     def check_api_exists(self, url: str, service_package: str) -> bool:
         """
@@ -101,7 +98,7 @@ class APIGenerator:
             else:
                 comments[key] = "TODO: 添加参数说明"
 
-        return format_dict_for_python(params_dict, format_parameter_value, comments)
+        return format_params_for_python(params_dict, format_parameter_value, comments, inline=False)
 
     def _parse_request_info(self, request_info: dict[str, Any], swagger_data: dict[str, Any] = None) -> dict[str, Any]:
         """
@@ -511,7 +508,7 @@ class APIGenerator:
         url = request_info["url"]
 
         # 根据URL确定服务包
-        service_package = determine_service_package(url)
+        service_package = APIConfig.determine_service_package(url)
 
         # 设置默认的Swagger信息
         swagger_info = swagger_info or self.DEFAULT_SWAGGER_INFO.copy()

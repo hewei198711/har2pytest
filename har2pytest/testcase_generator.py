@@ -5,6 +5,7 @@ from .config import APIConfig
 from .har_parser import HARParser
 from .logger import logger
 from .swagger_handler import SwaggerHandler
+from .url_matcher import find_matching_api_file, get_url_from_api_file, match_path_template
 from .utils import (
     deduplicate_values,
     format_headers_for_python,
@@ -13,8 +14,6 @@ from .utils import (
     get_headers_from_api_file,
     get_output_dir,
     get_param_remarks_from_api_file,
-    get_url_from_api_file,
-    match_path_template,
     write_test_file,
 )
 
@@ -34,7 +33,7 @@ class TestCaseGenerator:
         初始化用例生成器
         """
         if api_dir is None:
-            api_dir = APIConfig.DEFAULT_SERVICE_PACKAGE()
+            api_dir = APIConfig.DEFAULT_API_DIR()
         if output_dir is None:
             output_dir = APIConfig.TESTCASE_DIR()
         self.api_dir = api_dir
@@ -80,10 +79,7 @@ class TestCaseGenerator:
         """
         requests = self.har_parser.extract_requests_from_har(har_file_path)
 
-        api_files = []
-
         # 预先处理所有请求的URL，获取对应的转换后的URL
-        # 这样可以避免在嵌套循环中重复调用get_swagger_data_for_url
         request_url_map = {}
         for request in requests:
             request_url = request["url"]
@@ -92,28 +88,23 @@ class TestCaseGenerator:
             transformed_url = url_pattern if url_pattern else request_url
             request_url_map[request_url] = transformed_url
 
+        # 获取所有API文件
+        api_files_list = []
         for root, dirs, files in os.walk(self.api_dir):
             for file in files:
                 if file.endswith(".py") and file != "__init__.py":
-                    filepath = os.path.join(root, file)
+                    api_files_list.append(os.path.join(root, file))
 
-                    result = get_url_from_api_file(filepath)
-                    if result:
-                        _, file_url = result
-                        for request in requests:
-                            request_url = request["url"]
-                            transformed_url = request_url_map.get(request_url, request_url)
+        # 使用统一的URL匹配服务查找匹配的API文件
+        matched_files = []
+        for request in requests:
+            request_url = request["url"]
+            matched_file = find_matching_api_file(request_url, api_files_list, request_url_map)
+            if matched_file and matched_file not in matched_files:
+                matched_files.append(matched_file)
 
-                            # 支持多种匹配方式：
-                            # 1. 直接相等
-                            # 2. request_url 以 file_url 结尾（处理完整URL的情况）
-                            # 3. 转换后的模板URL与API文件URL相等
-                            if request_url == file_url or request_url.endswith(file_url) or transformed_url == file_url:
-                                api_files.append(filepath)
-                                break
-
-        logger.debug(f"匹配到的API文件: {api_files}")
-        return api_files
+        logger.debug(f"匹配到的API文件: {matched_files}")
+        return matched_files
 
     def extract_params_from_har_request(self, request_info: dict[str, Any]) -> dict[str, Any] | None:
         """
@@ -650,39 +641,55 @@ class TestCaseGenerator:
             return None
 
         # 从HAR文件中提取所有参数和请求方法
+        all_params, all_requests_params, request_method = self._extract_params_from_requests(requests, api_url)
+        if not all_requests_params:
+            return None
+
+        # 从API文件中提取参数备注
+        param_remarks = get_param_remarks_from_api_file(api_file) or {}
+
+        # 提取服务包名称
+        service_package = module_path.split(".")[1] if len(module_path.split(".")) > 1 else "default"
+
+        # 生成测试用例内容
+        content = self._generate_test_case_imports(service_package, function_name, task_id)
+        content.extend(self._generate_test_case_description(api_description, api_url, service_package, all_params, param_remarks))
+        content.extend(self._generate_test_class_setup())
+
+        # 生成参数化测试方法
+        param_items = self.normalize_params_for_parametrization(all_requests_params)
+        content.extend(self._generate_parametrized_test_methods(param_items, api_description, clean_function_name, request_method, param_remarks))
+
+        return "\n".join(content)
+
+    def _extract_params_from_requests(self, requests: list, api_url: str) -> tuple:
+        """
+        从请求列表中提取参数和请求方法
+        """
         all_params = set()
         all_requests_params = []
-        request_method = "GET"  # 默认GET方法
+        request_method = "GET"
+
         for req in requests:
             if req["url"] == api_url:
-                # 提取API参数
                 api_params = self.extract_params_from_har_request(req)
                 if isinstance(api_params, dict):
                     all_requests_params.append(api_params)
-                    # 只添加非空参数到 all_params（空列表视为无效参数）
                     for param_name, param_value in api_params.items():
                         is_valid = param_value is not None and param_value != ""
                         if isinstance(param_value, (list, set)):
                             is_valid = is_valid and len(param_value) > 0
                         if is_valid:
                             all_params.add(param_name)
-                # 记录请求方法（只记录第一个匹配的）
                 if request_method == "GET":
                     request_method = req.get("method", "GET")
-                # 继续处理所有匹配的请求，而不是只处理第一个
 
-        if not all_requests_params:
-            return None
+        return all_params, all_requests_params, request_method
 
-        # 从API文件中提取参数备注
-        param_remarks = get_param_remarks_from_api_file(api_file)
-        if not param_remarks:
-            param_remarks = {}
-
-        # 提取服务包名称
-        service_package = module_path.split(".")[1] if len(module_path.split(".")) > 1 else "default"
-
-        # 生成测试用例内容
+    def _generate_test_case_imports(self, service_package: str, function_name: str, task_id: str) -> list[str]:
+        """
+        生成测试用例的导入部分
+        """
         content = [
             "import os",
             "import pytest",
@@ -694,132 +701,152 @@ class TestCaseGenerator:
         ]
         if task_id:
             content.append(f"@pytest.mark.test_{task_id}")
-        content.extend(
-            [
-                f"@allure.feature('{service_package}')",
-                f"@allure.story('{api_url}')",
-                f'@allure.description("""接口说明：\n- 接口名称：{api_description}',
-                f"- 接口地址：{api_url}",
-                "",
-                "主要参数说明：",
-            ]
-        )
+        return content
 
-        # 添加参数说明
-        logger.debug(f"参数备注: {param_remarks}")
+    def _generate_test_case_description(self, api_description: str, api_url: str, service_package: str, all_params: set, param_remarks: dict) -> list[str]:
+        """
+        生成测试用例的描述部分（装饰器和文档）
+        """
+        content = [
+            f"@allure.feature('{service_package}')",
+            f"@allure.story('{api_url}')",
+            f'@allure.description("""接口说明：\n- 接口名称：{api_description}',
+            f"- 接口地址：{api_url}",
+            "",
+            "主要参数说明：",
+        ]
+
         for param_name in all_params:
-            # 使用参数备注，如果没有备注则显示"可选"
             remark = param_remarks.get(param_name, "# TODO 请填写参数备注")
-            # 检查是否包含 TODO
             if "TODO" in remark:
                 remark = "# TODO 请填写参数备注"
             content.append(f"- {param_name}：{remark}")
 
-        content.extend(
-            [
-                '""")',
-                "class TestClass:",
-                "",
-                "    # 初始化测试数据字典，用于在步骤间传递数据",
-                "    def setup_class(self):",
-                "        self.headers = {",
-                '            "channel": "pc",',
-                '            "client": "op",',
-                '            "content-type": "application/json;charset=UTF-8",',
-                '            "authorization": f"bearer {os.environ[\'access_token\']}",',
-                "        }",
-                "",
-            ]
-        )
+        content.append('""")')
+        return content
 
-        # 生成参数化测试方法
+    def _generate_test_class_setup(self) -> list[str]:
+        """
+        生成测试类的setup方法
+        """
+        return [
+            "class TestClass:",
+            "",
+            "    # 初始化测试数据字典，用于在步骤间传递数据",
+            "    def setup_class(self):",
+            "        self.headers = {",
+            '            "channel": "pc",',
+            '            "client": "op",',
+            '            "content-type": "application/json;charset=UTF-8",',
+            '            "authorization": f"bearer {os.environ[\'access_token\']}",',
+            "        }",
+            "",
+        ]
+
+    def _generate_parametrized_test_methods(self, param_items: list, api_description: str, clean_function_name: str, request_method: str, param_remarks: dict) -> list[str]:
+        """
+        生成参数化测试方法
+        """
+        content = []
         param_count = 0
 
-        # 使用 normalize_params_for_parametrization 方法处理参数
-        param_items = self.normalize_params_for_parametrization(all_requests_params)
-
-        # 生成测试用例
         for item in param_items:
-            # 提取参数名和值
             param_name = next((k for k in item if k != "other_params"), None)
             if not param_name:
                 continue
 
             param_values = item[param_name]
             other_params = item["other_params"]
-
-            # 生成参数化测试方法
             is_combination = "," in param_name
-
-            # 准备参数化值
-            parametrize_values = self._generate_parametrize_values(param_values, is_combination)
-
-            # 生成参数化装饰器
-            if is_combination:
-                param_names = param_name.split(",")
-                content.append(f'    @pytest.mark.parametrize("{", ".join(param_names)}, p", [')
-            else:
-                content.append(f'    @pytest.mark.parametrize("{param_name}, p", [')
-
-            for i, value in enumerate(parametrize_values):
-                if i == len(parametrize_values) - 1:
-                    content.append(f"        {value}")
-                else:
-                    content.append(f"        {value},")
-
-            # 获取参数的备注信息
-            if is_combination:
-                param_names = param_name.split(",")
-                param_descriptions = set()
-                for p in param_names:
-                    desc = param_remarks.get(p, p)
-                    # 只取空格前的部分作为参数描述
-                    if "-" in desc:
-                        desc = desc.split("-")[0]
-                    param_descriptions.add(desc)
-                param_description_str = "-".join(param_descriptions)
-                content.extend(
-                    [
-                        "    ])",
-                        f'    @allure.title("{api_description}-成功路径: {param_description_str} 查询")',
-                        f"    def test_{param_count}_{clean_function_name}(self, {', '.join(param_names)}, p):",
-                    ]
-                )
-            else:
-                param_description = param_remarks.get(param_name, param_name)
-                # 只取空格前的部分作为参数描述
-                if " " in param_description:
-                    param_description = param_description.split(" ")[0]
-                content.extend(
-                    [
-                        "    ])",
-                        f'    @allure.title("{api_description}-成功路径: {param_description} 查询")',
-                        f"    def test_{param_count}_{clean_function_name}(self, {param_name}, p):",
-                    ]
-                )
-
-            # 根据请求方法类型决定使用 data 还是 params
             param_var_name = "params" if request_method == "GET" else "data"
 
-            content.extend(
-                [
-                    "",
-                    "        # 用例级别",
-                    "        allure.dynamic.severity(p)",
-                    "",
-                    f"        {param_var_name} =   {{",
-                ]
-            )
+            # 生成参数化装饰器
+            content.extend(self._generate_parametrize_decorator(param_name, param_values, is_combination))
 
-            # 生成数据字典
-            self._generate_data_dict(content, param_name, other_params, is_combination, param_var_name)
+            # 生成方法定义
+            content.extend(self._generate_test_method_definition(api_description, param_name, param_remarks, clean_function_name, param_count, is_combination))
+
+            # 生成方法体
+            content.extend(self._generate_test_method_body(param_var_name, param_name, other_params, is_combination))
 
             # 生成断言
-            self._generate_assertions(content, function_name, param_name, is_combination, param_var_name)
+            content.extend(self._generate_test_method_assertions(clean_function_name, param_var_name))
 
             param_count += 1
 
-        return "\n".join(content)
+        return content
+
+    def _generate_parametrize_decorator(self, param_name: str, param_values: list, is_combination: bool) -> list[str]:
+        """
+        生成@pytest.mark.parametrize装饰器
+        """
+        parametrize_values = self._generate_parametrize_values(param_values, is_combination)
+
+        if is_combination:
+            param_names = param_name.split(",")
+            decorator_line = f'    @pytest.mark.parametrize("{", ".join(param_names)}, p", ['
+        else:
+            decorator_line = f'    @pytest.mark.parametrize("{param_name}, p", ['
+
+        content = [decorator_line]
+        for i, value in enumerate(parametrize_values):
+            suffix = "" if i == len(parametrize_values) - 1 else ","
+            content.append(f"        {value}{suffix}")
+        content.append("    ])")
+
+        return content
+
+    def _generate_test_method_definition(self, api_description: str, param_name: str, param_remarks: dict, clean_function_name: str, param_count: int, is_combination: bool) -> list[str]:
+        """
+        生成测试方法定义（装饰器+方法签名）
+        """
+        if is_combination:
+            param_names = param_name.split(",")
+            param_descriptions = set()
+            for p in param_names:
+                desc = param_remarks.get(p, p)
+                if "-" in desc:
+                    desc = desc.split("-")[0]
+                param_descriptions.add(desc)
+            param_description_str = "-".join(param_descriptions)
+            return [
+                f'    @allure.title("{api_description}-成功路径: {param_description_str} 查询")',
+                f"    def test_{param_count}_{clean_function_name}(self, {', '.join(param_names)}, p):",
+            ]
+        else:
+            param_description = param_remarks.get(param_name, param_name)
+            if " " in param_description:
+                param_description = param_description.split(" ")[0]
+            return [
+                f'    @allure.title("{api_description}-成功路径: {param_description} 查询")',
+                f"    def test_{param_count}_{clean_function_name}(self, {param_name}, p):",
+            ]
+
+    def _generate_test_method_body(self, param_var_name: str, param_name: str, other_params: dict, is_combination: bool) -> list[str]:
+        """
+        生成测试方法体
+        """
+        content = [
+            "",
+            "        # 用例级别",
+            "        allure.dynamic.severity(p)",
+            "",
+            f"        {param_var_name} =   {{",
+        ]
+        self._generate_data_dict(content, param_name, other_params, is_combination, param_var_name)
+        return content
+
+    def _generate_test_method_assertions(self, function_name: str, param_var_name: str) -> list[str]:
+        """
+        生成测试方法断言部分
+        """
+        content = [
+            f"        with {function_name}(data={param_var_name}, headers=self.headers) as r:",
+            "            assert r.status_code == 200",
+            "            assert r.json()['code'] == 200",
+            "",
+        ]
+        return content
 
     def generate_scenario_testcase(self, har_file_path: str, target_url: str, task_id: str) -> str | None:
         """

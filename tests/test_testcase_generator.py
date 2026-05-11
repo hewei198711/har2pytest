@@ -202,7 +202,6 @@ def test_normalize_params_for_parametrization():
 def test_extract_service_package_from_url():
     """测试从URL中提取服务包名"""
     from har2pytest.config import APIConfig
-    from har2pytest.utils import determine_service_package
 
     # 触发配置初始化
     APIConfig.get_config("SERVICE_MAPPING")
@@ -212,9 +211,9 @@ def test_extract_service_package_from_url():
     APIConfig._config["SERVICE_MAPPING"] = {"mobile": "mall_mobile_application", "user": "mall_center_user"}
 
     try:
-        assert determine_service_package("/mobile/trade/orderCommit") == "mall_mobile_application"
-        assert determine_service_package("/user/123/info") == "mall_center_user"
-        assert determine_service_package("") == "apis"
+        assert APIConfig.determine_service_package("/mobile/trade/orderCommit") == "mall_mobile_application"
+        assert APIConfig.determine_service_package("/user/123/info") == "mall_center_user"
+        assert APIConfig.determine_service_package("") == "apis"
     finally:
         # 恢复原始配置
         APIConfig._config["SERVICE_MAPPING"] = original_service_mapping
@@ -268,7 +267,7 @@ def test_match_api_files_for_har(tmp_path):
             "entries": [
                 {
                     "_resourceType": "xhr",
-                    "request": {"url": "https://example.com/api/user/login", "method": "POST", "headers": []},
+                    "request": {"url": "/api/user/login", "method": "POST", "headers": []},
                     "response": {"status": 200, "content": {"text": "{}"}},
                     "time": 100,
                 }
@@ -359,7 +358,7 @@ def test_generate_test_case_content(tmp_path):
                 {
                     "_resourceType": "xhr",
                     "request": {
-                        "url": "https://example.com/api/user/login",
+                        "url": "/api/user/login",
                         "method": "POST",
                         "headers": [{"name": "Content-Type", "value": "application/json"}],
                         "postData": {"mimeType": "application/json", "text": "{}"},
@@ -426,7 +425,7 @@ def test_generate_test_case_from_har(tmp_path):
                 {
                     "_resourceType": "xhr",
                     "request": {
-                        "url": "https://example.com/api/user/login",
+                        "url": "/api/user/login",
                         "method": "POST",
                         "headers": [{"name": "Content-Type", "value": "application/json"}],
                         "postData": {"mimeType": "application/json", "text": "{}"},
@@ -568,7 +567,7 @@ def test_generate_scenario_testcase(tmp_path):
                 {
                     "_resourceType": "xhr",
                     "request": {
-                        "url": "https://example.com/api/user/login",
+                        "url": "/api/user/login",
                         "method": "POST",
                         "headers": [{"name": "Content-Type", "value": "application/json"}],
                         "postData": {"mimeType": "application/json", "text": "{}"},
@@ -1504,7 +1503,7 @@ def test_generate_test_case_with_path_and_query_params(tmp_path):
 @allure.feature("测试用例生成器")
 @allure.story("路径URL生成测试用例-无Swagger匹配时使用原始URL")
 def test_generate_test_case_without_swagger_match(tmp_path):
-    """测试当Swagger中没有匹配的路径模板时，使用原始URL"""
+    """测试当Swagger中没有匹配的路径模板时，仍然可以使用路径参数模式匹配"""
     import json
 
     test_har = {
@@ -1554,7 +1553,9 @@ def _user_info(data=data, access_token=access_token):
     try:
         api_files = generator.match_api_files_for_har(str(har_file))
 
-        assert len(api_files) == 0
+        # 即使没有Swagger数据，也应该能通过路径参数模式匹配找到API文件
+        assert len(api_files) == 1
+        assert str(api_file) in api_files[0]
     finally:
         generator.swagger_handler.get_swagger_data_for_url = original_get_swagger_data
 

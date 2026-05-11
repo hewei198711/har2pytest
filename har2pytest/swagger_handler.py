@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from .config import APIConfig
 from .logger import logger
-from .utils import determine_service_package, handle_base_path
+from .url_matcher import match_path_template
+from .utils import handle_base_path
 
 # 仅在类型检查时导入，运行时不会执行
 if TYPE_CHECKING:
@@ -397,7 +398,7 @@ class SwaggerHandler:
         """
 
         # 根据URL确定服务包
-        service_package = determine_service_package(url)
+        service_package = APIConfig.determine_service_package(url)
 
         # 检查服务包是否有对应的Swagger文档URL
         if service_package in APIConfig.SWAGGER_DOC_URLS():

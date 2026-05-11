@@ -2,7 +2,7 @@ import sys
 
 sys.path.insert(0, "d:/ligeit_github/har2pytest")
 
-from har2pytest.utils import match_path_template
+from har2pytest.url_matcher import match_path_template
 
 
 # 测试匹配逻辑

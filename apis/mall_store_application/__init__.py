@@ -992,3 +992,5 @@ from ._appStore_webAndApp_store_move_moveApplyList import _appStore_webAndApp_st
 from ._appStore_webAndApp_store_move_queryStoreMoveByCode import (
     _appStore_webAndApp_store_move_queryStoreMoveByCode,  # noqa: F401
 )
+
+from ._appStore_store_signProfessionalCapacity_storeCode_id import _appStore_store_signProfessionalCapacity_storeCode_id # noqa: F401

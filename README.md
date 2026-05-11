@@ -272,7 +272,7 @@ class HARParser:
 class APIGenerator:
     """API文件生成器"""
 
-    def __init__(self, output_dir=APIConfig.DEFAULT_SERVICE_PACKAGE):
+    def __init__(self, output_dir=APIConfig.DEFAULT_API_DIR):
         # 初始化生成器，使用APIConfig配置
         # 初始化Swagger文档处理器和HAR生成器
 
@@ -379,7 +379,7 @@ class SwaggerHandler:
 ```python
 BASE_URL = "https://uc-test.perfect99.com/api"  # 基础URL，用于清理URL中的前缀
 KILL_URL = "arms-retcode.aliyuncs.com"  # 过滤掉包含特定关键字的接口请求
-DEFAULT_SERVICE_PACKAGE = 'api'  # 默认服务包
+DEFAULT_API_DIR = 'api'  # 默认API文件目录
 ```
 
 #### 服务包映射

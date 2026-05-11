@@ -11,7 +11,7 @@
     "user": "user_service",
     "order": "order_service"
   },
-  "DEFAULT_SERVICE_PACKAGE": "api",
+  "DEFAULT_API_DIR": "api",
   "SWAGGER_DOC_URLS": {
     "your_api_service": "https://your-api-docs.com/swagger"
   },
