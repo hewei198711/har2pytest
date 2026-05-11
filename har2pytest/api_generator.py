@@ -4,9 +4,8 @@ from typing import Any
 from .config import APIConfig
 from .logger import logger
 from .swagger_handler import SwaggerHandler
-from .url_matcher import match_path_template
+from .url_matcher import URLMatcher
 from .utils import (
-    extract_function_name,
     format_headers_for_python,
     format_parameter_value,
     format_params_for_python,
@@ -34,6 +33,7 @@ class APIGenerator:
             output_dir = APIConfig.DEFAULT_API_DIR()
         self.output_dir = output_dir
         self.swagger_handler = SwaggerHandler(api_generator=self)
+        self.url_matcher = URLMatcher()
 
     def check_api_exists(self, url: str, service_package: str) -> bool:
         """
@@ -50,7 +50,7 @@ class APIGenerator:
             exists = generator.check_api_exists("/mobile/trade/orderCommit", "mall_mobile_application")
             # 如果文件存在返回True，否则返回False
         """
-        function_name = extract_function_name(url)
+        function_name = URLMatcher.generate_function_name(url)
         filename = f"{function_name}.py"
 
         # 检查根目录是否存在
@@ -65,6 +65,97 @@ class APIGenerator:
                 return True
 
         return False
+
+    def _parse_request_info(self, request_info: dict[str, Any], swagger_data: dict[str, Any] = None) -> dict[str, Any]:
+        """解析请求信息（优化版）"""
+        method = request_info["method"].upper()
+        url = request_info["url"]
+        query_params = request_info.get("query_params", {})
+        post_data = request_info.get("post_data", {})
+        raw_headers = request_info.get("headers", {})
+        
+        # 处理headers（保持不变）
+        headers_to_include = APIConfig.HEADERS_TO_INCLUDE()
+        if isinstance(headers_to_include, dict):
+            headers_to_include = set(headers_to_include.keys())
+        
+        headers = {}
+        for key, value in raw_headers.items():
+            if key.lower() in [h.lower() for h in headers_to_include]:
+                headers[key] = value
+        
+        required_headers = APIConfig.REQUIRED_HEADERS()
+        for key, default_value in required_headers.items():
+            if key not in headers:
+                headers[key] = default_value
+        
+        is_file_upload = False
+        if method == "POST" and raw_headers.get("content-type", "").startswith("multipart/form-data"):
+            is_file_upload = True
+        
+        is_need_urlencode = False
+        if method == "POST" and raw_headers.get("content-length", "") == "0" and not post_data:
+            is_need_urlencode = True
+        
+        # 使用统一的URL匹配器
+        self.url_matcher.swagger_data = swagger_data
+        url_info = self.url_matcher.get_url_info(url)
+        
+        return {
+            "method": method,
+            "url": url_info["pattern"] or url,  # 使用匹配到的模板URL
+            "original_url": url,
+            "query_params": query_params,
+            "post_data": post_data,
+            "headers": headers,
+            "is_file_upload": is_file_upload,
+            "is_need_urlencode": is_need_urlencode,
+            "path_params": url_info["path_params"],
+            "url_pattern": url_info["pattern"],
+            "function_name": url_info["function_name"],
+        }
+    
+    def generate_api_file(self, request_info: dict, force_overwrite: bool = False, swagger_info: dict = None):
+        """生成API文件（优化版）"""
+        method = request_info["method"].upper()
+        url = request_info["url"]
+        
+        # 获取Swagger数据
+        swagger_data = None
+        swagger_data = self.swagger_handler.get_swagger_data_for_url(url)
+        
+        # 解析请求信息（使用优化后的方法）
+        parsed_info = self._parse_request_info(request_info, swagger_data)
+        url_pattern = parsed_info.get("url_pattern", url)
+        
+        # 确定服务包
+        service_package = APIConfig.determine_service_package(url)
+        
+        # 使用URLMatcher生成的函数名
+        function_name = parsed_info["function_name"]
+        
+        # 检查文件是否存在
+        if self.check_api_exists(url_pattern, service_package):
+            if not force_overwrite:
+                logger.info(f"接口已存在，跳过生成: {method} {url_pattern}")
+                return None
+            else:
+                logger.info(f"接口已存在，强制覆盖: {method} {url_pattern}")
+        
+        # 生成文件路径
+        filename = f"{function_name}.py"
+        if service_package == "apis":
+            filepath = os.path.join(self.output_dir, filename)
+        else:
+            filepath = os.path.join(self.output_dir, service_package, filename)
+        
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        # 生成文件内容
+        content = self.generate_file_content(request_info, function_name, swagger_info, parsed_info)
+        write_test_file(filepath, content)
+        
+        return filepath
 
     def _generate_params_string(self, params_dict: dict[str, Any], swagger_info: dict[str, Any] = None) -> str:
         """
@@ -99,70 +190,6 @@ class APIGenerator:
                 comments[key] = "TODO: 添加参数说明"
 
         return format_params_for_python(params_dict, format_parameter_value, comments, inline=False)
-
-    def _parse_request_info(self, request_info: dict[str, Any], swagger_data: dict[str, Any] = None) -> dict[str, Any]:
-        """
-        解析请求信息
-
-        解析请求信息字典，提取method、url、query_params、post_data、headers等
-        并处理路径参数和URL模式匹配
-
-        Args:
-            request_info: 请求信息字典，包含method、url、query_params、post_data、headers等
-            swagger_data: Swagger文档数据，可选，用于匹配路径模板
-
-        Returns:
-            Dict[str, Any]: 解析后的请求信息字典
-        """
-        method = request_info["method"].upper()
-        url = request_info["url"]
-        query_params = request_info.get("query_params", {})
-        post_data = request_info.get("post_data", {})
-        raw_headers = request_info.get("headers", {})
-
-        # 只收录配置中指定的 headers 参数
-        headers_to_include = APIConfig.HEADERS_TO_INCLUDE()
-
-        # 获取 headers 名称集合（支持字典格式）
-        if isinstance(headers_to_include, dict):
-            headers_to_include = set(headers_to_include.keys())
-
-        headers = {}
-        for key, value in raw_headers.items():
-            if key.lower() in [h.lower() for h in headers_to_include]:
-                headers[key] = value
-
-        # 添加必须的 headers 字段及其默认值
-        required_headers = APIConfig.REQUIRED_HEADERS()
-        for key, default_value in required_headers.items():
-            if key not in headers:
-                headers[key] = default_value
-
-        is_file_upload = False
-        if method == "POST" and raw_headers.get("content-type", "").startswith("multipart/form-data"):
-            is_file_upload = True
-
-        is_need_urlencode = False
-        if method == "POST" and raw_headers.get("content-length", "") == "0" and not post_data:
-            is_need_urlencode = True
-
-        # 使用辅助方法匹配路径模板
-        url_pattern, path_params, _ = match_path_template(url, swagger_data)
-
-        if url_pattern:
-            url = url_pattern
-
-        return {
-            "method": method,
-            "url": url,
-            "query_params": query_params,
-            "post_data": post_data,
-            "headers": headers,
-            "is_file_upload": is_file_upload,
-            "is_need_urlencode": is_need_urlencode,
-            "path_params": path_params,
-            "url_pattern": url_pattern,
-        }
 
     def _generate_imports(self, parsed_info: dict[str, Any]) -> list[str]:
         """
@@ -477,80 +504,6 @@ class APIGenerator:
         content_parts = imports + params_section + function_def
         return "\n".join(content_parts)
 
-    def generate_api_file(
-        self, request_info: dict[str, Any], force_overwrite: bool = False, swagger_info: dict[str, Any] = None
-    ) -> str | None:
-        """
-        为单个API请求生成接口文件
-
-        根据请求信息生成单个API接口文件，包括检查文件是否已存在、生成文件内容和保存文件
-
-        Args:
-            request_info: 请求信息字典，包含method、url、query_params、post_data、headers等
-            force_overwrite: 如果为True，即使文件存在也会覆盖；如果为False，跳过已存在的文件
-            swagger_info: Swagger文档信息，包含description、parameters等
-
-        Returns:
-            Optional[str]: 生成的文件路径，如果文件已存在则返回None
-
-        Example:
-            request_info = {
-                "method": "POST",
-                "url": "/mobile/trade/orderCommit",
-                "query_params": {},
-                "post_data": {"productId": "123"},
-                "headers": {"content-type": "application/json"}
-            }
-            filepath = generator.generate_api_file(request_info)
-            # 返回生成的文件路径，如 "api/mall_mobile_application/_mobile_trade_orderCommit.py"
-        """
-        method = request_info["method"].upper()
-        url = request_info["url"]
-
-        # 根据URL确定服务包
-        service_package = APIConfig.determine_service_package(url)
-
-        # 设置默认的Swagger信息
-        swagger_info = swagger_info or self.DEFAULT_SWAGGER_INFO.copy()
-
-        # 获取Swagger文档数据（用于路径模板匹配）
-        swagger_data = None
-        swagger_data = self.swagger_handler.get_swagger_data_for_url(url)
-
-        # 解析请求信息，传递Swagger文档数据用于匹配路径模板
-        parsed_info = self._parse_request_info(request_info, swagger_data)
-        url_pattern = parsed_info.get("url_pattern", url)
-
-        # 如果有Swagger文档数据，再次查找API信息（使用匹配后的路径模板）
-        if swagger_data and url_pattern != url:
-            swagger_info = self.swagger_handler.find_api_info_in_swagger(swagger_data, url_pattern, method)
-
-        # 检查文件是否存在
-        if self.check_api_exists(url_pattern, service_package):
-            if not force_overwrite:
-                logger.info(f"接口已存在，跳过生成 (设置 force_overwrite=True 可覆盖): {method} {url_pattern}")
-                return None
-            else:
-                logger.info(f"接口已存在，强制覆盖: {method} {url_pattern}")
-
-        # 使用匹配后的路径模板生成函数名
-        function_name = extract_function_name(url_pattern)
-
-        base_filename = function_name
-        filename = f"{base_filename}.py"
-
-        if service_package == "apis":
-            filepath = os.path.join(self.output_dir, filename)
-        else:
-            filepath = os.path.join(self.output_dir, service_package, filename)
-
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-
-        content = self.generate_file_content(request_info, function_name, swagger_info, parsed_info)
-
-        write_test_file(filepath, content)
-
-        return filepath
 
     def generate_index_file(self, generated_files: list[str]):
         """

@@ -4,11 +4,11 @@
 
 import allure
 
-from har2pytest.url_matcher import get_url_from_api_file
 from har2pytest.utils import (
     escape_string_for_python,
     format_parameter_value,
     get_headers_from_api_file,
+    get_url_from_api_file,
 )
 
 
@@ -16,15 +16,22 @@ from har2pytest.utils import (
 @allure.story("URL提取")
 def test_get_url_from_api_file():
     """测试从文件中提取URL"""
-    # 测试从文件中提取URL
-    test_content = "some content https://example.com/api/test some more content"
+    # 测试从文件中提取URL（使用真实的API文件格式）
+    test_content = '''def _user_login(data=data, headers=headers):
+    """
+    用户登录
+    /user/login
+    """
+    url = "/user/login"
+'''
     with open("test_url.txt", "w", encoding="utf-8") as f:
         f.write(test_content)
 
     try:
         result = get_url_from_api_file("test_url.txt")
         assert result is not None
-        assert result[1] == "https://example.com/api/test"
+        assert result[0] == "用户登录"
+        assert result[1] == "/user/login"
     finally:
         import os
 

@@ -14,7 +14,6 @@ from .har_parser import HARParser
 from .logger import get_logger, logger
 from .swagger_handler import SwaggerHandler
 from .testcase_generator import TestCaseGenerator
-from .url_matcher import get_url_from_api_file
 from .utils import (
     escape_string_for_python,
     format_headers_for_python,
@@ -23,6 +22,7 @@ from .utils import (
     get_function_name_from_api_file,
     get_headers_from_api_file,
     get_param_remarks_from_api_file,
+    get_url_from_api_file,
 )
 
 __all__ = [

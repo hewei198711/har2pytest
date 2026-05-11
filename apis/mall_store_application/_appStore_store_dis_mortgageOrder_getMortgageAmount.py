@@ -3,14 +3,15 @@ import os
 from util.client import client
 
 headers = {
+    "channel": "pc",
+    "client": "store",
     "authorization": f"bearer {os.environ['access_token']}",
-    "content-length": "0",
 }
 
 
 def _appStore_store_dis_mortgageOrder_getMortgageAmount(headers=headers):
     """
-    查询店铺押货余额与限额
+    TODO: 添加接口描述
     /appStore/store/dis/mortgageOrder/getMortgageAmount
     """
 

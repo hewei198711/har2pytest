@@ -10,27 +10,27 @@ import allure
 from har2pytest.api_generator import APIGenerator
 from har2pytest.config import APIConfig
 from har2pytest.swagger_handler import SwaggerHandler
-from har2pytest.utils import extract_function_name
+from har2pytest.url_matcher import URLMatcher
 
 
 @allure.feature("API生成器")
 @allure.story("提取函数名")
-def test_extract_function_name():
+def test_generate_function_name():
     """测试从URL提取函数名"""
     # 触发配置初始化
     APIConfig.get_config("PATH_URLS")
 
     # 测试普通URL
-    assert extract_function_name("/mobile/trade/orderCommit") == "_mobile_trade_orderCommit"
+    assert URLMatcher.generate_function_name("/mobile/trade/orderCommit") == "_mobile_trade_orderCommit"
 
     # 测试带路径参数的URL（模板格式）
-    assert extract_function_name("/user/{userId}/info") == "_user_userId_info"
+    assert URLMatcher.generate_function_name("/user/{userId}/info") == "_user_userId_info"
 
     # 测试带数字的URL（非模板格式，直接转换）
-    assert extract_function_name("/user/123/info") == "_user_123_info"
+    assert URLMatcher.generate_function_name("/user/123/info") == "_user_123_info"
 
     # 测试根路径
-    assert extract_function_name("/") == "_"
+    assert URLMatcher.generate_function_name("/") == "_"
 
 
 @allure.feature("API生成器")

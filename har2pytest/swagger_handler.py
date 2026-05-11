@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from .config import APIConfig
 from .logger import logger
-from .url_matcher import match_path_template
-from .utils import handle_base_path
+from .url_matcher import URLMatcher
+
 
 # 仅在类型检查时导入，运行时不会执行
 if TYPE_CHECKING:
@@ -120,7 +120,7 @@ class SwaggerHandler:
 
         # 1. 获取Swagger文档的basePath并处理
         base_path = swagger_data.get("basePath", "")
-        search_path = handle_base_path(api_path, base_path)
+        search_path = URLMatcher.remove_base_path(api_path, base_path)
 
         # 2. 尝试匹配处理后的路径
         if search_path in paths:
@@ -394,7 +394,7 @@ class SwaggerHandler:
             swagger_data = swagger_handler.get_swagger_data_for_url("/appStore/store/dis/mortgageOrder/detail/96453")
             if swagger_data:
                 # 使用Swagger数据进行路径模板匹配
-                url_pattern, path_params, _ = match_path_template(url, swagger_data)
+                url_pattern, path_params, _ = URLMatcher(swagger_data).match_with_swagger(url)
         """
 
         # 根据URL确定服务包

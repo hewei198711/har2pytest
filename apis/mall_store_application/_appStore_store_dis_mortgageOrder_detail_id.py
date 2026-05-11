@@ -3,22 +3,20 @@ import os
 from util.client import client
 
 params = {
-    "id": "",  # id
+    "id": "96453",  # TODO: 添加参数说明
 }
 
 headers = {
+    "channel": "pc",
+    "client": "store",
     "authorization": f"bearer {os.environ['access_token']}",
-    "content-length": "0",
 }
 
 
 def _appStore_store_dis_mortgageOrder_detail_id(params=params, headers=headers):
     """
-    押货单详情
+    TODO: 添加接口描述
     /appStore/store/dis/mortgageOrder/detail/{id}
-
-    参数说明:
-    - id: id
     """
 
     url = f"/appStore/store/dis/mortgageOrder/detail/{params['id']}"

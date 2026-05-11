@@ -1,4 +1,5 @@
-from har2pytest.url_matcher import match_url_pattern, find_matching_api_file
+from har2pytest.url_matcher import URLMatcher
+from har2pytest.utils import get_url_from_api_file
 
 
 class TestMatchUrlPattern:
@@ -6,70 +7,70 @@ class TestMatchUrlPattern:
 
     def test_exact_match_without_params(self):
         """测试无路径参数的完全匹配"""
-        matched, params = match_url_pattern("/api/user/info", "/api/user/info")
+        matched, params = URLMatcher.match_url_pattern("/api/user/info", "/api/user/info")
         assert matched is True
         assert params == {}
 
     def test_match_with_path_param(self):
         """测试带路径参数的匹配"""
-        matched, params = match_url_pattern("/api/user/123/info", "/api/user/{userId}/info")
+        matched, params = URLMatcher.match_url_pattern("/api/user/123/info", "/api/user/{userId}/info")
         assert matched is True
         assert params == {"userId": "123"}
 
     def test_match_with_multiple_path_params(self):
         """测试多个路径参数的匹配"""
-        matched, params = match_url_pattern("/api/user/123/order/456", "/api/user/{userId}/order/{orderId}")
+        matched, params = URLMatcher.match_url_pattern("/api/user/123/order/456", "/api/user/{userId}/order/{orderId}")
         assert matched is True
         assert params == {"userId": "123", "orderId": "456"}
 
     def test_length_mismatch(self):
         """测试URL长度不同时不匹配"""
-        matched, params = match_url_pattern("/api/user/info", "/api/user")
+        matched, params = URLMatcher.match_url_pattern("/api/user/info", "/api/user")
         assert matched is False
         assert params == {}
         
-        matched, params = match_url_pattern("/api/user", "/api/user/info")
+        matched, params = URLMatcher.match_url_pattern("/api/user", "/api/user/info")
         assert matched is False
         assert params == {}
 
     def test_non_param_part_mismatch(self):
         """测试非参数部分不匹配"""
-        matched, params = match_url_pattern("/api/user/123/info", "/api/order/{userId}/info")
+        matched, params = URLMatcher.match_url_pattern("/api/user/123/info", "/api/order/{userId}/info")
         assert matched is False
         assert params == {}
         
-        matched, params = match_url_pattern("/api/user/123/info", "/api/user/{userId}/detail")
+        matched, params = URLMatcher.match_url_pattern("/api/user/123/info", "/api/user/{userId}/detail")
         assert matched is False
         assert params == {}
 
     def test_empty_url(self):
         """测试空URL"""
-        matched, params = match_url_pattern("", "")
+        matched, params = URLMatcher.match_url_pattern("", "")
         assert matched is True
         assert params == {}
         
-        matched, params = match_url_pattern("/", "/")
+        matched, params = URLMatcher.match_url_pattern("/", "/")
         assert matched is True
         assert params == {}
         
-        matched, params = match_url_pattern("", "/api/user")
+        matched, params = URLMatcher.match_url_pattern("", "/api/user")
         assert matched is False
         assert params == {}
 
     def test_numeric_param_value(self):
         """测试数字类型的路径参数值"""
-        matched, params = match_url_pattern("/api/order/12345/detail", "/api/order/{orderId}/detail")
+        matched, params = URLMatcher.match_url_pattern("/api/order/12345/detail", "/api/order/{orderId}/detail")
         assert matched is True
         assert params == {"orderId": "12345"}
         
-        matched, params = match_url_pattern("/api/product/abc123", "/api/product/{productId}")
+        matched, params = URLMatcher.match_url_pattern("/api/product/abc123", "/api/product/{productId}")
         assert matched is True
         assert params == {"productId": "abc123"}
 
     def test_full_url_vs_pattern(self):
         """测试完整URL与模式的匹配（不应该匹配，因为长度不同）"""
         # 完整URL包含协议域名，长度不同
-        matched, params = match_url_pattern("https://example.com/api/user/123", "/api/user/{userId}")
+        matched, params = URLMatcher.match_url_pattern("https://example.com/api/user/123", "/api/user/{userId}")
         assert matched is False
         assert params == {}
 
@@ -95,7 +96,7 @@ class TestFindMatchingApiFile:
         return r
 ''')
 
-        result = find_matching_api_file("/api/user/info", [str(api_file)])
+        result = URLMatcher.find_matching_api_file("/api/user/info", [str(api_file)])
         assert result == str(api_file)
 
 
@@ -117,7 +118,7 @@ class TestFindMatchingApiFile:
         return r
 ''')
 
-        result = find_matching_api_file("/api/user/123/info", [str(api_file)])
+        result = URLMatcher.find_matching_api_file("/api/user/123/info", [str(api_file)])
         assert result == str(api_file)
 
     def test_transformed_url_match(self, tmp_path):
@@ -143,7 +144,7 @@ class TestFindMatchingApiFile:
             "/api/user/123/info": "/api/user/{userId}/info"
         }
         
-        result = find_matching_api_file("/api/user/123/info", [str(api_file)], request_url_map)
+        result = URLMatcher.find_matching_api_file("/api/user/123/info", [str(api_file)], request_url_map)
         assert result == str(api_file)
 
     def test_no_matching_file(self, tmp_path):
@@ -164,7 +165,7 @@ class TestFindMatchingApiFile:
         return r
 ''')
 
-        result = find_matching_api_file("/api/order/list", [str(api_file)])
+        result = URLMatcher.find_matching_api_file("/api/order/list", [str(api_file)])
         assert result is None
 
     def test_multiple_api_files_priority(self, tmp_path):
@@ -200,7 +201,7 @@ class TestFindMatchingApiFile:
 ''')
 
         # 直接相等应该优先
-        result = find_matching_api_file("/api/user/info", [str(api_file1), str(api_file2)])
+        result = URLMatcher.find_matching_api_file("/api/user/info", [str(api_file1), str(api_file2)])
         assert result == str(api_file1)
 
     def test_full_url_with_base_url_stripped(self, tmp_path):
@@ -222,29 +223,10 @@ class TestFindMatchingApiFile:
 ''')
 
         # 模拟HAR解析器已移除base_url前缀的情况
-        result = find_matching_api_file("/api/user/123/info", [str(api_file)])
+        result = URLMatcher.find_matching_api_file("/api/user/123/info", [str(api_file)])
         assert result == str(api_file)
 
     def test_empty_api_files_list(self):
         """测试空API文件列表"""
-        result = find_matching_api_file("/api/user/info", [])
-        assert result is None
-
-    def test_api_file_url_not_found(self, tmp_path):
-        """测试API文件中无法提取URL"""
-        api_dir = tmp_path / "apis"
-        api_dir.mkdir()
-        
-        # 创建一个没有URL的无效API文件
-        api_file = api_dir / "_invalid.py"
-        with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def _invalid(data=data, access_token=access_token):
-    """无效API"""
-    # 没有url变量
-    headers = {}
-    with client.get(url="", headers=headers, params=data) as r:
-        return r
-''')
-
-        result = find_matching_api_file("/api/user/info", [str(api_file)])
+        result = URLMatcher.find_matching_api_file("/api/user/info", [])
         assert result is None

@@ -5,66 +5,7 @@ import subprocess
 import sys
 from typing import Any
 
-from .config import APIConfig
 from .logger import logger
-
-
-def handle_base_path(url: str, base_path: str) -> str:
-    """
-    处理URL中的basePath前缀
-
-    如果URL包含basePath前缀，将其移除，并确保结果以"/"开头
-
-    Args:
-        url: 原始URL，如 /appStore/store/xxx
-        base_path: Swagger文档中的basePath，如 /appStore
-
-    Returns:
-        str: 移除basePath前缀后的URL，如 /store/xxx
-
-    Example:
-        handle_base_path("/appStore/store/xxx", "/appStore")  # 返回 "/store/xxx"
-        handle_base_path("/appStore/store/xxx", "/")  # 返回 "/appStore/store/xxx"
-        handle_base_path("/appStore/store/xxx", "")  # 返回 "/appStore/store/xxx"
-    """
-    if not base_path or base_path == "/":
-        return url
-
-    # 尝试去掉basePath前缀
-    if url.startswith(base_path):
-        result = url[len(base_path) :]
-        if not result.startswith("/"):
-            result = "/" + result
-        return result
-    return url
-
-
-def extract_function_name(url: str) -> str:
-    """
-    从URL中提取测试方法函数名
-
-    将URL路径转换为合法的Python函数名格式，去除花括号参数标记，
-    将所有非字母数字下划线的字符替换为下划线。
-
-    Args:
-        url: 原始接口URL，如 /mobile/trade/orderCommit
-
-    Returns:
-        str: 生成的函数名片段，如 _mobile_trade_orderCommit
-
-    Example:
-        URL: /mobile/trade/orderCommit → 返回 _mobile_trade_orderCommit
-        URL: /user/{userId}/info → 返回 _user_userId_info
-        URL: /appStore/dis-inventory/settled-scope → 返回 _appStore_dis_inventory_settled_scope
-    """
-
-    if "{" in url and "}" in url:
-        url = re.sub(r"\{|\}", "", url)
-    
-    # 直接将所有非字母数字下划线的字符替换为下划线
-    cleaned = re.sub(r"[^a-zA-Z0-9_]", "_", url)
-    
-    return cleaned
 
 
 def format_parameter_value(value: Any) -> str:
@@ -103,35 +44,6 @@ def format_parameter_value(value: Any) -> str:
     return result
 
 
-def deduplicate_values(values: list[Any]) -> list[Any]:
-    """
-    对值列表进行去重处理，支持列表类型值
-
-    将不可哈希的值（list）转为可哈希的tuple进行去重，然后返回去重后的列表
-    如果元素是列表，则转换为元组后返回；否则直接返回原值
-
-    Args:
-        values: 需要去重的值列表，可以包含任意类型，包括嵌套列表
-
-    Returns:
-        List[Any]: 去重后的值列表，列表类型的元素会被转换为元组
-
-    Example:
-        result = deduplicate_values([1, 2, 3, 2, 1])
-        # 返回 [1, 2, 3]
-        result = deduplicate_values([[1, 2], [3, 4], [1, 2]])
-        # 返回 [(1, 2), (3, 4)]
-        result = deduplicate_values(["a", "b", "a"])
-        # 返回 ["a", "b"]
-    """
-    unique_values = []
-    for value in values:
-        key = tuple(value) if isinstance(value, list) else value
-        if key not in unique_values:
-            unique_values.append(key)
-    return unique_values
-
-
 def escape_string_for_python(value: str) -> str:
     """
     转义字符串以便在Python代码中使用
@@ -159,6 +71,35 @@ def escape_string_for_python(value: str) -> str:
     value = value.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
 
     return value
+
+
+def deduplicate_values(values: list[Any]) -> list[Any]:
+    """
+    对值列表进行去重处理，支持列表类型值
+
+    将不可哈希的值（list）转为可哈希的tuple进行去重，然后返回去重后的列表
+    如果元素是列表，则转换为元组后返回；否则直接返回原值
+
+    Args:
+        values: 需要去重的值列表，可以包含任意类型，包括嵌套列表
+
+    Returns:
+        List[Any]: 去重后的值列表，列表类型的元素会被转换为元组
+
+    Example:
+        result = deduplicate_values([1, 2, 3, 2, 1])
+        # 返回 [1, 2, 3]
+        result = deduplicate_values([[1, 2], [3, 4], [1, 2]])
+        # 返回 [(1, 2), (3, 4)]
+        result = deduplicate_values(["a", "b", "a"])
+        # 返回 ["a", "b"]
+    """
+    unique_values = []
+    for value in values:
+        key = tuple(value) if isinstance(value, list) else value
+        if key not in unique_values:
+            unique_values.append(key)
+    return unique_values
 
 
 def format_python_file(filepath: str) -> None:
@@ -206,6 +147,120 @@ def write_test_file(filepath: str, content: str):
     format_python_file(filepath)
 
 
+def parse_api_file(filepath: str) -> dict:
+    """
+    从API文件中一次性提取所有信息
+
+    解析API文件，提取函数名、描述、URL、参数备注和headers配置
+    避免重复打开文件，提高性能
+
+    Args:
+        filepath: API文件路径
+
+    Returns:
+        dict: 包含所有提取信息的字典，键包括:
+            - function_name: 函数名
+            - description: 描述
+            - url: URL
+            - param_remarks: 参数备注字典
+            - headers: headers配置字典
+
+    Example:
+        result = parse_api_file("apis/_user_login.py")
+        # 返回 {
+        #     "function_name": "_user_login",
+        #     "description": "用户登录",
+        #     "url": "/user/login",
+        #     "param_remarks": {"username": "用户名", "password": "密码"},
+        #     "headers": {"channel": "pc", "content-type": "application/json"}
+        # }
+    """
+    result = {
+        "function_name": None,
+        "description": "",
+        "url": None,
+        "param_remarks": {},
+        "headers": {}
+    }
+
+    # 函数名从文件名提取，无需读取文件内容
+    try:
+        basename = os.path.basename(filepath)
+        result["function_name"] = os.path.splitext(basename)[0]
+    except Exception as e:
+        logger.error(f"从文件路径提取函数名失败 {filepath}: {str(e)}")
+
+    # 其他信息需要读取文件内容
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            content = f.read()
+
+        # 提取描述和URL模板（从函数文档）
+        docstring_match = re.search(r'"""(.*?)"""', content, re.DOTALL)
+        docstring_url = None
+        if docstring_match:
+            lines = [line.strip() for line in docstring_match.group(1).split('\n') if line.strip()]
+            if lines:
+                result["description"] = lines[0]
+                # 从文档字符串提取URL模板（跳过第一行描述）
+                for line in lines[1:]:
+                    if line.startswith('/'):
+                        docstring_url = line
+                        break
+
+        # 提取URL（优先使用代码中的非f-string URL）
+        url_match = re.search(r'url\s*=\s*(f)?["\']([^"\']+)["\']', content)
+        if url_match:
+            is_fstring = url_match.group(1) == 'f'
+            if not is_fstring:
+                result["url"] = url_match.group(2)
+            else:
+                # f-string格式，使用文档中的URL模板
+                result["url"] = docstring_url
+
+        # 提取参数备注（支持 data、params、files）
+        for param_type in ["data", "params", "files"]:
+            data_match = re.search(rf"{param_type}\s*=\s*\{{[^}}]*\}}", content, re.DOTALL)
+            if data_match:
+                data_block = data_match.group(0)
+                param_matches = re.findall(r'"(\w+)"\s*:\s*([^#]+)\s*#\s*(.+?)\n', data_block)
+                for param_name, _, remark in param_matches:
+                    result["param_remarks"][param_name] = remark.strip()
+
+        # 提取headers配置
+        headers_match = re.search(r"headers\s*=\s*\{[^}]*\}", content, re.DOTALL)
+        if headers_match:
+            headers_block = headers_match.group(0)
+            header_matches = re.findall(r'"(\w+[-]?\w+)"\s*:\s*("[^"]*"|f"[^"]*")', headers_block)
+            for key, value in header_matches:
+                result["headers"][key] = value.strip()
+
+    except Exception as e:
+        logger.error(f"读取API文件 {filepath} 失败: {str(e)}")
+
+    return result
+
+
+def get_url_from_api_file(filepath: str) -> tuple[str, str] | None:
+    """
+    从API文件中提取URL和描述信息
+
+    解析API文件，提取函数文档中的描述和url变量定义
+
+    Args:
+        filepath: API文件路径
+
+    Returns:
+        Optional[tuple[str, str]]: (描述, URL) 元组，如果提取失败返回None
+
+    Example:
+        result = get_url_from_api_file("apis/_user_login.py")
+        # 返回 ("用户登录", "/user/login")
+    """
+    result = parse_api_file(filepath)
+    return result["description"], result["url"]
+
+
 def get_function_name_from_api_file(filepath: str) -> str | None:
     """
     从API文件路径中提取函数名
@@ -223,13 +278,8 @@ def get_function_name_from_api_file(filepath: str) -> str | None:
         result = get_function_name_from_api_file("apis/_user_login.py")
         # 返回 "_user_login"
     """
-    try:
-        basename = os.path.basename(filepath)
-        function_name = os.path.splitext(basename)[0]
-        return function_name
-    except Exception as e:
-        logger.error(f"从文件路径提取函数名失败 {filepath}: {str(e)}")
-        return None
+    result = parse_api_file(filepath)
+    return result["function_name"]
 
 
 def get_param_remarks_from_api_file(api_file: str) -> dict[str, str]:
@@ -246,25 +296,8 @@ def get_param_remarks_from_api_file(api_file: str) -> dict[str, str]:
         result = get_param_remarks_from_api_file("apis/_user_login.py")
         # 返回 {"username": "用户名", "password": "密码"}
     """
-    param_remarks = {}
-    try:
-        with open(api_file, encoding="utf-8") as f:
-            content = f.read()
-
-        # 查找data字典定义
-        data_match = re.search(r"data\s*=\s*\{[^}]*\}", content, re.DOTALL)
-        if data_match:
-            data_block = data_match.group(0)
-            # 提取每个参数和备注
-            param_matches = re.findall(r'"(\w+)"\s*:\s*([^#]+)\s*#\s*(.+?)\n', data_block)
-            for param_name, _, remark in param_matches:
-                # 提取备注中的参数名称
-                # 例如："兑换流水号" 或 "顾客手机号"
-                param_remarks[param_name] = remark.strip()
-    except Exception as e:
-        logger.error(f"读取API文件 {api_file} 失败: {str(e)}")
-
-    return param_remarks
+    result = parse_api_file(api_file)
+    return result["param_remarks"]
 
 
 def get_headers_from_api_file(api_file: str) -> dict[str, str]:
@@ -281,23 +314,8 @@ def get_headers_from_api_file(api_file: str) -> dict[str, str]:
         result = get_headers_from_api_file("apis/_user_login.py")
         # 返回 {"channel": "pc", "content-type": "application/json"}
     """
-    headers = {}
-    try:
-        with open(api_file, encoding="utf-8") as f:
-            content = f.read()
-
-        # 查找headers字典定义
-        headers_match = re.search(r"headers\s*=\s*\{[^}]*\}", content, re.DOTALL)
-        if headers_match:
-            headers_block = headers_match.group(0)
-            # 提取每个header键值对
-            header_matches = re.findall(r'"(\w+[-]?\w+)"\s*:\s*("[^"]*"|f"[^"]*")', headers_block)
-            for key, value in header_matches:
-                headers[key] = value.strip()
-    except Exception as e:
-        logger.error(f"读取API文件 {api_file} 失败: {str(e)}")
-
-    return headers
+    result = parse_api_file(api_file)
+    return result["headers"]
 
 
 def format_headers_for_python(headers: dict[str, str]) -> str:

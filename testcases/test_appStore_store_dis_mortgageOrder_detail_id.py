@@ -13,7 +13,7 @@ from apis.mall_store_application import (
 @allure.severity(Severity.CRITICAL)
 @allure.feature("mall_store_application")
 @allure.story("/appStore/store/dis/mortgageOrder/detail/{id}")
-@allure.title("押货单详情")
+@allure.title("TODO: 添加接口描述")
 def test_appStore_store_dis_mortgageOrder_detail_id():
 
     # 初始化测试数据字典，用于在步骤间传递数据
@@ -26,7 +26,7 @@ def test_appStore_store_dis_mortgageOrder_detail_id():
         },
     }
 
-    @allure.step("押货单详情")
+    @allure.step("TODO: 添加接口描述")
     def step_appStore_store_dis_mortgageOrder_detail_id():
 
         params = {"id": "96453"}
@@ -35,7 +35,7 @@ def test_appStore_store_dis_mortgageOrder_detail_id():
             assert r.json()["code"] == 200
             test_data["detail_id"] = r.json()
 
-    @allure.step("查询店铺押货余额与限额")
+    @allure.step("TODO: 添加接口描述")
     def step_appStore_store_dis_mortgageOrder_getMortgageAmount():
 
         with _appStore_store_dis_mortgageOrder_getMortgageAmount(headers=test_data["headers"]) as r:
@@ -43,7 +43,7 @@ def test_appStore_store_dis_mortgageOrder_detail_id():
             assert r.json()["code"] == 200
             test_data["mortgageOrder_getMortgageAmount"] = r.json()
 
-    @allure.step("店铺是否处于交通管控")
+    @allure.step("TODO: 添加接口描述")
     def step_appStore_common_isStoreInTrafficControl():
 
         with _appStore_common_isStoreInTrafficControl(headers=test_data["headers"]) as r:

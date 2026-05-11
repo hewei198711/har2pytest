@@ -3,13 +3,15 @@ import os
 from util.client import client
 
 headers = {
+    "channel": "pc",
+    "client": "store",
     "authorization": f"bearer {os.environ['access_token']}",
 }
 
 
 def _appStore_common_isStoreInTrafficControl(headers=headers):
     """
-    店铺是否处于交通管控
+    TODO: 添加接口描述
     /appStore/common/isStoreInTrafficControl
     """
 

@@ -9,6 +9,7 @@ params = {
 
 headers = {
     "authorization": f"bearer {os.environ['access_token']}",
+    "content-length": "0",
 }
 
 
