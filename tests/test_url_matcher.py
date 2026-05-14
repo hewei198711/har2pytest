@@ -1,5 +1,4 @@
 from har2pytest.url_matcher import URLMatcher
-from har2pytest.utils import get_url_from_api_file
 
 
 class TestMatchUrlPattern:

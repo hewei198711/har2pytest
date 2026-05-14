@@ -6,13 +6,14 @@ import os
 
 import allure
 
+from har2pytest.config import APIConfig
 from har2pytest.testcase_generator import TestCaseGenerator
-from har2pytest.utils import get_function_name_from_api_file, get_param_remarks_from_api_file
+from har2pytest.utils import parse_api_file
 
 
 @allure.feature("测试用例生成器")
 @allure.story("提取函数名")
-def test_get_function_name_from_file():
+def test_parse_api_file_function_name():
     """测试从API文件中提取函数名"""
     # 创建测试API文件（文件名符合规范：函数名.py）
     test_content = '''
@@ -34,7 +35,8 @@ def _user_login(data=data, access_token=access_token):
         f.write(test_content)
 
     try:
-        function_name = get_function_name_from_api_file("_user_login.py")
+        result = parse_api_file("_user_login.py")
+        function_name = result["function_name"]
         assert function_name == "_user_login"
     finally:
         if os.path.exists("_user_login.py"):
@@ -221,7 +223,7 @@ def test_extract_service_package_from_url():
 
 @allure.feature("测试用例生成器")
 @allure.story("提取参数备注")
-def test_get_param_remarks_from_api_file():
+def test_parse_api_file_param_remarks():
     """测试从API文件中提取参数备注"""
     # 创建测试API文件
     test_content = """
@@ -233,10 +235,10 @@ data = {
 }
 
 def _user_login(data=data, access_token=access_token):
-    \"""
+    \\\"\\\"\\\"
     用户登录
     /user/login
-    \"""
+    \\\"\\\"\\\"
     url = "/user/login"
     headers = {"Authorization": f"bearer {access_token}"}
     with client.post(url=url, headers=headers, json=data) as r:
@@ -247,7 +249,8 @@ def _user_login(data=data, access_token=access_token):
         f.write(test_content)
 
     try:
-        remarks = get_param_remarks_from_api_file("test_api.py")
+        result = parse_api_file("test_api.py")
+        remarks = result["param_remarks"]
         assert remarks.get("username") == "用户名"
         assert remarks.get("password") == "密码"
     finally:
@@ -621,15 +624,16 @@ def _user_login(data=data, access_token=access_token):
 
 @allure.feature("测试用例生成器")
 @allure.story("提取参数备注-文件不存在")
-def test_get_param_remarks_from_api_file_not_found():
+def test_parse_api_file_param_remarks_not_found():
     """测试从不存在的API文件提取参数备注"""
-    remarks = get_param_remarks_from_api_file("nonexistent.py")
+    result = parse_api_file("nonexistent.py")
+    remarks = result["param_remarks"]
     assert remarks == {}
 
 
 @allure.feature("测试用例生成器")
 @allure.story("提取参数备注-无效内容")
-def test_get_param_remarks_from_api_file_invalid():
+def test_parse_api_file_param_remarks_invalid():
     """测试从无效内容的API文件提取参数备注"""
     test_content = """
 # coding:utf-8
@@ -641,7 +645,8 @@ def test_func():
         f.write(test_content)
 
     try:
-        remarks = get_param_remarks_from_api_file("invalid_api.py")
+        result = parse_api_file("invalid_api.py")
+        remarks = result["param_remarks"]
         assert remarks == {}
     finally:
         if os.path.exists("invalid_api.py"):
@@ -650,9 +655,9 @@ def test_func():
 
 @allure.feature("测试用例生成器")
 @allure.story("获取清理后的函数名")
-def test_get_clean_function_name():
+def test_parse_api_file_function_name_clean():
     """测试获取清理后的函数名"""
-    generator = TestCaseGenerator()
+    from har2pytest.utils import parse_api_file
 
     test_content = '''
 # coding:utf-8
@@ -672,7 +677,8 @@ def _user_login(data=data, access_token=access_token):
         f.write(test_content)
 
     try:
-        clean_name = generator._get_clean_function_name("_user_login.py")
+        result = parse_api_file("_user_login.py")
+        clean_name = result["function_name"].lstrip("_")
         assert clean_name == "user_login"
     finally:
         if os.path.exists("_user_login.py"):
@@ -681,9 +687,9 @@ def _user_login(data=data, access_token=access_token):
 
 @allure.feature("测试用例生成器")
 @allure.story("获取清理后的函数名-无函数名")
-def test_get_clean_function_name_no_function():
+def test_parse_api_file_function_name_no_function():
     """测试从无函数名的文件获取清理后的函数名"""
-    generator = TestCaseGenerator()
+    from har2pytest.utils import parse_api_file
 
     test_content = '''
 # coding:utf-8
@@ -697,7 +703,8 @@ data = {
         f.write(test_content)
 
     try:
-        clean_name = generator._get_clean_function_name("test_no_func.py")
+        result = parse_api_file("test_no_func.py")
+        clean_name = result["function_name"].lstrip("_")
         assert clean_name == "test_no_func"
     finally:
         if os.path.exists("test_no_func.py"):
@@ -705,29 +712,10 @@ data = {
 
 
 @allure.feature("测试用例生成器")
-@allure.story("获取Headers字符串")
-def test_get_headers_str():
-    """测试获取Headers字符串"""
-    from har2pytest.config import APIConfig
-
-    generator = TestCaseGenerator()
-
-    APIConfig._config["HEADERS_TO_INCLUDE"] = {
-        "content-type": "application/json",
-        "authorization": "bearer token",
-    }
-
-    headers_str = generator._get_headers_str()
-
-    assert "content-type" in headers_str
-    assert "authorization" in headers_str
-
-
-@allure.feature("测试用例生成器")
-@allure.story("获取Headers字符串-带API文件")
-def test_get_headers_str_with_api_file():
-    """测试带API文件获取Headers字符串"""
-    from har2pytest.config import APIConfig
+@allure.story("获取Headers字符串-直接使用parse_api_file")
+def test_parse_api_file_headers():
+    """测试使用parse_api_file获取Headers"""
+    from har2pytest.utils import parse_api_file
 
     test_content = '''
 # coding:utf-8
@@ -750,17 +738,9 @@ def _test_api(headers=headers):
         f.write(test_content)
 
     try:
-        APIConfig._config["HEADERS_TO_INCLUDE"] = {
-            "content-type": "application/json",
-            "authorization": "bearer token",
-        }
-
-        generator = TestCaseGenerator()
-        headers_str = generator._get_headers_str("_test_api.py")
-
-        assert "content-type" in headers_str
-        assert "authorization" in headers_str
-        assert "custom-header" in headers_str
+        result = parse_api_file("_test_api.py")
+        headers = result["headers"]
+        assert "custom-header" in headers
     finally:
         if os.path.exists("_test_api.py"):
             os.remove("_test_api.py")
@@ -1217,8 +1197,12 @@ def test_extract_path_params_from_url(tmp_path):
         json.dump(test_har, f)
 
     generator = TestCaseGenerator(base_urls=["https://example.com/api"])
-    original_get_swagger_data = generator.swagger_handler.get_swagger_data_for_url
-    generator.swagger_handler.get_swagger_data_for_url = lambda url: swagger_data
+    original_swagger_doc_urls = APIConfig.SWAGGER_DOC_URLS
+    original_default_api_dir = APIConfig.DEFAULT_API_DIR
+    APIConfig.SWAGGER_DOC_URLS = lambda: {"mall_center_user": "https://example.com/swagger"}
+    APIConfig.DEFAULT_API_DIR = lambda: "apis"
+    original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
+    generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
 
     try:
         requests = generator.har_parser.extract_requests_from_har(str(har_file))
@@ -1228,7 +1212,9 @@ def test_extract_path_params_from_url(tmp_path):
         assert "userId" in params
         assert params["userId"] == "12345"
     finally:
-        generator.swagger_handler.get_swagger_data_for_url = original_get_swagger_data
+        APIConfig.SWAGGER_DOC_URLS = original_swagger_doc_urls
+        APIConfig.DEFAULT_API_DIR = original_default_api_dir
+        generator.swagger_handler.get_swagger_doc = original_get_swagger_doc
 
 
 @allure.feature("测试用例生成器")
@@ -1286,8 +1272,12 @@ def _user_detail(data=data, access_token=access_token):
 ''')
 
     generator = TestCaseGenerator(api_dir=str(api_dir), base_urls=["https://example.com"])
-    original_get_swagger_data = generator.swagger_handler.get_swagger_data_for_url
-    generator.swagger_handler.get_swagger_data_for_url = lambda url: swagger_data
+    original_swagger_doc_urls = APIConfig.SWAGGER_DOC_URLS
+    original_default_api_dir = APIConfig.DEFAULT_API_DIR
+    APIConfig.SWAGGER_DOC_URLS = lambda: {"mall_center_user": "https://example.com/swagger"}
+    APIConfig.DEFAULT_API_DIR = lambda: "apis"
+    original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
+    generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
 
     try:
         api_files = generator.match_api_files_for_har(str(har_file))
@@ -1295,7 +1285,9 @@ def _user_detail(data=data, access_token=access_token):
         assert len(api_files) == 1
         assert "_user_detail.py" in api_files[0]
     finally:
-        generator.swagger_handler.get_swagger_data_for_url = original_get_swagger_data
+        APIConfig.SWAGGER_DOC_URLS = original_swagger_doc_urls
+        APIConfig.DEFAULT_API_DIR = original_default_api_dir
+        generator.swagger_handler.get_swagger_doc = original_get_swagger_doc
 
 
 @allure.feature("测试用例生成器")
@@ -1359,8 +1351,12 @@ def _order_items_detail(data=data, access_token=access_token):
 ''')
 
     generator = TestCaseGenerator(api_dir=str(api_dir), base_urls=["https://example.com"])
-    original_get_swagger_data = generator.swagger_handler.get_swagger_data_for_url
-    generator.swagger_handler.get_swagger_data_for_url = lambda url: swagger_data
+    original_swagger_doc_urls = APIConfig.SWAGGER_DOC_URLS
+    original_default_api_dir = APIConfig.DEFAULT_API_DIR
+    APIConfig.SWAGGER_DOC_URLS = lambda: {"mall_center_user": "https://example.com/swagger"}
+    APIConfig.DEFAULT_API_DIR = lambda: "apis"
+    original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
+    generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
 
     try:
         content = generator.generate_test_case_content(
@@ -1375,7 +1371,9 @@ def _order_items_detail(data=data, access_token=access_token):
         assert "orderId" in content or "ORD20260101001" in content
         assert "itemId" in content or "ITEM001" in content
     finally:
-        generator.swagger_handler.get_swagger_data_for_url = original_get_swagger_data
+        APIConfig.SWAGGER_DOC_URLS = original_swagger_doc_urls
+        APIConfig.DEFAULT_API_DIR = original_default_api_dir
+        generator.swagger_handler.get_swagger_doc = original_get_swagger_doc
 
 
 @allure.feature("测试用例生成器")
@@ -1421,8 +1419,12 @@ def test_generate_test_case_with_multiple_path_params(tmp_path):
         json.dump(test_har, f)
 
     generator = TestCaseGenerator(base_urls=["https://example.com"])
-    original_get_swagger_data = generator.swagger_handler.get_swagger_data_for_url
-    generator.swagger_handler.get_swagger_data_for_url = lambda url: swagger_data
+    original_swagger_doc_urls = APIConfig.SWAGGER_DOC_URLS
+    original_default_api_dir = APIConfig.DEFAULT_API_DIR
+    APIConfig.SWAGGER_DOC_URLS = lambda: {"apis": "https://example.com/swagger"}
+    APIConfig.DEFAULT_API_DIR = lambda: "apis"
+    original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
+    generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
 
     try:
         requests = generator.har_parser.extract_requests_from_har(str(har_file))
@@ -1432,7 +1434,9 @@ def test_generate_test_case_with_multiple_path_params(tmp_path):
         assert params["storeId"] == "123"
         assert params["productId"] == "456"
     finally:
-        generator.swagger_handler.get_swagger_data_for_url = original_get_swagger_data
+        APIConfig.SWAGGER_DOC_URLS = original_swagger_doc_urls
+        APIConfig.DEFAULT_API_DIR = original_default_api_dir
+        generator.swagger_handler.get_swagger_doc = original_get_swagger_doc
 
 
 @allure.feature("测试用例生成器")
@@ -1482,8 +1486,12 @@ def test_generate_test_case_with_path_and_query_params(tmp_path):
         json.dump(test_har, f)
 
     generator = TestCaseGenerator(base_urls=["https://example.com"])
-    original_get_swagger_data = generator.swagger_handler.get_swagger_data_for_url
-    generator.swagger_handler.get_swagger_data_for_url = lambda url: swagger_data
+    original_swagger_doc_urls = APIConfig.SWAGGER_DOC_URLS
+    original_default_api_dir = APIConfig.DEFAULT_API_DIR
+    APIConfig.SWAGGER_DOC_URLS = lambda: {"apis": "https://example.com/swagger"}
+    APIConfig.DEFAULT_API_DIR = lambda: "apis"
+    original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
+    generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
 
     try:
         requests = generator.har_parser.extract_requests_from_har(str(har_file))
@@ -1497,7 +1505,9 @@ def test_generate_test_case_with_path_and_query_params(tmp_path):
         if "userId" in params:
             assert params["userId"] == "USER123"
     finally:
-        generator.swagger_handler.get_swagger_data_for_url = original_get_swagger_data
+        APIConfig.SWAGGER_DOC_URLS = original_swagger_doc_urls
+        APIConfig.DEFAULT_API_DIR = original_default_api_dir
+        generator.swagger_handler.get_swagger_doc = original_get_swagger_doc
 
 
 @allure.feature("测试用例生成器")
@@ -1547,8 +1557,12 @@ def _user_info(data=data, access_token=access_token):
 ''')
 
     generator = TestCaseGenerator(api_dir=str(api_dir), base_urls=["https://example.com"])
-    original_get_swagger_data = generator.swagger_handler.get_swagger_data_for_url
-    generator.swagger_handler.get_swagger_data_for_url = lambda url: None
+    original_swagger_doc_urls = APIConfig.SWAGGER_DOC_URLS
+    original_default_api_dir = APIConfig.DEFAULT_API_DIR
+    APIConfig.SWAGGER_DOC_URLS = lambda: {"apis": "https://example.com/swagger"}
+    APIConfig.DEFAULT_API_DIR = lambda: "apis"
+    original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
+    generator.swagger_handler.get_swagger_doc = lambda url: None
 
     try:
         api_files = generator.match_api_files_for_har(str(har_file))
@@ -1557,7 +1571,9 @@ def _user_info(data=data, access_token=access_token):
         assert len(api_files) == 1
         assert str(api_file) in api_files[0]
     finally:
-        generator.swagger_handler.get_swagger_data_for_url = original_get_swagger_data
+        APIConfig.SWAGGER_DOC_URLS = original_swagger_doc_urls
+        APIConfig.DEFAULT_API_DIR = original_default_api_dir
+        generator.swagger_handler.get_swagger_doc = original_get_swagger_doc
 
 
 @allure.feature("测试用例生成器")
@@ -1872,8 +1888,12 @@ def _customer_orders(data=data, access_token=access_token):
     output_dir = tmp_path / "output"
 
     generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir), base_urls=["https://example.com"])
-    original_get_swagger_data = generator.swagger_handler.get_swagger_data_for_url
-    generator.swagger_handler.get_swagger_data_for_url = lambda url: swagger_data
+    original_swagger_doc_urls = APIConfig.SWAGGER_DOC_URLS
+    original_default_api_dir = APIConfig.DEFAULT_API_DIR
+    APIConfig.SWAGGER_DOC_URLS = lambda: {"apis": "https://example.com/swagger"}
+    APIConfig.DEFAULT_API_DIR = lambda: "apis"
+    original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
+    generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
 
     try:
         # 先验证API文件匹配
@@ -1887,4 +1907,6 @@ def _customer_orders(data=data, access_token=access_token):
             assert "test_customer_orders.py" in generated_files[0]
             assert os.path.exists(generated_files[0])
     finally:
-        generator.swagger_handler.get_swagger_data_for_url = original_get_swagger_data
+        APIConfig.SWAGGER_DOC_URLS = original_swagger_doc_urls
+        APIConfig.DEFAULT_API_DIR = original_default_api_dir
+        generator.swagger_handler.get_swagger_doc = original_get_swagger_doc

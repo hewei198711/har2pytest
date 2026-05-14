@@ -8,13 +8,9 @@ from .swagger_handler import SwaggerHandler
 from .url_matcher import URLMatcher
 from .utils import (
     deduplicate_values,
-    format_headers_for_python,
     format_parameter_value,
-    get_function_name_from_api_file,
-    get_headers_from_api_file,
     get_output_dir,
-    get_param_remarks_from_api_file,
-    get_url_from_api_file,
+    parse_api_file,
     write_test_file,
 )
 
@@ -63,48 +59,20 @@ class TestCaseGenerator:
         
         return api_files
 
-    def _get_clean_function_name(self, filepath: str) -> str:
-        """
-        获取清理后的函数名
-        """
-        function_name = get_function_name_from_api_file(filepath)
-        if function_name:
-            return function_name.lstrip("_").strip()
-        return os.path.splitext(os.path.basename(filepath))[0].lstrip("_").strip()
-
-    def _get_headers_str(self, api_file: str = None) -> str:
-        """
-        从API文件或配置文件中获取需要包含的 headers，生成测试用例中的 headers 字符串
-
-        优先从API文件中提取 headers，如果没有提供API文件或提取失败，则使用配置文件中的默认值
-
-        Args:
-            api_file: API文件路径，可选
-
-        Returns:
-            headers 字符串，用于测试用例中
-        """
-        api_headers = {}
-        if api_file:
-            api_headers = get_headers_from_api_file(api_file)
-
-        default_headers = APIConfig.HEADERS_TO_INCLUDE()
-
-        headers_config = {**default_headers, **api_headers}
-
-        return format_headers_for_python(headers_config)
-
     def match_api_files_for_har(self, har_file_path: str) -> list[str]:
-        """根据HAR文件查找对应的API文件（优化版）"""
+        """根据HAR文件查找对应的API文件"""
         requests = self.har_parser.extract_requests_from_har(har_file_path)
         
         # 使用URLMatcher预处理所有请求URL
         request_url_map = {}
         for request in requests:
             request_url = request["url"]
-            # 获取Swagger数据
-            swagger_data = self.swagger_handler.get_swagger_data_for_url(request_url)
-            self.url_matcher.swagger_data = swagger_data
+            # 获取Swagger文档
+            service_package = APIConfig.determine_service_package(request_url)
+            swagger_doc = None
+            if service_package in APIConfig.SWAGGER_DOC_URLS():
+                swagger_doc = self.swagger_handler.get_swagger_doc(APIConfig.SWAGGER_DOC_URLS()[service_package])
+            self.url_matcher.swagger_data = swagger_doc
             
             # 使用统一的匹配器获取URL信息
             url_info = self.url_matcher.get_url_info(request_url)
@@ -118,7 +86,7 @@ class TestCaseGenerator:
         matched_files = []
         for request in requests:
             request_url = request["url"]
-            matched_file = self._find_matching_api_file_unified(
+            matched_file = URLMatcher.find_matching_api_file(
                 request_url, api_files_list, request_url_map
             )
             if matched_file and matched_file not in matched_files:
@@ -126,50 +94,6 @@ class TestCaseGenerator:
         
         logger.debug(f"匹配到的API文件: {matched_files}")
         return matched_files
-
-    def _find_matching_api_file_unified(
-        self, 
-        request_url: str, 
-        api_files: list[str], 
-        request_url_map: dict = None
-    ) -> str | None:
-        """
-        统一的API文件查找方法
-        
-        Args:
-            request_url: 请求URL
-            api_files: API文件路径列表
-            request_url_map: 请求URL到转换后URL的映射
-            
-        Returns:
-            Optional[str]: 匹配的API文件路径
-        """
-        # 获取转换后的URL
-        transformed_url = request_url_map.get(request_url, request_url) if request_url_map else request_url
-        
-        # 为每个API文件创建匹配器（避免重复创建）
-        for api_file in api_files:
-            result = get_url_from_api_file(api_file)
-            if not result:
-                continue
-                
-            _, file_url = result
-            
-            # 三种匹配方式
-            # 1. 直接匹配
-            if request_url == file_url:
-                return api_file
-            
-            # 2. 转换后匹配
-            if transformed_url == file_url:
-                return api_file
-            
-            # 3. 使用URLMatcher进行模板匹配
-            matched, _ = URLMatcher.match_url_pattern(request_url, file_url)
-            if matched:
-                return api_file
-        
-        return None
 
     def extract_params_from_har_request(self, request_info: dict[str, Any]) -> dict[str, Any] | None:
         """
@@ -192,8 +116,11 @@ class TestCaseGenerator:
             params.update(post_data)
 
         # 从URL中提取路径参数（使用Swagger文档）
-        swagger_data = self.swagger_handler.get_swagger_data_for_url(url)
-        _, path_params, _ = URLMatcher(swagger_data).match_with_swagger(url)
+        service_package = APIConfig.determine_service_package(url)
+        swagger_doc = None
+        if service_package in APIConfig.SWAGGER_DOC_URLS():
+            swagger_doc = self.swagger_handler.get_swagger_doc(APIConfig.SWAGGER_DOC_URLS()[service_package])
+        _, path_params, _ = URLMatcher(swagger_doc).match_with_swagger(url)
         if path_params:
             params.update(path_params)
 
@@ -344,7 +271,8 @@ class TestCaseGenerator:
         imports = []
         for api_file in api_files:
             module_path = api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
-            function_name = get_function_name_from_api_file(api_file)
+            result = parse_api_file(api_file)
+            function_name = result["function_name"]
             if function_name:
                 # 提取服务包名称（apis.mall_center_user._xxx -> mall_center_user）
                 parts = module_path.split(".")
@@ -370,7 +298,9 @@ class TestCaseGenerator:
                 feature_name = module_path.split(".")[1]
 
             # 提取接口描述和URL
-            api_description, api_url = get_url_from_api_file(target_api_file)
+            result = parse_api_file(target_api_file)
+            api_description = result["description"]
+            api_url = result["url"]
             if api_description:
                 title_name = api_description
             if api_url:
@@ -391,7 +321,7 @@ class TestCaseGenerator:
 
         # 生成测试函数名称
         if target_api_file:
-            clean_function_name = self._get_clean_function_name(target_api_file)
+            clean_function_name = parse_api_file(target_api_file)["function_name"].lstrip("_")
             test_function_name = f"def test_{clean_function_name}():"
         else:
             test_function_name = "def test_har_api_flow():"
@@ -420,21 +350,24 @@ class TestCaseGenerator:
             method = request_info["method"]
 
             api_function = None
+            api_description = None
             for api_file in api_files:
-                _, file_url = get_url_from_api_file(api_file)
+                result = parse_api_file(api_file)
+                file_url = result["url"]
                 # 1. 直接相等匹配
                 if file_url == url:
-                    api_function = get_function_name_from_api_file(api_file)
+                    api_function = result["function_name"]
+                    api_description = result["description"]
                     break
                 # 2. 如果API文件URL包含路径参数模板，尝试匹配
                 elif file_url and "{" in file_url and "}" in file_url:
                     url_pattern, _, _ = URLMatcher({"paths": {file_url: {}}}).match_with_swagger(url)
                     if url_pattern == file_url:
-                        api_function = get_function_name_from_api_file(api_file)
+                        api_function = result["function_name"]
+                        api_description = result["description"]
                         break
 
             if api_function:
-                api_description, _ = get_url_from_api_file(api_file)
 
                 clean_function_name = api_function.lstrip("_")
 
@@ -592,7 +525,7 @@ class TestCaseGenerator:
 
         for api_file in api_files:
             try:
-                clean_function_name = self._get_clean_function_name(api_file)
+                clean_function_name = parse_api_file(api_file)["function_name"].lstrip("_")
                 test_filename = f"test_{clean_function_name}.py"
                 test_filepath = os.path.join(output_dir, test_filename)
 
@@ -690,12 +623,14 @@ class TestCaseGenerator:
         """
         生成参数化测试用例内容
         """
-        function_name = get_function_name_from_api_file(api_file)
+        result = parse_api_file(api_file)
+        function_name = result["function_name"]
         if not function_name:
             return None
         
         # 获取API信息
-        api_description, api_url = get_url_from_api_file(api_file)
+        api_description = result["description"]
+        api_url = result["url"]
         
         # 解析HAR文件获取请求信息
         requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
@@ -709,14 +644,14 @@ class TestCaseGenerator:
             return None
 
         # 从API文件中提取参数备注
-        param_remarks = get_param_remarks_from_api_file(api_file) or {}
+        param_remarks = result["param_remarks"] or {}
 
         # 提取服务包名称
         module_path = api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
         service_package = module_path.split(".")[1] if len(module_path.split(".")) > 1 else "default"
 
         # 获取清理后的函数名
-        clean_function_name = self._get_clean_function_name(api_file)
+        clean_function_name = parse_api_file(api_file)["function_name"].lstrip("_")
 
         # 生成测试用例内容
         content = self._generate_test_case_imports(service_package, function_name, task_id)
@@ -820,7 +755,7 @@ class TestCaseGenerator:
             return None
         
         # 生成测试用例
-        clean_function_name = self._get_clean_function_name(target_api_file)
+        clean_function_name = parse_api_file(target_api_file)["function_name"].lstrip("_")
         test_filename = f"test_{clean_function_name}.py"
         test_filepath = os.path.join(output_dir, test_filename)
         
@@ -848,11 +783,10 @@ class TestCaseGenerator:
             Optional[str]: 匹配的API文件路径
         """
         for api_file in api_files:
-            result = get_url_from_api_file(api_file)
-            if not result:
+            result = parse_api_file(api_file)
+            file_url = result["url"]
+            if not file_url:
                 continue
-                
-            _, file_url = result
             
             # 1. 直接匹配
             if file_url == target_url:
@@ -1024,6 +958,7 @@ class TestCaseGenerator:
             f"        {param_var_name} =   {{",
         ]
         self._generate_data_dict(content, param_name, other_params, is_combination, param_var_name)
+        content.append("        }")
         return content
 
     def _generate_test_method_assertions(self, function_name: str, param_var_name: str) -> list[str]:

@@ -66,8 +66,8 @@ class APIGenerator:
 
         return False
 
-    def _parse_request_info(self, request_info: dict[str, Any], swagger_data: dict[str, Any] = None) -> dict[str, Any]:
-        """解析请求信息（优化版）"""
+    def _parse_request_info(self, request_info: dict[str, Any]) -> dict[str, Any]:
+        """解析请求信息"""
         method = request_info["method"].upper()
         url = request_info["url"]
         query_params = request_info.get("query_params", {})
@@ -77,11 +77,11 @@ class APIGenerator:
         # 处理headers（保持不变）
         headers_to_include = APIConfig.HEADERS_TO_INCLUDE()
         if isinstance(headers_to_include, dict):
-            headers_to_include = set(headers_to_include.keys())
+            headers_to_include = headers_to_include = set(h.lower() for h in headers_to_include.keys())
         
         headers = {}
         for key, value in raw_headers.items():
-            if key.lower() in [h.lower() for h in headers_to_include]:
+            if key.lower() in headers_to_include:
                 headers[key] = value
         
         required_headers = APIConfig.REQUIRED_HEADERS()
@@ -97,14 +97,12 @@ class APIGenerator:
         if method == "POST" and raw_headers.get("content-length", "") == "0" and not post_data:
             is_need_urlencode = True
         
-        # 使用统一的URL匹配器
-        self.url_matcher.swagger_data = swagger_data
+        # 使用统一的URL匹配器（swagger_data已在外部设置）
         url_info = self.url_matcher.get_url_info(url)
         
         return {
             "method": method,
             "url": url_info["pattern"] or url,  # 使用匹配到的模板URL
-            "original_url": url,
             "query_params": query_params,
             "post_data": post_data,
             "headers": headers,
@@ -116,23 +114,35 @@ class APIGenerator:
         }
     
     def generate_api_file(self, request_info: dict, force_overwrite: bool = False, swagger_info: dict = None):
-        """生成API文件（优化版）"""
+        """生成API文件"""
         method = request_info["method"].upper()
         url = request_info["url"]
         
-        # 获取Swagger数据
-        swagger_data = None
-        swagger_data = self.swagger_handler.get_swagger_data_for_url(url)
-        
-        # 解析请求信息（使用优化后的方法）
-        parsed_info = self._parse_request_info(request_info, swagger_data)
-        url_pattern = parsed_info.get("url_pattern", url)
-        
-        # 确定服务包
         service_package = APIConfig.determine_service_package(url)
-        
-        # 使用URLMatcher生成的函数名
-        function_name = parsed_info["function_name"]
+        # 如果已传入swagger_info，不需要获取Swagger文档
+        if swagger_info is None:
+            # 获取整个Swagger文档（用于URL模板匹配和获取API信息）
+            swagger_doc = None
+            if service_package in APIConfig.SWAGGER_DOC_URLS():
+                swagger_doc = self.swagger_handler.get_swagger_doc(APIConfig.SWAGGER_DOC_URLS()[service_package])
+            
+            # 设置swagger_data到url_matcher
+            self.url_matcher.swagger_data = swagger_doc
+            
+            # 解析请求信息，获取URL模式
+            parsed_info = self._parse_request_info(request_info)
+            url_pattern = parsed_info.get("url_pattern", url)
+            
+            # 获取特定URL的Swagger信息（summary、description、parameters）
+            if swagger_doc:
+                swagger_info = self.swagger_handler.find_api_info_in_swagger(swagger_doc, url_pattern, method)
+            
+            # 使用URLMatcher生成的函数名
+            function_name = parsed_info["function_name"]
+        else:
+            parsed_info = self._parse_request_info(request_info)
+            function_name = parsed_info["function_name"]
+            url_pattern = parsed_info.get("url_pattern", url)
         
         # 检查文件是否存在
         if self.check_api_exists(url_pattern, service_package):
@@ -151,7 +161,7 @@ class APIGenerator:
         
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
-        # 生成文件内容
+        # 生成文件内容（使用从Swagger获取的数据）
         content = self.generate_file_content(request_info, function_name, swagger_info, parsed_info)
         write_test_file(filepath, content)
         
@@ -405,12 +415,10 @@ class APIGenerator:
         elif method == "GET":
             param_name = "params" if query_params else None
         elif method == "POST":
-            if query_params:
-                param_name = "data"
-            elif is_file_upload:
+            if is_file_upload:
                 param_name = "files" if post_data else None
             else:
-                param_name = "data" if post_data else None
+                param_name = "data" if (post_data or query_params) else None
         else:
             param_name = None
 
@@ -422,7 +430,7 @@ class APIGenerator:
         function_def.append(f"def {function_name}({', '.join(func_params)}):")
         function_def.append('    """')
 
-        # 使用Swagger文档中的描述信息
+        # 使用Swagger文档中的描述信息(接口名称，url模板，参数说明)
         if swagger_info.get("summary"):
             function_def.append(f"    {swagger_info['summary']}")
         elif swagger_info.get("description"):

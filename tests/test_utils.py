@@ -7,14 +7,13 @@ import allure
 from har2pytest.utils import (
     escape_string_for_python,
     format_parameter_value,
-    get_headers_from_api_file,
-    get_url_from_api_file,
+    parse_api_file,
 )
 
 
 @allure.feature("工具函数")
 @allure.story("URL提取")
-def test_get_url_from_api_file():
+def test_parse_api_file_url():
     """测试从文件中提取URL"""
     # 测试从文件中提取URL（使用真实的API文件格式）
     test_content = '''def _user_login(data=data, headers=headers):
@@ -28,10 +27,10 @@ def test_get_url_from_api_file():
         f.write(test_content)
 
     try:
-        result = get_url_from_api_file("test_url.txt")
+        result = parse_api_file("test_url.txt")
         assert result is not None
-        assert result[0] == "用户登录"
-        assert result[1] == "/user/login"
+        assert result["description"] == "用户登录"
+        assert result["url"] == "/user/login"
     finally:
         import os
 
@@ -63,10 +62,10 @@ def _user_order_getStoreAgentOrderList(data=data, headers=headers):
         f.write(test_content)
 
     try:
-        result = get_url_from_api_file("test_api.py")
+        result = parse_api_file("test_api.py")
         assert result is not None
-        assert result[0] == "PC店铺查询兑换订单列表"
-        assert result[1] == "/user/order/getStoreAgentOrderList"
+        assert result["description"] == "PC店铺查询兑换订单列表"
+        assert result["url"] == "/user/order/getStoreAgentOrderList"
     finally:
         import os
 
@@ -119,7 +118,7 @@ def test_escape_string_for_python():
 
 @allure.feature("工具函数")
 @allure.story("Headers提取")
-def test_get_headers_from_api_file():
+def test_parse_api_file_headers():
     """测试从API文件中提取headers配置"""
     # 测试真实的API文件格式
     test_content = '''from util.client import client
@@ -144,12 +143,13 @@ def _user_login(data=data, headers=headers):
         f.write(test_content)
 
     try:
-        result = get_headers_from_api_file("test_api_headers.py")
+        result = parse_api_file("test_api_headers.py")
         assert result is not None
-        assert "channel" in result
-        assert result["channel"] == '"pc"'
-        assert "content-type" in result
-        assert result["content-type"] == '"application/json;charset=UTF-8"'
+        headers = result["headers"]
+        assert "channel" in headers
+        assert headers["channel"] == '"pc"'
+        assert "content-type" in headers
+        assert headers["content-type"] == '"application/json;charset=UTF-8"'
     finally:
         import os
 

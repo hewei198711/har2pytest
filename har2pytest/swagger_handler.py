@@ -6,7 +6,6 @@ from .config import APIConfig
 from .logger import logger
 from .url_matcher import URLMatcher
 
-
 # 仅在类型检查时导入，运行时不会执行
 if TYPE_CHECKING:
     from .api_generator import APIGenerator
@@ -145,10 +144,11 @@ class SwaggerHandler:
                 for param in parameters:
                     param_name = param.get("name", "")
                     param_desc = param.get("description", "")
+                    param_in = param.get("in", "")
 
-                    # 对于所有参数，只要有名称和描述，就添加到参数列表中
-                    # 包括 GET 请求的 body 参数（通常作为查询参数传递）
-                    if param_name and param_desc:
+                    # 对于 query 和 path 参数，添加到参数列表中
+                    # 对于 body 参数，只添加其内部属性，不添加 body 参数本身
+                    if param_name and param_desc and param_in != "body":
                         api_info["parameters"][param_name] = param_desc
 
                     if "schema" in param and "$ref" in param["schema"]:
@@ -201,23 +201,9 @@ class SwaggerHandler:
             elif param_in == "body" and "schema" in param:
                 has_body_param = True
                 post_data = self._extract_body_params(param["schema"], swagger_data)
-                # 提取body参数的嵌套描述
+                # 递归提取body参数的嵌套描述
                 schema = param["schema"]
-                if "$ref" in schema:
-                    ref = schema["$ref"]
-                    ref_name = ref.split("/")[-1]
-                    if "definitions" in swagger_data and ref_name in swagger_data["definitions"]:
-                        definition = swagger_data["definitions"][ref_name]
-                        if "properties" in definition:
-                            for prop_name, prop_info in definition["properties"].items():
-                                prop_desc = prop_info.get("description", "")
-                                if prop_name and prop_desc:
-                                    param_descriptions[prop_name] = prop_desc
-                elif "properties" in schema:
-                    for prop_name, prop_info in schema["properties"].items():
-                        prop_desc = prop_info.get("description", "")
-                        if prop_name and prop_desc:
-                            param_descriptions[prop_name] = prop_desc
+                self._extract_nested_descriptions(schema, swagger_data, param_descriptions)
             elif param_in == "path":
                 # 处理路径参数
                 path_params[param_name] = self._get_default_value(param_type)
@@ -252,16 +238,16 @@ class SwaggerHandler:
 
     def _extract_body_params(self, schema: dict[str, Any], swagger_data: dict[str, Any]) -> dict[str, Any]:
         """
-        从body参数schema中提取参数
+        从body参数schema中提取参数（递归处理嵌套结构）
 
-        处理模型引用和内联模型
+        处理模型引用和内联模型，递归处理嵌套对象
 
         Args:
             schema: 参数的schema定义
             swagger_data: 完整的Swagger文档数据
 
         Returns:
-            Dict[str, Any]: 提取的参数字典
+            Dict[str, Any]: 提取的参数字典（包含嵌套结构）
         """
         body_params = {}
 
@@ -272,14 +258,106 @@ class SwaggerHandler:
                 definition = swagger_data["definitions"][ref_name]
                 if "properties" in definition:
                     for prop_name, prop_info in definition["properties"].items():
-                        prop_type = prop_info.get("type", "string")
-                        body_params[prop_name] = self._get_default_value(prop_type)
+                        body_params[prop_name] = self._extract_param_value(prop_info, swagger_data)
         elif "properties" in schema:
             for prop_name, prop_info in schema["properties"].items():
-                prop_type = prop_info.get("type", "string")
-                body_params[prop_name] = self._get_default_value(prop_type)
+                body_params[prop_name] = self._extract_param_value(prop_info, swagger_data)
 
         return body_params
+
+    def _extract_param_value(self, prop_info: dict[str, Any], swagger_data: dict[str, Any]) -> Any:
+        """
+        递归提取参数值，处理嵌套对象和数组
+
+        Args:
+            prop_info: 属性信息
+            swagger_data: 完整的Swagger文档数据
+
+        Returns:
+            Any: 参数值（可能是基本类型、对象或数组）
+        """
+        prop_type = prop_info.get("type", "string")
+        
+        # 如果有 $ref，优先处理引用
+        if "$ref" in prop_info:
+            ref = prop_info["$ref"]
+            ref_name = ref.split("/")[-1]
+            if "definitions" in swagger_data and ref_name in swagger_data["definitions"]:
+                definition = swagger_data["definitions"][ref_name]
+                if "properties" in definition:
+                    result = {}
+                    for nested_name, nested_info in definition["properties"].items():
+                        result[nested_name] = self._extract_param_value(nested_info, swagger_data)
+                    return result
+        
+        if prop_type == "object":
+            if "properties" in prop_info:
+                result = {}
+                for nested_name, nested_info in prop_info["properties"].items():
+                    result[nested_name] = self._extract_param_value(nested_info, swagger_data)
+                return result
+            return {}
+        elif prop_type == "array":
+            items = prop_info.get("items", {})
+            if "$ref" in items:
+                ref = items["$ref"]
+                ref_name = ref.split("/")[-1]
+                if "definitions" in swagger_data and ref_name in swagger_data["definitions"]:
+                    definition = swagger_data["definitions"][ref_name]
+                    if "properties" in definition:
+                        result = {}
+                        for nested_name, nested_info in definition["properties"].items():
+                            result[nested_name] = self._extract_param_value(nested_info, swagger_data)
+                        return [result]
+            elif "properties" in items:
+                result = {}
+                for nested_name, nested_info in items["properties"].items():
+                    result[nested_name] = self._extract_param_value(nested_info, swagger_data)
+                return [result]
+            return []
+        else:
+            return self._get_default_value(prop_type)
+
+    def _extract_nested_descriptions(self, schema: dict[str, Any], swagger_data: dict[str, Any], 
+                                      descriptions: dict[str, str], parent_key: str = "") -> None:
+        """
+        递归提取嵌套参数的描述信息
+
+        Args:
+            schema: 参数的schema定义
+            swagger_data: 完整的Swagger文档数据
+            descriptions: 存储描述信息的字典
+            parent_key: 父级参数名（用于嵌套参数）
+        """
+        if "$ref" in schema:
+            ref = schema["$ref"]
+            ref_name = ref.split("/")[-1]
+            if "definitions" in swagger_data and ref_name in swagger_data["definitions"]:
+                definition = swagger_data["definitions"][ref_name]
+                if "properties" in definition:
+                    for prop_name, prop_info in definition["properties"].items():
+                        full_key = f"{parent_key}.{prop_name}" if parent_key else prop_name
+                        prop_desc = prop_info.get("description", "")
+                        if prop_name and prop_desc:
+                            descriptions[full_key] = prop_desc
+                        # 递归处理嵌套对象
+                        if prop_info.get("type") == "object" or "$ref" in prop_info:
+                            self._extract_nested_descriptions(prop_info, swagger_data, descriptions, full_key)
+                        elif prop_info.get("type") == "array":
+                            items = prop_info.get("items", {})
+                            self._extract_nested_descriptions(items, swagger_data, descriptions, full_key)
+        elif "properties" in schema:
+            for prop_name, prop_info in schema["properties"].items():
+                full_key = f"{parent_key}.{prop_name}" if parent_key else prop_name
+                prop_desc = prop_info.get("description", "")
+                if prop_name and prop_desc:
+                    descriptions[full_key] = prop_desc
+                # 递归处理嵌套对象
+                if prop_info.get("type") == "object" or "$ref" in prop_info:
+                    self._extract_nested_descriptions(prop_info, swagger_data, descriptions, full_key)
+                elif prop_info.get("type") == "array":
+                    items = prop_info.get("items", {})
+                    self._extract_nested_descriptions(items, swagger_data, descriptions, full_key)
 
     def generate_apis_from_swagger(
         self, swagger_url: str, force_overwrite: bool = False, specific_path: str = None
@@ -307,23 +385,37 @@ class SwaggerHandler:
                 logger.error(f"无法获取Swagger文档: {swagger_url}")
                 return generated_files
 
+            # 获取Swagger文档的basePath
+            base_path = swagger_data.get("basePath", "")
+
             # 遍历所有API路径
             paths = swagger_data.get("paths", {})
             logger.info(f"从Swagger文档中发现 {len(paths)} 个API路径")
 
-            # 获取Swagger文档的basePath
-            base_path = swagger_data.get("basePath", "")
+            # 如果指定了特定路径，直接查找而不是遍历
+            paths_to_process = paths.items()
+            if specific_path:
+                # 从specific_path中移除base_path前缀
+                search_path = specific_path
+                if base_path and base_path != "/":
+                    if search_path.startswith(base_path):
+                        search_path = search_path[len(base_path):]
+                        if not search_path.startswith("/"):
+                            search_path = "/" + search_path
+                
+                # 直接在paths中查找
+                if search_path in paths.keys():
+                    paths_to_process = [(search_path, paths[search_path])]
+                else:
+                    logger.warning(f"指定的路径 {specific_path} 在Swagger文档中未找到")
+                    return generated_files
 
-            for path, methods in paths.items():
+            for path, methods in paths_to_process:
                 # 构建完整的URL路径，包含basePath
                 full_path = path
                 if base_path and base_path != "/":
                     # 拼接路径，避免产生双斜杠
                     full_path = base_path.rstrip("/") + "/" + path.lstrip("/")
-
-                # 如果指定了特定路径，只处理匹配的路径
-                if specific_path and full_path != specific_path:
-                    continue
 
                 # 遍历支持的HTTP方法
                 for method, method_data in methods.items():
@@ -380,41 +472,3 @@ class SwaggerHandler:
 
         return generated_files
 
-    def get_swagger_data_for_url(self, url: str) -> dict[str, Any] | None:
-        """
-        根据URL获取对应的Swagger文档数据
-
-        Args:
-            url: 原始接口URL，如 /appStore/store/dis/mortgageOrder/detail/96453
-
-        Returns:
-            dict: Swagger文档数据，如果获取失败则返回None
-
-        Example:
-            swagger_data = swagger_handler.get_swagger_data_for_url("/appStore/store/dis/mortgageOrder/detail/96453")
-            if swagger_data:
-                # 使用Swagger数据进行路径模板匹配
-                url_pattern, path_params, _ = URLMatcher(swagger_data).match_with_swagger(url)
-        """
-
-        # 根据URL确定服务包
-        service_package = APIConfig.determine_service_package(url)
-
-        # 检查服务包是否有对应的Swagger文档URL
-        if service_package in APIConfig.SWAGGER_DOC_URLS():
-            try:
-                # 获取Swagger文档URL
-                doc_base_url = APIConfig.SWAGGER_DOC_URLS()[service_package]
-                logger.debug(f"服务包: {service_package}, Swagger文档URL: {doc_base_url}")
-
-                # 获取Swagger文档（使用缓存）
-                swagger_data = self.get_swagger_doc(doc_base_url)
-                if swagger_data:
-                    logger.debug(f"成功获取Swagger文档，路径数量: {len(swagger_data.get('paths', {}))}")
-                    return swagger_data
-                else:
-                    logger.debug(f"无法获取Swagger文档: {doc_base_url}")
-            except Exception as e:
-                logger.error(f"获取Swagger文档信息失败: {str(e)}")
-
-        return None

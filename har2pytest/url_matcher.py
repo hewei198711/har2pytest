@@ -3,7 +3,7 @@ from typing import Any
 
 from .config import APIConfig
 from .logger import logger
-from .utils import get_url_from_api_file
+from .utils import parse_api_file
 
 
 class URLMatcher:
@@ -20,6 +20,27 @@ class URLMatcher:
         """
         self.swagger_data = swagger_data
         self._path_params_cache = {}
+    
+    def _has_numeric_path_segment(self, url: str) -> bool:
+        """
+        检查URL中是否包含数字路径参数（两个斜杠之间有完整的数字）
+        
+        Args:
+            url: URL路径
+            
+        Returns:
+            bool: 是否包含数字路径参数
+            
+        Example:
+            >>> matcher = URLMatcher()
+            >>> matcher._has_numeric_path_segment("/appStore/store/123/detail")
+            True
+            >>> matcher._has_numeric_path_segment("/appStore/store/detail")
+            False
+        """
+        # 匹配两个斜杠之间的纯数字段
+        pattern = r'\/(\d+)\/'
+        return bool(re.search(pattern, url))
     
     @staticmethod
     def match_url_pattern(url: str, pattern: str) -> tuple[bool, dict[str, str]]:
@@ -148,31 +169,6 @@ class URLMatcher:
         return clean_url
     
     @staticmethod
-    def extract_path_params(url: str) -> dict[str, str]:
-        """
-        从URL中提取路径参数（当URL已经是模板格式时）
-        
-        Args:
-            url: 包含路径参数的URL，如 /user/{userId}/info
-            
-        Returns:
-            Dict[str, str]: 路径参数名称到空值的映射
-            
-        Example:
-            >>> URLMatcher.extract_path_params("/user/{userId}/info")
-            {"userId": ""}
-        """
-        path_params = {}
-        parts = url.strip('/').split('/')
-        
-        for part in parts:
-            if part.startswith('{') and part.endswith('}'):
-                param_name = part[1:-1]
-                path_params[param_name] = ""
-        
-        return path_params
-    
-    @staticmethod
     def generate_function_name(url: str | None) -> str:
         """
         从URL生成函数名
@@ -196,10 +192,7 @@ class URLMatcher:
         clean_url = re.sub(r'[{}]', '', url)
         # 替换非字母数字下划线为下划线
         clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', clean_url)
-        # 移除开头的下划线（如果有）
-        clean_name = clean_name.lstrip('_')
-        # 添加前缀下划线
-        return f"_{clean_name}"
+        return clean_name
     
     def get_url_info(self, url: str) -> dict[str, Any]:
         """
@@ -213,46 +206,42 @@ class URLMatcher:
         """
         # 初始化结果
         result = {
-            "original_url": url,
-            "normalized_url": url,
-            "pattern": None,
-            "path_params": {},
-            "function_name": None,
-            "has_path_params": False
+            "original_url": url,  # 原始URL
+            "pattern": None,  # 匹配到的路径模板
+            "path_params": {},  # 路径参数映射
+            "function_name": None,  # 生成的函数名
+            "has_path_params": False  # 是否包含路径参数
         }
         
-        # 1. 检查URL是否已经是模板格式
-        if '{' in url and '}' in url:
-            result["pattern"] = url
-            result["path_params"] = self.extract_path_params(url)
-            result["has_path_params"] = True
-            result["function_name"] = self.generate_function_name(url)
-            return result
+        has_braces = '{' in url and '}' in url
+        has_numeric = self._has_numeric_path_segment(url)
         
-        # 2. 尝试从配置的PATH_URLS匹配
-        path_urls = APIConfig.PATH_URLS()
-        pattern, params = self.extract_url_template(url, path_urls)
-        if pattern:
-            result["pattern"] = pattern
-            result["path_params"] = params
-            result["has_path_params"] = bool(params)
-            result["function_name"] = self.generate_function_name(pattern)
-            return result
-        
-        # 3. 尝试从Swagger文档匹配
-        if self.swagger_data:
-            pattern, params, _ = self.match_with_swagger(url)
+        # 如果URL包含数字路径段或花括号参数，尝试从配置和Swagger匹配
+        if has_numeric or has_braces:
+            # 1. 尝试从配置的PATH_URLS匹配
+            path_urls = APIConfig.PATH_URLS()
+            pattern, params = self.extract_url_template(url, path_urls)
             if pattern:
                 result["pattern"] = pattern
                 result["path_params"] = params
                 result["has_path_params"] = bool(params)
                 result["function_name"] = self.generate_function_name(pattern)
                 return result
+            
+            # 2. 尝试从Swagger文档匹配
+            if self.swagger_data:
+                pattern, params, _ = self.match_with_swagger(url)
+                if pattern:
+                    result["pattern"] = pattern
+                    result["path_params"] = params
+                    result["has_path_params"] = bool(params)
+                    result["function_name"] = self.generate_function_name(pattern)
+                    return result
         
-        # 4. 没有匹配到模板，使用原始URL
-        result["normalized_url"] = url
-        result["pattern"] = url  # 设置 pattern 为原始URL
+        # 3. 没有匹配到模板或不需要匹配，使用原始URL
+        result["pattern"] = url
         result["function_name"] = self.generate_function_name(url)
+         
         return result
     
     @staticmethod
@@ -326,11 +315,10 @@ class URLMatcher:
         transformed_url = request_url_map.get(request_url, request_url) if request_url_map else request_url
         
         for api_file in api_files:
-            result = get_url_from_api_file(api_file)
-            if not result:
+            result = parse_api_file(api_file)
+            file_url = result["url"]
+            if not file_url:
                 continue
-                
-            _, file_url = result
             
             # 1. 直接匹配
             if request_url == file_url:

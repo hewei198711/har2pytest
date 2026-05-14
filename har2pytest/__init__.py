@@ -19,10 +19,7 @@ from .utils import (
     format_headers_for_python,
     format_parameter_value,
     format_params_for_python,
-    get_function_name_from_api_file,
-    get_headers_from_api_file,
-    get_param_remarks_from_api_file,
-    get_url_from_api_file,
+    parse_api_file,
 )
 
 __all__ = [
@@ -33,12 +30,9 @@ __all__ = [
     "SwaggerHandler",
     "get_logger",
     "logger",
-    "get_url_from_api_file",
+    "parse_api_file",
     "format_parameter_value",
     "escape_string_for_python",
-    "get_function_name_from_api_file",
-    "get_param_remarks_from_api_file",
-    "get_headers_from_api_file",
     "format_headers_for_python",
     "format_params_for_python",
 ]

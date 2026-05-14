@@ -1,18 +1,20 @@
 import os
+from urllib.parse import urlencode
 
 from util.client import client
 
-params = {
+data = {
     "content": "",  # content
 }
 
 headers = {
     "authorization": f"bearer {os.environ['access_token']}",
     "content-length": "0",
+    "content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
 }
 
 
-def _appStore_order_appletsGenerateOrderCode(params=params, headers=headers):
+def _appStore_order_appletsGenerateOrderCode(data=data, headers=headers):
     """
     appletsGenerateOrderCode
     /appStore/order/appletsGenerateOrderCode
@@ -22,5 +24,7 @@ def _appStore_order_appletsGenerateOrderCode(params=params, headers=headers):
     """
 
     url = "/appStore/order/appletsGenerateOrderCode"
-    with client.get(url=url, params=params, headers=headers) as r:
+    data = urlencode(data)  # application/x-www-form-urlencoded传参需要特殊处理
+
+    with client.post(url=url, data=data, headers=headers) as r:
         return r
