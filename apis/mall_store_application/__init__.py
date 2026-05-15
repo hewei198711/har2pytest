@@ -1604,3 +1604,6 @@ from ._appStore_webAndApp_store_move_getMoveApplyRecord import _appStore_webAndA
 from ._appStore_webAndApp_store_move_getStoreMoveApply import _appStore_webAndApp_store_move_getStoreMoveApply # noqa: F401
 from ._appStore_webAndApp_store_move_moveApplyList import _appStore_webAndApp_store_move_moveApplyList # noqa: F401
 from ._appStore_webAndApp_store_move_queryStoreMoveByCode import _appStore_webAndApp_store_move_queryStoreMoveByCode # noqa: F401
+
+from ._appStore_mobile_returnOrder_page import _appStore_mobile_returnOrder_page # noqa: F401
+from ._appStore_mobile_returnOrder_returnProduct import _appStore_mobile_returnOrder_returnProduct # noqa: F401

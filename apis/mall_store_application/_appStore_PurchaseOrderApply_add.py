@@ -4,7 +4,7 @@ from util.client import client
 
 data = {
     "orderSn": "",  # 押货单编号
-    "products": [],  # 修改明细
+    "products": [{"mortgageNum": 0, "productCode": ""}],  # 修改明细
     "reason": "",  # 申请原因
     "remarks": "",  # 修改说明
     "storeCode": "",  # 服务中心编号(无需填写)
@@ -23,6 +23,8 @@ def _appStore_PurchaseOrderApply_add(data=data, headers=headers):
     参数说明:
     - orderSn: 押货单编号
     - products: 修改明细
+    - products.mortgageNum: 商品数量
+    - products.productCode: 商品编号
     - reason: 申请原因
     - remarks: 修改说明
     - storeCode: 服务中心编号(无需填写)

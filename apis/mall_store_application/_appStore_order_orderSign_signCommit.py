@@ -17,7 +17,25 @@ data = {
     "isUpgrade": 0,  # 是否需要升级 0->否 1->是
     "orderAmount": 0.0,  # 订单金额(总计)
     "orderClient": 0,  # 订单客户来源，1-PC店铺
-    "orders": [],  # 每个月订单信息
+    "orders": [
+        {
+            "couponList": [{"cartCouponAmount": 0.0, "couponType": 0, "memberCouponId": 0}],
+            "giftList": [{"grantdtlId": 0}],
+            "productList": [
+                {
+                    "cusSerialNo": "",
+                    "exchangeParam": {"exchangeSerialNo": "", "number": 0},
+                    "number": 0,
+                    "prodType": 0,
+                    "productGroupIndex": 0,
+                    "serialNo": "",
+                    "sssProdType": 0,
+                }
+            ],
+            "secondCouponList": [{"secondCouponId": 0}],
+            "signNumber": 0,
+        }
+    ],  # 每个月订单信息
     "ownerId": 0,  # 送货人ID
     "payType": 0,  # 付款方式，1->一次性付款 2->分期付款
     "promotionId": 0,  # 活动ID
@@ -56,6 +74,25 @@ def _appStore_order_orderSign_signCommit(data=data, headers=headers):
     - orderAmount: 订单金额(总计)
     - orderClient: 订单客户来源，1-PC店铺
     - orders: 每个月订单信息
+    - orders.couponList: 使用的优惠券
+    - orders.couponList.cartCouponAmount: 优惠券可优惠金额
+    - orders.couponList.couponType: 优惠券类型:1-立减券,2-满减券,3-叠加满减券,4-堆叠满减券,5-产品兑换券
+    - orders.couponList.memberCouponId: 用户优惠券id
+    - orders.giftList: 使用的电子礼券
+    - orders.giftList.grantdtlId: 电子礼券id
+    - orders.productList: 购买产品信息
+    - orders.productList.cusSerialNo: 定制商品二级编码,购买定制商品不能为空
+    - orders.productList.exchangeParam: 换购商品信息
+    - orders.productList.exchangeParam.exchangeSerialNo: 换购商品编码
+    - orders.productList.exchangeParam.number: 换购商品数量
+    - orders.productList.number: 产品数量
+    - orders.productList.prodType: 签约购3.0使用，1：必选产品；2：可选产品
+    - orders.productList.productGroupIndex: 随心购主产品分组序号
+    - orders.productList.serialNo: 产品编码
+    - orders.productList.sssProdType: S+S+S使用，1：主产品；2：赠品
+    - orders.secondCouponList: 使用的秒返券
+    - orders.secondCouponList.secondCouponId: 秒返券id
+    - orders.signNumber: 签约购期数
     - ownerId: 送货人ID
     - payType: 付款方式，1->一次性付款 2->分期付款
     - promotionId: 活动ID

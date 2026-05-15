@@ -435,6 +435,11 @@ class SwaggerHandler:
                             self._extract_params_from_swagger(parameters, swagger_data)
                         )
 
+                        logger.debug(f"提取到的post_data: {post_data}")
+                        logger.debug(f"post_data类型: {type(post_data)}")
+                        logger.debug(f"param_descriptions: {param_descriptions}")
+                        logger.debug(f"path_params: {path_params}")
+
                         request_info["query_params"] = query_params
                         request_info["post_data"] = post_data
                         request_info["path_params"] = path_params

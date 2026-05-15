@@ -3,7 +3,7 @@ import os
 from util.client import client
 
 data = {
-    "productList": [],  # 商品编号列表
+    "productList": [{"serialNo": ""}],  # 商品编号列表
     "productShelvesKeyword": "",  # 货架关联关联词
 }
 
@@ -20,6 +20,7 @@ def _appStore_msym_productShelves_saveShelvesProducts(data=data, headers=headers
 
     参数说明:
     - productList: 商品编号列表
+    - productList.serialNo: 商品编号
     - productShelvesKeyword: 货架关联关联词
     """
 

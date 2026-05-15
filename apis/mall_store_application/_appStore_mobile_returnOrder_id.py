@@ -3,7 +3,7 @@ import os
 from util.client import client
 
 params = {
-    "id": "",  # id
+    "id": 0,  # id
 }
 
 headers = {

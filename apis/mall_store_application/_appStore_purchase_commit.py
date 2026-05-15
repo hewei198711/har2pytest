@@ -3,7 +3,7 @@ import os
 from util.client import client
 
 data = {
-    "list": [],  # 押货列表
+    "list": [{"productCode": "", "productMortgagePrice": 0.0, "productNum": 0, "productRetailPrice": 0.0}],  # 押货列表
     "transId": "",  # 业务id
 }
 
@@ -20,6 +20,10 @@ def _appStore_purchase_commit(data=data, headers=headers):
 
     参数说明:
     - list: 押货列表
+    - list.productCode: 押货商品编码
+    - list.productMortgagePrice: 商品押货价
+    - list.productNum: 押货商品数量
+    - list.productRetailPrice: 商品零售价
     - transId: 业务id
     """
 

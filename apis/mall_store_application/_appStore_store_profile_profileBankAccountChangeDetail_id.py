@@ -3,7 +3,7 @@ import os
 from util.client import client
 
 params = {
-    "id": "",  # 资料变更ID
+    "id": 0,  # 资料变更ID
 }
 
 headers = {

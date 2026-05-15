@@ -4,7 +4,7 @@ from util.client import client
 
 data = {
     "orderMark": 0,  # 押货标识 1普通押货单 2仅调账不发货 3套装组合押货 4套装拆分押货 5库存转移 6签约押货单 7随心购押货单 8换购品押货 9签约购押货3.0 10商城-店铺押货 11签约购押货4.0
-    "products": [],  # 商品列表
+    "products": [{"mortgageNum": 0, "productCode": ""}],  # 商品列表
     "storeCode": "",  # 店铺编号
 }
 
@@ -22,6 +22,8 @@ def _appStore_store_dis_mortgageOrder_checkMortgagePayProduct(data=data, headers
     参数说明:
     - orderMark: 押货标识 1普通押货单 2仅调账不发货 3套装组合押货 4套装拆分押货 5库存转移 6签约押货单 7随心购押货单 8换购品押货 9签约购押货3.0 10商城-店铺押货 11签约购押货4.0
     - products: 商品列表
+    - products.mortgageNum: 商品数量
+    - products.productCode: 商品编码
     - storeCode: 店铺编号
     """
 

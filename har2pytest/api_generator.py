@@ -141,6 +141,9 @@ class APIGenerator:
             function_name = parsed_info["function_name"]
         else:
             parsed_info = self._parse_request_info(request_info)
+            # 保留 swagger_handler 中提取的路径参数
+            if "path_params" in request_info and request_info["path_params"]:
+                parsed_info["path_params"] = request_info["path_params"]
             function_name = parsed_info["function_name"]
             url_pattern = parsed_info.get("url_pattern", url)
         
@@ -256,12 +259,13 @@ class APIGenerator:
         param_name = None
         param_data = None
 
-        if path_params:
-            param_name = "params"
-            param_data = path_params
-        elif method == "GET" and query_params:
+        # 如果同时有路径参数和查询参数，需要处理两者
+        if method == "GET" and query_params:
             param_name = "params"
             param_data = query_params
+        elif path_params:
+            param_name = "params"
+            param_data = path_params
         elif method == "POST":
             if is_need_urlencode and query_params:
                 param_name = "data"
@@ -357,10 +361,10 @@ class APIGenerator:
         function_def = []
 
         if method == "GET":
-            if path_params:
-                function_def.append("    with client.get(url=url, headers=headers) as r:")
-            elif query_params:
+            if query_params:
                 function_def.append("    with client.get(url=url, params=params, headers=headers) as r:")
+            elif path_params:
+                function_def.append("    with client.get(url=url, headers=headers) as r:")
             else:
                 function_def.append("    with client.get(url=url, headers=headers) as r:")
         elif method == "POST":
@@ -511,7 +515,6 @@ class APIGenerator:
 
         content_parts = imports + params_section + function_def
         return "\n".join(content_parts)
-
 
     def generate_index_file(self, generated_files: list[str]):
         """

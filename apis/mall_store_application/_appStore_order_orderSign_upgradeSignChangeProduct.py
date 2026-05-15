@@ -3,8 +3,8 @@ import os
 from util.client import client
 
 data = {
-    "chooseProducts": [],  # 签约3.0 可选商品集合
-    "mustProducts": [],  # 签约3.0 修改必选商品集合
+    "chooseProducts": [{"quantity": 0, "serialNo": ""}],  # 签约3.0 可选商品集合
+    "mustProducts": [{"quantity": 0, "serialNo": ""}],  # 签约3.0 修改必选商品集合
     "promotionId": 0,  # 活动ID
     "signNo": "",  # 签约单号
     "subOrderSignId": 0,  # 签约单子单自增ID
@@ -23,7 +23,11 @@ def _appStore_order_orderSign_upgradeSignChangeProduct(data=data, headers=header
 
     参数说明:
     - chooseProducts: 签约3.0 可选商品集合
+    - chooseProducts.quantity: 购买数量
+    - chooseProducts.serialNo: 商品编码
     - mustProducts: 签约3.0 修改必选商品集合
+    - mustProducts.quantity: 购买数量
+    - mustProducts.serialNo: 商品编码
     - promotionId: 活动ID
     - signNo: 签约单号
     - subOrderSignId: 签约单子单自增ID

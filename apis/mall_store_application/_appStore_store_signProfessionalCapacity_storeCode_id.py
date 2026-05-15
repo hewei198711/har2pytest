@@ -3,8 +3,8 @@ import os
 from util.client import client
 
 params = {
-    "storeCode": "",  # 服务中心编号
     "id": "",  # 门店专业技能id
+    "storeCode": "",  # 服务中心编号
 }
 
 headers = {

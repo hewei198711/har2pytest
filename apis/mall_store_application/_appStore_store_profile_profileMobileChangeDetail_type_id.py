@@ -3,8 +3,8 @@ import os
 from util.client import client
 
 params = {
-    "type": "",  # 变更类型，1/变更负责人手机号, 2/变更配偶手机号, 3/变更服务中心电话
-    "id": "",  # 资料变更ID
+    "id": 0,  # 资料变更ID
+    "type": 0,  # 变更类型，1/变更负责人手机号, 2/变更配偶手机号, 3/变更服务中心电话
 }
 
 headers = {
