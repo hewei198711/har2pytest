@@ -1,3 +1,8 @@
+"""HAR 文件生成器模块。
+
+提供从 HAR 文件生成 API 接口文件的功能。
+"""
+
 import traceback
 
 from .har_parser import HARParser
@@ -9,20 +14,19 @@ def generate_api_files_from_har(
     force_overwrite: bool = False,
     api_generator=None,
 ) -> list[str]:
-    """
-    从HAR文件生成所有API接口文件
+    """从 HAR 文件生成所有 API 接口文件。
 
     Args:
-        har_file_path: HAR文件路径，如 "api_request.har"
-        force_overwrite: 是否覆盖已存在的文件
-        api_generator: 可选的API生成器实例
+        har_file_path: HAR 文件路径，如 "api_request.har"。
+        force_overwrite: 是否覆盖已存在的文件（默认 False）。
+        api_generator: 可选的 API 生成器实例。
 
     Returns:
-        List[str]: 生成的文件路径列表
+        list[str]: 生成的文件路径列表。
 
     Example:
-        files = generate_api_files_from_har("普通订单.har")
-        # 返回生成的文件路径列表，如 ["api/_mobile_product_search.py", "api/_mobile_trade_orderCommit.py"]
+        >>> files = generate_api_files_from_har("普通订单.har")
+        >>> # 返回生成的文件路径列表，如 ["api/_mobile_product_search.py", ...]
     """
     har_parser = HARParser()
     requests = har_parser.extract_requests_from_har(har_file_path)

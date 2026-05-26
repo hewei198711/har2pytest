@@ -1,16 +1,30 @@
+"""工具函数模块。
+
+提供参数格式化、文件处理等通用工具函数。
+"""
+
 import json
 import os
 import re
 import subprocess
 import sys
-from functools import lru_cache
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from .logger import logger
 
 
 def format_parameter_value(value: Any) -> str:
-    """生成参数值的Python代码字符串"""
+    """生成参数值的 Python 代码字符串。
+
+    将 Python 值转换为可在代码中使用的字符串表示。
+
+    Args:
+        value: 要格式化的值，可以是任意类型。
+
+    Returns:
+        str: 格式化后的字符串，如 '"hello"'、'123'、'None' 等。
+    """
     result = json.dumps(value, ensure_ascii=False)
     result = result.replace("null", "None")
     result = result.replace("false", "False")
@@ -19,14 +33,32 @@ def format_parameter_value(value: Any) -> str:
 
 
 def escape_string_for_python(value: str) -> str:
-    """转义字符串以便在Python代码中使用"""
+    """转义字符串以便在 Python 代码中使用。
+
+    处理特殊字符（如换行符、制表符等）的转义。
+
+    Args:
+        value: 要转义的字符串。
+
+    Returns:
+        str: 转义后的字符串。
+    """
     value = value.replace("\\", "\\\\")
     value = value.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
     return value
 
 
 def deduplicate_values(values: list[Any]) -> list[Any]:
-    """对值列表进行去重处理"""
+    """对值列表进行去重处理。
+
+    保持原始顺序，只保留第一次出现的值。
+
+    Args:
+        values: 要去重的值列表。
+
+    Returns:
+        list[Any]: 去重后的列表。
+    """
     unique_values = []
     for value in values:
         key = tuple(value) if isinstance(value, list) else value
@@ -36,7 +68,13 @@ def deduplicate_values(values: list[Any]) -> list[Any]:
 
 
 def format_python_file(filepath: str) -> None:
-    """使用ruff格式化Python文件"""
+    """使用 ruff 格式化 Python 文件。
+
+    先运行 ruff check --fix 修复代码问题，再运行 ruff format 格式化代码。
+
+    Args:
+        filepath: 要格式化的文件路径。
+    """
     try:
         ruff_path = os.path.join(os.path.dirname(sys.executable), "ruff")
         subprocess.run([ruff_path, "check", "--fix", filepath], capture_output=True, text=True)
@@ -47,14 +85,31 @@ def format_python_file(filepath: str) -> None:
 
 
 def get_output_dir(base_output_dir: str, task_id: str = None) -> str:
-    """获取输出目录路径"""
+    """获取输出目录路径。
+
+    如果目录不存在则创建。
+
+    Args:
+        base_output_dir: 基础输出目录。
+        task_id: 任务 ID，用于创建子目录（可选）。
+
+    Returns:
+        str: 输出目录的完整路径。
+    """
     output_dir = os.path.join(base_output_dir, task_id) if task_id else base_output_dir
     os.makedirs(output_dir, exist_ok=True)
     return output_dir
 
 
 def write_test_file(filepath: str, content: str):
-    """写入Python文件并格式化"""
+    """写入 Python 文件并格式化。
+
+    将内容写入文件后，使用 ruff 进行格式化。
+
+    Args:
+        filepath: 文件路径。
+        content: 文件内容。
+    """
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(content)
     format_python_file(filepath)
@@ -65,17 +120,26 @@ _API_FILE_CACHE = {}
 
 
 def parse_api_file(filepath: str) -> dict:
-    """从API文件中一次性提取所有信息（带缓存）"""
+    """从 API 文件中提取所有信息。
+
+    提取函数名、描述、URL、参数备注和请求头等信息。
+    结果会被缓存以提高性能。
+
+    Args:
+        filepath: API 文件路径。
+
+    Returns:
+        dict: 包含以下字段的字典：
+            - function_name: 函数名
+            - description: 接口描述
+            - url: 接口 URL
+            - param_remarks: 参数备注字典
+            - headers: 请求头字典
+    """
     if filepath in _API_FILE_CACHE:
         return _API_FILE_CACHE[filepath].copy()
-    
-    result = {
-        "function_name": None,
-        "description": "",
-        "url": None,
-        "param_remarks": {},
-        "headers": {}
-    }
+
+    result = {"function_name": None, "description": "", "url": None, "param_remarks": {}, "headers": {}}
 
     try:
         basename = os.path.basename(filepath)
@@ -87,22 +151,24 @@ def parse_api_file(filepath: str) -> dict:
         with open(filepath, encoding="utf-8") as f:
             content = f.read()
 
-        # 提取描述和URL
-        docstring_match = re.search(r'"""(.*?)"""', content, re.DOTALL)
+        # 提取描述和URL（支持单引号和双引号的docstring）
+        docstring_match = re.search(r'"""(.*?)"""|\'\'\'(.*?)\'\'\'', content, re.DOTALL)
         docstring_url = None
         if docstring_match:
-            lines = [line.strip() for line in docstring_match.group(1).split('\n') if line.strip()]
+            # 获取第一个非空的捕获组
+            docstring_content = docstring_match.group(1) if docstring_match.group(1) else docstring_match.group(2)
+            lines = [line.strip() for line in docstring_content.split("\n") if line.strip()]
             if lines:
                 result["description"] = lines[0]
                 for line in lines[1:]:
-                    if line.startswith('/'):
+                    if line.startswith("/"):
                         docstring_url = line
                         break
 
         # 提取URL
         url_match = re.search(r'url\s*=\s*(f)?["\']([^"\']+)["\']', content)
         if url_match:
-            is_fstring = url_match.group(1) == 'f'
+            is_fstring = url_match.group(1) == "f"
             result["url"] = docstring_url if is_fstring else url_match.group(2)
 
         # 提取参数备注
@@ -128,27 +194,50 @@ def parse_api_file(filepath: str) -> dict:
 
 
 def clear_api_cache():
-    """清除API文件解析缓存"""
+    """清除 API 文件解析缓存。
+
+    当 API 文件被修改后，需要调用此方法清除缓存以获取最新内容。
+    """
     _API_FILE_CACHE.clear()
 
 
 def format_headers_for_python(headers: dict[str, str]) -> str:
-    """格式化headers字典为Python代码字符串"""
+    """格式化 headers 字典为 Python 代码字符串。
+
+    Args:
+        headers: 请求头字典。
+
+    Returns:
+        str: 格式化后的 Python 代码字符串。
+    """
+
     def header_value_formatter(value):
         if isinstance(value, str) and value.startswith(('"', 'f"')):
             return value
         return f'"{value}"'
-    
+
     return format_params_for_python(headers, header_value_formatter, inline=False)
 
 
 def format_params_for_python(
     params: dict,
-    value_formatter: Optional[Callable] = None,
+    value_formatter: Callable | None = None,
     comments: dict = None,
     inline: bool = False,
 ) -> str:
-    """统一的参数格式化函数"""
+    """统一的参数格式化函数。
+
+    将参数字典格式化为 Python 代码字符串，支持添加注释和内联格式。
+
+    Args:
+        params: 参数字典。
+        value_formatter: 值格式化函数，默认使用 repr。
+        comments: 参数注释字典，键为参数名，值为注释内容。
+        inline: 是否使用内联格式（单行）。
+
+    Returns:
+        str: 格式化后的 Python 代码字符串。
+    """
     if not params:
         return "{}"
 

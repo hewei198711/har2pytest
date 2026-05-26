@@ -1,3 +1,8 @@
+"""Swagger 文档处理器模块。
+
+提供从 Swagger/OpenAPI 文档中获取 API 信息、提取参数等功能。
+"""
+
 import json
 import urllib.request
 from typing import TYPE_CHECKING, Any, Optional
@@ -12,21 +17,28 @@ if TYPE_CHECKING:
 
 
 class SwaggerHandler:
-    """Swagger文档处理器类"""
+    """Swagger 文档处理器类。
+
+    用于获取和解析 Swagger/OpenAPI 文档，提取 API 信息和参数。
+    """
 
     def __init__(self, api_generator: Optional["APIGenerator"] = None):
-        """
-        初始化Swagger文档处理器
+        """初始化 Swagger 文档处理器。
 
         Args:
-            api_generator: API生成器实例
+            api_generator: API 生成器实例（可选）。
         """
         self.swagger_cache: dict[str, dict[str, Any]] = {}
         self.api_generator: APIGenerator | None = api_generator  # API生成器实例
 
     def _send_request(self, url: str) -> Any | None:
-        """
-        发送HTTP请求并返回响应数据
+        """发送 HTTP 请求并返回响应数据。
+
+        Args:
+            url: 请求的 URL。
+
+        Returns:
+            Any | None: 响应的 JSON 数据，如果请求失败则返回 None。
         """
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -39,8 +51,16 @@ class SwaggerHandler:
             return json.loads(content)
 
     def get_swagger_doc(self, service_base_url: str) -> dict[str, Any] | None:
-        """
-        获取Swagger API文档数据
+        """获取 Swagger API 文档数据。
+
+        首先尝试通过 swagger-resources 获取文档路径，失败后回退到常见路径。
+        结果会被缓存以提高性能。
+
+        Args:
+            service_base_url: 服务基础 URL。
+
+        Returns:
+            dict[str, Any] | None: Swagger 文档数据，如果获取失败则返回 None。
         """
         if service_base_url in self.swagger_cache:
             return self.swagger_cache[service_base_url]
@@ -105,8 +125,15 @@ class SwaggerHandler:
     def find_api_info_in_swagger(
         self, swagger_data: dict[str, Any], api_path: str, method: str = "GET"
     ) -> dict[str, Any]:
-        """
-        在Swagger文档中查找特定API的信息
+        """在 Swagger 文档中查找特定 API 的信息。
+
+        Args:
+            swagger_data: Swagger 文档数据。
+            api_path: API 路径。
+            method: HTTP 方法（默认 GET）。
+
+        Returns:
+            dict[str, Any]: 包含 description、parameters、summary 的字典。
         """
         api_info = {"description": "", "parameters": {}, "summary": ""}
 
@@ -277,7 +304,7 @@ class SwaggerHandler:
             Any: 参数值（可能是基本类型、对象或数组）
         """
         prop_type = prop_info.get("type", "string")
-        
+
         # 如果有 $ref，优先处理引用
         if "$ref" in prop_info:
             ref = prop_info["$ref"]
@@ -289,7 +316,7 @@ class SwaggerHandler:
                     for nested_name, nested_info in definition["properties"].items():
                         result[nested_name] = self._extract_param_value(nested_info, swagger_data)
                     return result
-        
+
         if prop_type == "object":
             if "properties" in prop_info:
                 result = {}
@@ -318,8 +345,9 @@ class SwaggerHandler:
         else:
             return self._get_default_value(prop_type)
 
-    def _extract_nested_descriptions(self, schema: dict[str, Any], swagger_data: dict[str, Any], 
-                                      descriptions: dict[str, str], parent_key: str = "") -> None:
+    def _extract_nested_descriptions(
+        self, schema: dict[str, Any], swagger_data: dict[str, Any], descriptions: dict[str, str], parent_key: str = ""
+    ) -> None:
         """
         递归提取嵌套参数的描述信息
 
@@ -399,10 +427,10 @@ class SwaggerHandler:
                 search_path = specific_path
                 if base_path and base_path != "/":
                     if search_path.startswith(base_path):
-                        search_path = search_path[len(base_path):]
+                        search_path = search_path[len(base_path) :]
                         if not search_path.startswith("/"):
                             search_path = "/" + search_path
-                
+
                 # 直接在paths中查找
                 if search_path in paths.keys():
                     paths_to_process = [(search_path, paths[search_path])]
@@ -476,4 +504,3 @@ class SwaggerHandler:
             logger.error(f"❌ 从Swagger文档生成API文件失败: {str(e)}")
 
         return generated_files
-

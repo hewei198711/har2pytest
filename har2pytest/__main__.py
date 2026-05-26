@@ -162,7 +162,9 @@ def handle_api(args):
     logger.info("-" * 50)
 
     api_generator = APIGenerator(output_dir)
-    generated_files = generate_api_files_from_har(har_file, force_overwrite=force_overwrite, api_generator=api_generator)
+    generated_files = generate_api_files_from_har(
+        har_file, force_overwrite=force_overwrite, api_generator=api_generator
+    )
 
     logger.info("-" * 50)
     logger.info(f"共生成 {len(generated_files)} 个API接口文件")

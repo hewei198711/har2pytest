@@ -5,6 +5,7 @@
 import allure
 
 from har2pytest.utils import (
+    clear_api_cache,
     escape_string_for_python,
     format_parameter_value,
     parse_api_file,
@@ -42,6 +43,9 @@ def test_parse_api_file_url():
 @allure.story("URL提取")
 def test_extract_url_from_api_file():
     """测试从API文件中提取URL（真实的API文件格式）"""
+    # 清除缓存
+    clear_api_cache()
+    
     # 测试真实的API文件格式
     test_content = '''from util.client import client
 

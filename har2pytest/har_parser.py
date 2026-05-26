@@ -1,3 +1,8 @@
+"""HAR 文件解析器模块。
+
+提供从 HAR（HTTP Archive）文件中提取和解析 API 请求信息的功能。
+"""
+
 import json
 from typing import Any
 from urllib.parse import unquote
@@ -7,18 +12,42 @@ from .logger import logger
 
 
 class HARParser:
-    """HAR文件解析器类"""
+    """HAR 文件解析器类。
+
+    用于从 HAR 文件中提取 API 请求信息，支持过滤无效参数、重复 URL 等功能。
+    """
 
     def __init__(self, base_urls: str = None, kill_urls: str = None):
-        """
-        初始化HAR解析器
+        """初始化 HAR 解析器。
+
+        Args:
+            base_urls: 基础 URL 列表，用于从完整 URL 中提取相对路径（可选）。
+            kill_urls: 需要过滤的 URL 关键字列表（可选）。
         """
         self.base_urls = base_urls if base_urls is not None else APIConfig.BASE_URLS()
         self.kill_urls = kill_urls if kill_urls is not None else APIConfig.KILL_URLS()
 
     def extract_requests_from_har(self, har_file_path: str, filter_duplicate_url: bool = True) -> list[dict[str, Any]]:
-        """
-        从HAR文件中提取请求信息
+        """从 HAR 文件中提取请求信息。
+
+        Args:
+            har_file_path: HAR 文件路径。
+            filter_duplicate_url: 是否过滤重复的 URL（默认 True）。
+
+        Returns:
+            list[dict[str, Any]]: 包含请求信息的字典列表。每个字典包含以下字段：
+                - method: HTTP 方法
+                - url: 清理后的 URL
+                - full_url: 完整的 URL
+                - headers: 请求头
+                - content_type: 内容类型
+                - cookies: Cookie 字典
+                - query_params: 查询参数
+                - post_data: POST 数据
+                - response_status: 响应状态码
+                - response_content: 响应内容
+                - response_time: 响应时间（毫秒）
+                - server_ip: 服务器 IP 地址
         """
         try:
             with open(har_file_path, encoding="utf-8") as f:
@@ -158,8 +187,15 @@ class HARParser:
         return requests
 
     def _filter_invalid_params(self, data: dict[str, Any]) -> dict[str, Any]:
-        """
-        过滤无效参数
+        """过滤无效参数。
+
+        根据配置中的 INVALID_PARAMS 过滤掉不需要的参数。
+
+        Args:
+            data: 原始参数字典。
+
+        Returns:
+            dict[str, Any]: 过滤后的参数字典。
         """
         if not isinstance(data, dict):
             return data
@@ -174,14 +210,13 @@ class HARParser:
         return filtered_data
 
     def _filter_headers(self, headers: dict[str, str]) -> dict[str, str]:
-        """
-        过滤 headers，只保留配置中指定的和必要的 headers
+        """过滤 headers，只保留配置中指定的和必要的 headers。
 
         Args:
-            headers: 原始 headers 字典
+            headers: 原始 headers 字典。
 
         Returns:
-            Dict[str, str]: 过滤后的 headers 字典
+            dict[str, str]: 过滤后的 headers 字典。
         """
         if not isinstance(headers, dict):
             return headers
@@ -217,8 +252,10 @@ class HARParser:
         return filtered_headers
 
     def print_api_summary(self, har_file_path: str):
-        """
-        打印API请求摘要信息
+        """打印 API 请求摘要信息。
+
+        Args:
+            har_file_path: HAR 文件路径。
         """
         requests = self.extract_requests_from_har(har_file_path)
 

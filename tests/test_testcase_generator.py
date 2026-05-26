@@ -8,6 +8,7 @@ import allure
 
 from har2pytest.config import APIConfig
 from har2pytest.testcase_generator import TestCaseGenerator
+from har2pytest.utils import format_params_for_python
 from har2pytest.utils import parse_api_file
 
 
@@ -74,14 +75,12 @@ def test_extract_params_from_har_request():
 @allure.story("格式化参数")
 def test_format_test_case_params():
     """测试格式化参数为测试用例中的参数字符串"""
-    generator = TestCaseGenerator()
-
     # 测试空参数
-    assert generator.format_test_case_params({}) == "{}"
+    assert format_params_for_python({}) == "{}"
 
     # 测试简单参数
     params = {"keyword": "TS001", "pageNum": 1}
-    result = generator.format_test_case_params(params)
+    result = format_params_for_python(params)
     assert "keyword" in result
     assert "TS001" in result
     assert "pageNum" in result
@@ -807,10 +806,8 @@ def test_extract_params_from_har_request_mixed_params():
 @allure.story("格式化参数-特殊字符")
 def test_format_test_case_params_special_chars():
     """测试格式化包含特殊字符的参数"""
-    generator = TestCaseGenerator()
-
     params = {"name": "test<script>", "path": "/api/test"}
-    result = generator.format_test_case_params(params)
+    result = format_params_for_python(params)
 
     assert "name" in result
     assert "path" in result
@@ -820,10 +817,8 @@ def test_format_test_case_params_special_chars():
 @allure.story("格式化参数-空值")
 def test_format_test_case_params_empty_values():
     """测试格式化空值参数"""
-    generator = TestCaseGenerator()
-
     params = {"name": "", "value": None}
-    result = generator.format_test_case_params(params)
+    result = format_params_for_python(params)
 
     assert "name" in result
     assert "value" in result
@@ -833,10 +828,8 @@ def test_format_test_case_params_empty_values():
 @allure.story("格式化参数-数字和布尔值")
 def test_format_test_case_params_numbers_and_bools():
     """测试格式化数字和布尔值参数"""
-    generator = TestCaseGenerator()
-
     params = {"count": 42, "enabled": True, "rate": 3.14}
-    result = generator.format_test_case_params(params)
+    result = format_params_for_python(params)
 
     assert "count" in result
     assert "42" in result

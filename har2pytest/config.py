@@ -1,4 +1,8 @@
-"""配置管理模块"""
+"""配置管理模块。
+
+负责加载和管理 har2pytest 的配置信息，包括 API 基础 URL、服务映射、Swagger 文档 URL 等。
+"""
+
 import json
 import os
 import re
@@ -8,7 +12,11 @@ from .logger import logger
 
 
 class APIConfig:
-    """API配置管理类，负责加载和管理配置信息"""
+    """API 配置管理类。
+
+    负责加载和管理配置信息，支持从配置文件和环境变量读取配置。
+    配置文件默认为当前目录下的 har2pytest_config.json。
+    """
 
     _default_config = {
         # 基础配置 - 必需配置，必须在配置文件中指定
@@ -17,9 +25,7 @@ class APIConfig:
         # 请求参数过滤配置
         "INVALID_PARAMS": [],
         # 请求头配置
-        "REQUIRED_HEADERS": {
-            "authorization": "f\"bearer {os.environ['access_token']}\""
-        },
+        "REQUIRED_HEADERS": {"authorization": "f\"bearer {os.environ['access_token']}\""},
         "HEADERS_TO_INCLUDE": {},
         # 列表查询用例，这些参数不进行参数化处理
         "PAGINATION_PARAMS": [],
@@ -41,7 +47,14 @@ class APIConfig:
 
     @classmethod
     def _load_config(cls):
-        """加载配置，优先从环境变量和配置文件读取"""
+        """加载配置。
+
+        优先从环境变量 HAR2PYTEST_CONFIG 指定的配置文件读取，
+        如果未设置则使用当前目录下的 har2pytest_config.json。
+
+        Returns:
+            tuple[dict, bool]: 返回配置字典和配置文件是否存在的标志。
+        """
         config = cls._default_config.copy()
         config_file_exists = False
 
@@ -74,10 +87,10 @@ class APIConfig:
         if isinstance(config.get("INVALID_PARAMS"), list):
             config["INVALID_PARAMS"] = set(config["INVALID_PARAMS"])
 
-        # 检查 HEADERS_TO_INCLUDE 是否为列表，如果是则报错
-        if isinstance(config.get("HEADERS_TO_INCLUDE"), list):
+        # 检查 HEADERS_TO_INCLUDE 是否为字典，如果不是则报错
+        if not isinstance(config.get("HEADERS_TO_INCLUDE"), dict):
             raise ValueError(
-                "配置文件格式错误：HEADERS_TO_INCLUDE 不支持列表格式，请使用字典格式。\n"
+                "配置文件格式错误：HEADERS_TO_INCLUDE 仅支持字典格式，请使用字典格式。\n"
                 "示例：\n"
                 '    "HEADERS_TO_INCLUDE": {\n'
                 '        "authorization": "bearer {os.environ[\'access_token\']}",\n'
@@ -94,23 +107,28 @@ class APIConfig:
             ("DEFAULT_API_DIR", "默认API文件目录"),
             ("SWAGGER_DOC_URLS", "Swagger文档URL配置"),
         ]
-        
+
         missing_configs = []
         for key, description in required_configs:
             if config.get(key) is None:
                 missing_configs.append(f"- {key} ({description})")
-        
+
         if missing_configs:
             raise ValueError(
-                "配置文件缺少必需配置项，请在配置文件中添加以下配置：\n" + "\n".join(missing_configs) +
-                "\n\n请参考配置文件示例：har2pytest_config.json.example"
+                "配置文件缺少必需配置项，请在配置文件中添加以下配置：\n"
+                + "\n".join(missing_configs)
+                + "\n\n请参考配置文件示例：har2pytest_config.json.example"
             )
 
         return config, config_file_exists
 
     @classmethod
     def _warn_missing_config(cls):
-        """提示用户创建配置文件"""
+        """提示用户创建配置文件。
+
+        当配置文件不存在时，打印警告信息和配置示例。
+        只会警告一次。
+        """
         if cls._config_warned:
             return
 
@@ -136,7 +154,14 @@ class APIConfig:
 
     @classmethod
     def get_config(cls, key: str) -> Any:
-        """获取配置值"""
+        """获取配置值。
+
+        Args:
+            key: 配置项的键名。
+
+        Returns:
+            Any: 配置项的值，如果不存在则返回 None。
+        """
         if cls._config is None:
             cls._config, cls._config_file_exists = cls._load_config()
 
@@ -195,18 +220,20 @@ class APIConfig:
 
     @classmethod
     def determine_service_package(cls, url: str) -> str:
-        """
-        根据URL的第一个字段判断属于哪个微服务包
+        """根据 URL 判断所属的微服务包。
+
+        通过 URL 的第一个路径段匹配 SERVICE_MAPPING 配置，
+        确定该接口属于哪个微服务。
 
         Args:
-            url: 原始接口URL，如 /mobile/trade/orderCommit
+            url: 原始接口 URL，如 /mobile/trade/orderCommit。
 
         Returns:
-            str: 服务包名称，如 mall_mobile_application
+            str: 服务包名称，如 mall_mobile_application。
 
         Example:
-            URL: /mobile/trade/orderCommit → 返回 mall_mobile_application
-            URL: /member/info → 返回 mall_center_member
+            >>> APIConfig.determine_service_package("/mobile/trade/orderCommit")
+            'mall_mobile_application'
         """
 
         # 处理 None 或空字符串

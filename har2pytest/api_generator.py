@@ -73,33 +73,33 @@ class APIGenerator:
         query_params = request_info.get("query_params", {})
         post_data = request_info.get("post_data", {})
         raw_headers = request_info.get("headers", {})
-        
+
         # 处理headers（保持不变）
         headers_to_include = APIConfig.HEADERS_TO_INCLUDE()
         if isinstance(headers_to_include, dict):
             headers_to_include = headers_to_include = set(h.lower() for h in headers_to_include.keys())
-        
+
         headers = {}
         for key, value in raw_headers.items():
             if key.lower() in headers_to_include:
                 headers[key] = value
-        
+
         required_headers = APIConfig.REQUIRED_HEADERS()
         for key, default_value in required_headers.items():
             if key not in headers:
                 headers[key] = default_value
-        
+
         is_file_upload = False
         if method == "POST" and raw_headers.get("content-type", "").startswith("multipart/form-data"):
             is_file_upload = True
-        
+
         is_need_urlencode = False
         if method == "POST" and raw_headers.get("content-length", "") == "0" and not post_data:
             is_need_urlencode = True
-        
+
         # 使用统一的URL匹配器（swagger_data已在外部设置）
         url_info = self.url_matcher.get_url_info(url)
-        
+
         return {
             "method": method,
             "url": url_info["pattern"] or url,  # 使用匹配到的模板URL
@@ -112,12 +112,12 @@ class APIGenerator:
             "url_pattern": url_info["pattern"],
             "function_name": url_info["function_name"],
         }
-    
+
     def generate_api_file(self, request_info: dict, force_overwrite: bool = False, swagger_info: dict = None):
         """生成API文件"""
         method = request_info["method"].upper()
         url = request_info["url"]
-        
+
         service_package = APIConfig.determine_service_package(url)
         # 如果已传入swagger_info，不需要获取Swagger文档
         if swagger_info is None:
@@ -125,18 +125,18 @@ class APIGenerator:
             swagger_doc = None
             if service_package in APIConfig.SWAGGER_DOC_URLS():
                 swagger_doc = self.swagger_handler.get_swagger_doc(APIConfig.SWAGGER_DOC_URLS()[service_package])
-            
+
             # 设置swagger_data到url_matcher
             self.url_matcher.swagger_data = swagger_doc
-            
+
             # 解析请求信息，获取URL模式
             parsed_info = self._parse_request_info(request_info)
             url_pattern = parsed_info.get("url_pattern", url)
-            
+
             # 获取特定URL的Swagger信息（summary、description、parameters）
             if swagger_doc:
                 swagger_info = self.swagger_handler.find_api_info_in_swagger(swagger_doc, url_pattern, method)
-            
+
             # 使用URLMatcher生成的函数名
             function_name = parsed_info["function_name"]
         else:
@@ -146,7 +146,7 @@ class APIGenerator:
                 parsed_info["path_params"] = request_info["path_params"]
             function_name = parsed_info["function_name"]
             url_pattern = parsed_info.get("url_pattern", url)
-        
+
         # 检查文件是否存在
         if self.check_api_exists(url_pattern, service_package):
             if not force_overwrite:
@@ -154,20 +154,20 @@ class APIGenerator:
                 return None
             else:
                 logger.info(f"接口已存在，强制覆盖: {method} {url_pattern}")
-        
+
         # 生成文件路径
         filename = f"{function_name}.py"
         if service_package == "apis":
             filepath = os.path.join(self.output_dir, filename)
         else:
             filepath = os.path.join(self.output_dir, service_package, filename)
-        
+
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        
+
         # 生成文件内容（使用从Swagger获取的数据）
         content = self.generate_file_content(request_info, function_name, swagger_info, parsed_info)
         write_test_file(filepath, content)
-        
+
         return filepath
 
     def _generate_params_string(self, params_dict: dict[str, Any], swagger_info: dict[str, Any] = None) -> str:
