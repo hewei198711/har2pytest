@@ -2,8 +2,6 @@ import os
 
 import pytest
 
-
-
 if __name__ == "__main__":
     # 设置配置为test环境
     os.environ["access_token"] = "996771f2-bf30-4037-b37b-b58a592c3895"

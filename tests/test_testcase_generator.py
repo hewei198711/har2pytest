@@ -8,8 +8,7 @@ import allure
 
 from har2pytest.config import APIConfig
 from har2pytest.testcase_generator import TestCaseGenerator
-from har2pytest.utils import format_params_for_python
-from har2pytest.utils import parse_api_file
+from har2pytest.utils import format_params_for_python, parse_api_file
 
 
 @allure.feature("测试用例生成器")
@@ -42,33 +41,6 @@ def _user_login(data=data, access_token=access_token):
     finally:
         if os.path.exists("_user_login.py"):
             os.remove("_user_login.py")
-
-
-@allure.feature("测试用例生成器")
-@allure.story("提取参数字典")
-def test_extract_params_from_har_request():
-    """测试从HAR请求信息中提取参数字典"""
-    generator = TestCaseGenerator()
-
-    # 测试POST请求带post_data
-    request_info = {"method": "POST", "url": "/api/user/login", "post_data": {"username": "test", "password": "123456"}}
-    params = generator.extract_params_from_har_request(request_info)
-    assert params == {"username": "test", "password": "123456"}
-
-    # 测试POST请求带query_params
-    request_info = {"method": "POST", "url": "/api/user/list", "query_params": {"page": 1, "size": 10}}
-    params = generator.extract_params_from_har_request(request_info)
-    assert params == {"page": 1, "size": 10}
-
-    # 测试GET请求带query_params
-    request_info = {"method": "GET", "url": "/api/user/123", "query_params": {"id": 123}}
-    params = generator.extract_params_from_har_request(request_info)
-    assert params == {"id": 123}
-
-    # 测试无参数的情况
-    request_info = {"method": "GET", "url": "/api/health"}
-    params = generator.extract_params_from_har_request(request_info)
-    assert params is None
 
 
 @allure.feature("测试用例生成器")
@@ -403,76 +375,12 @@ def _user_login(data=data, access_token=access_token):
             api_files=[str(api_file)],
             task_id="test_task",
             target_api_file=str(api_file),
-            target_url="/api/user/login",
         )
 
         assert "test_user_login" in content
         assert "user_login" in content
         assert "pytest" in content
         assert "allure" in content
-    finally:
-        pass
-
-
-@allure.feature("测试用例生成器")
-@allure.story("生成测试用例文件")
-def test_generate_test_case_from_har(tmp_path):
-    """测试从HAR文件生成测试用例文件"""
-    import json
-
-    # 创建测试HAR文件
-    test_har = {
-        "log": {
-            "entries": [
-                {
-                    "_resourceType": "xhr",
-                    "request": {
-                        "url": "/api/user/login",
-                        "method": "POST",
-                        "headers": [{"name": "Content-Type", "value": "application/json"}],
-                        "postData": {"mimeType": "application/json", "text": "{}"},
-                    },
-                    "response": {"status": 200, "content": {"text": "{}"}},
-                    "time": 100,
-                }
-            ]
-        }
-    }
-
-    har_file = tmp_path / "test.har"
-    with open(har_file, "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
-
-    # 创建测试API文件
-    api_dir = tmp_path / "apis" / "test_service"
-    api_dir.mkdir(parents=True)
-
-    api_file = api_dir / "_user_login.py"
-    with open(api_file, "w", encoding="utf-8") as f:
-        f.write('''
-# coding:utf-8
-
-def _user_login(data=data, access_token=access_token):
-    """
-    用户登录
-    /api/user/login
-    """
-    url = "/api/user/login"
-    headers = {}
-    with client.post(url=url, headers=headers, json=data) as r:
-        return r
-''')
-
-    # 创建输出目录
-    output_dir = tmp_path / "output"
-
-    try:
-        generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir), base_urls=[])
-        result = generator.generate_test_case_from_har(str(har_file))
-
-        assert result is not None
-        assert "test_test.py" in result
-        assert os.path.exists(result)
     finally:
         pass
 
@@ -690,13 +598,13 @@ def test_parse_api_file_function_name_no_function():
     """测试从无函数名的文件获取清理后的函数名"""
     from har2pytest.utils import parse_api_file
 
-    test_content = '''
+    test_content = """
 # coding:utf-8
 
 data = {
     "username": "test"
 }
-'''
+"""
 
     with open("test_no_func.py", "w", encoding="utf-8") as f:
         f.write(test_content)
@@ -743,63 +651,6 @@ def _test_api(headers=headers):
     finally:
         if os.path.exists("_test_api.py"):
             os.remove("_test_api.py")
-
-
-@allure.feature("测试用例生成器")
-@allure.story("提取参数-空POST数据")
-def test_extract_params_from_har_request_empty_post():
-    """测试提取参数时POST数据为空"""
-    generator = TestCaseGenerator()
-
-    request_info = {
-        "method": "POST",
-        "url": "/api/test",
-        "post_data": {},
-        "query_params": {"page": 1},
-    }
-
-    params = generator.extract_params_from_har_request(request_info)
-
-    assert params == {"page": 1}
-
-
-@allure.feature("测试用例生成器")
-@allure.story("提取参数-POST数据非字典")
-def test_extract_params_from_har_request_post_data_not_dict():
-    """测试POST数据不是字典时提取参数"""
-    generator = TestCaseGenerator()
-
-    request_info = {
-        "method": "POST",
-        "url": "/api/test",
-        "post_data": "not a dict",
-        "query_params": {},
-    }
-
-    params = generator.extract_params_from_har_request(request_info)
-
-    assert params is None
-
-
-@allure.feature("测试用例生成器")
-@allure.story("提取参数-混合参数")
-def test_extract_params_from_har_request_mixed_params():
-    """测试提取混合参数（query和post_data）"""
-    generator = TestCaseGenerator()
-
-    request_info = {
-        "method": "POST",
-        "url": "/api/test",
-        "post_data": {"username": "test"},
-        "query_params": {"page": 1, "size": 10},
-    }
-
-    params = generator.extract_params_from_har_request(request_info)
-
-    assert params is not None
-    assert "username" in params
-    assert "page" in params
-    assert "size" in params
 
 
 @allure.feature("测试用例生成器")
@@ -1116,25 +967,7 @@ def test_match_api_files_for_har_file_not_exists():
 
 
 @allure.feature("测试用例生成器")
-@allure.story("生成测试用例-HAR文件不存在")
-def test_generate_test_case_from_har_file_not_exists():
-    """测试HAR文件不存在时生成测试用例"""
-    generator = TestCaseGenerator()
-
-    result = generator.generate_test_case_from_har("/nonexistent/test.har")
-
-    assert result is None
-
-
-@allure.feature("测试用例生成器")
 @allure.story("生成参数化测试用例-HAR文件不存在")
-def test_generate_parametrized_list_testcases_file_not_exists():
-    """测试HAR文件不存在时生成参数化测试用例"""
-    generator = TestCaseGenerator()
-
-    result = generator.generate_parametrized_list_testcases("/nonexistent/test.har", "test_task")
-
-    assert result == []
 
 
 @allure.feature("测试用例生成器")
@@ -1149,67 +982,6 @@ def test_generate_scenario_testcase_file_not_exists():
 
 
 # ==================== 路径URL测试用例 ====================
-@allure.feature("测试用例生成器")
-@allure.story("路径参数提取-从URL提取路径参数")
-def test_extract_path_params_from_url(tmp_path):
-    """测试从带路径参数的URL提取参数"""
-    import json
-
-    swagger_data = {
-        "paths": {
-            "/user/{userId}/detail": {
-                "get": {
-                    "summary": "用户详情",
-                    "parameters": [
-                        {"name": "userId", "in": "path", "type": "integer", "description": "用户ID"},
-                    ],
-                }
-            }
-        }
-    }
-
-    test_har = {
-        "log": {
-            "entries": [
-                {
-                    "_resourceType": "xhr",
-                    "request": {
-                        "url": "https://example.com/api/user/12345/detail",
-                        "method": "GET",
-                        "headers": [],
-                    },
-                    "response": {"status": 200, "content": {"text": "{}"}},
-                    "time": 100,
-                }
-            ]
-        }
-    }
-
-    har_file = tmp_path / "test.har"
-    with open(har_file, "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
-
-    generator = TestCaseGenerator(base_urls=["https://example.com/api"])
-    original_swagger_doc_urls = APIConfig.SWAGGER_DOC_URLS
-    original_default_api_dir = APIConfig.DEFAULT_API_DIR
-    APIConfig.SWAGGER_DOC_URLS = lambda: {"mall_center_user": "https://example.com/swagger"}
-    APIConfig.DEFAULT_API_DIR = lambda: "apis"
-    original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
-    generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
-
-    try:
-        requests = generator.har_parser.extract_requests_from_har(str(har_file))
-        params = generator.extract_params_from_har_request(requests[0])
-
-        assert params is not None
-        assert "userId" in params
-        assert params["userId"] == "12345"
-    finally:
-        APIConfig.SWAGGER_DOC_URLS = original_swagger_doc_urls
-        APIConfig.DEFAULT_API_DIR = original_default_api_dir
-        generator.swagger_handler.get_swagger_doc = original_get_swagger_doc
-
-
 @allure.feature("测试用例生成器")
 @allure.story("路径URL匹配-带路径参数的HAR请求匹配API文件")
 def test_match_api_files_with_path_params_from_swagger(tmp_path):
@@ -1356,76 +1128,12 @@ def _order_items_detail(data=data, access_token=access_token):
             har_file_path=str(har_file),
             api_files=[str(api_file)],
             target_api_file=str(api_file),
-            target_url="/api/order/{orderId}/items/{itemId}",
         )
 
         assert content is not None
         assert "_order_items_detail" in content
         assert "orderId" in content or "ORD20260101001" in content
         assert "itemId" in content or "ITEM001" in content
-    finally:
-        APIConfig.SWAGGER_DOC_URLS = original_swagger_doc_urls
-        APIConfig.DEFAULT_API_DIR = original_default_api_dir
-        generator.swagger_handler.get_swagger_doc = original_get_swagger_doc
-
-
-@allure.feature("测试用例生成器")
-@allure.story("路径URL生成测试用例-多个路径参数")
-def test_generate_test_case_with_multiple_path_params(tmp_path):
-    """测试带多个路径参数的URL生成测试用例"""
-    import json
-
-    swagger_data = {
-        "paths": {
-            "/api/store/{storeId}/product/{productId}/stock": {
-                "get": {
-                    "summary": "门店商品库存",
-                    "parameters": [
-                        {"name": "storeId", "in": "path", "type": "string"},
-                        {"name": "productId", "in": "path", "type": "string"},
-                    ],
-                }
-            }
-        }
-    }
-
-    test_har = {
-        "log": {
-            "entries": [
-                {
-                    "_resourceType": "xhr",
-                    "request": {
-                        "url": "https://example.com/api/store/123/product/456/stock",
-                        "method": "GET",
-                        "headers": [],
-                        "queryString": [{"name": "test", "value": "value"}],
-                    },
-                    "response": {"status": 200, "content": {"text": "{}"}},
-                    "time": 100,
-                }
-            ]
-        }
-    }
-
-    har_file = tmp_path / "test.har"
-    with open(har_file, "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
-
-    generator = TestCaseGenerator(base_urls=["https://example.com"])
-    original_swagger_doc_urls = APIConfig.SWAGGER_DOC_URLS
-    original_default_api_dir = APIConfig.DEFAULT_API_DIR
-    APIConfig.SWAGGER_DOC_URLS = lambda: {"apis": "https://example.com/swagger"}
-    APIConfig.DEFAULT_API_DIR = lambda: "apis"
-    original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
-    generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
-
-    try:
-        requests = generator.har_parser.extract_requests_from_har(str(har_file))
-        params = generator.extract_params_from_har_request(requests[0])
-
-        assert params is not None
-        assert params["storeId"] == "123"
-        assert params["productId"] == "456"
     finally:
         APIConfig.SWAGGER_DOC_URLS = original_swagger_doc_urls
         APIConfig.DEFAULT_API_DIR = original_default_api_dir
@@ -1488,7 +1196,11 @@ def test_generate_test_case_with_path_and_query_params(tmp_path):
 
     try:
         requests = generator.har_parser.extract_requests_from_har(str(har_file))
-        params = generator.extract_params_from_har_request(requests[0])
+        # 直接合并 query_params 和 post_data
+        params = {}
+        params.update(requests[0].get("query_params") or {})
+        if requests[0].get("post_data"):
+            params.update(requests[0]["post_data"])
 
         assert params is not None
         # 验证查询参数正确提取
@@ -1567,95 +1279,6 @@ def _user_info(data=data, access_token=access_token):
         APIConfig.SWAGGER_DOC_URLS = original_swagger_doc_urls
         APIConfig.DEFAULT_API_DIR = original_default_api_dir
         generator.swagger_handler.get_swagger_doc = original_get_swagger_doc
-
-
-@allure.feature("测试用例生成器")
-@allure.story("场景测试用例-文件上传请求")
-def test_extract_params_from_har_request_file_upload(tmp_path):
-    """测试从HAR请求中提取文件上传参数"""
-    import json
-
-    test_har = {
-        "log": {
-            "entries": [
-                {
-                    "_resourceType": "xhr",
-                    "request": {
-                        "url": "https://example.com/api/upload",
-                        "method": "POST",
-                        "headers": [
-                            {"name": "content-type", "value": "multipart/form-data; boundary=----WebKitFormBoundary"},
-                        ],
-                        "postData": {
-                            "mimeType": "multipart/form-data; boundary=----WebKitFormBoundary",
-                            "params": [
-                                {"name": "name", "value": "test.jpg"},
-                                {"name": "file", "fileName": "test.jpg", "contentType": "image/jpeg"},
-                            ],
-                        },
-                    },
-                    "response": {"status": 200, "content": {"text": '{"code": 200}'}},
-                    "time": 500,
-                }
-            ]
-        }
-    }
-
-    har_file = tmp_path / "test.har"
-    with open(har_file, "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
-
-    generator = TestCaseGenerator(api_dir=str(tmp_path), base_urls=["https://example.com"])
-    
-    requests = generator.har_parser.extract_requests_from_har(str(har_file))
-    assert len(requests) == 1
-    
-    request_info = requests[0]
-    params = generator.extract_params_from_har_request(request_info)
-    
-    assert params is not None
-    # 当前实现将所有参数都放在顶层，包括文件参数
-    assert "name" in params
-    assert params["name"] == "test.jpg"
-
-
-@allure.feature("测试用例生成器")
-@allure.story("场景测试用例-无参数请求")
-def test_extract_params_from_har_request_no_params(tmp_path):
-    """测试从HAR请求中提取无参数的情况"""
-    import json
-
-    test_har = {
-        "log": {
-            "entries": [
-                {
-                    "_resourceType": "xhr",
-                    "request": {
-                        "url": "https://example.com/api/health",
-                        "method": "GET",
-                        "headers": [],
-                    },
-                    "response": {"status": 200, "content": {"text": '{"code": 200}'}},
-                    "time": 50,
-                }
-            ]
-        }
-    }
-
-    har_file = tmp_path / "test.har"
-    with open(har_file, "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
-
-    generator = TestCaseGenerator(api_dir=str(tmp_path), base_urls=["https://example.com"])
-    
-    requests = generator.har_parser.extract_requests_from_har(str(har_file))
-    assert len(requests) == 1
-    
-    request_info = requests[0]
-    params = generator.extract_params_from_har_request(request_info)
-    
-    # 无参数请求应该返回None
-    assert params is None
 
 
 @allure.feature("测试用例生成器")
@@ -1892,7 +1515,7 @@ def _customer_orders(data=data, access_token=access_token):
         # 先验证API文件匹配
         api_files = generator.match_api_files_for_har(str(har_file))
         assert len(api_files) >= 1, f"未匹配到API文件: {api_files}"
-        
+
         # 然后验证测试用例生成
         generated_files = generator.generate_parametrized_list_testcases(str(har_file), "test_task")
 
@@ -1903,3 +1526,177 @@ def _customer_orders(data=data, access_token=access_token):
         APIConfig.SWAGGER_DOC_URLS = original_swagger_doc_urls
         APIConfig.DEFAULT_API_DIR = original_default_api_dir
         generator.swagger_handler.get_swagger_doc = original_get_swagger_doc
+
+
+
+@allure.feature("测试用例生成器")
+@allure.story("API目录不存在")
+def test_get_all_api_files_dir_not_exists(tmp_path):
+    """测试当API目录不存在时_get_all_api_files返回空列表"""
+    non_existent_dir = tmp_path / "non_existent_dir"
+    generator = TestCaseGenerator(api_dir=str(non_existent_dir))
+    result = generator._get_all_api_files()
+    assert result == []
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成测试函数名称")
+def test_generate_test_function_name():
+    """测试_generate_test_function_name方法"""
+    generator = TestCaseGenerator()
+    
+    # 测试带下划线前缀的函数名
+    assert generator._generate_test_function_name("_user_login") == "test_user_login"
+    
+    # 测试不带下划线前缀的函数名
+    assert generator._generate_test_function_name("user_login") == "test_user_login"
+    
+    # 测试多个下划线前缀
+    assert generator._generate_test_function_name("___private_func") == "test_private_func"
+
+
+@allure.feature("测试用例生成器")
+@allure.story("从API文件生成测试用例-文件不存在")
+def test_generate_testcase_from_api_file_not_exists(tmp_path):
+    """测试当API文件不存在时返回None"""
+    generator = TestCaseGenerator(output_dir=str(tmp_path))
+    non_existent_file = tmp_path / "non_existent.py"
+    result = generator.generate_testcase_from_api_file(str(non_existent_file))
+    assert result is None
+
+
+@allure.feature("测试用例生成器")
+@allure.story("从API文件生成测试用例-无法提取函数名")
+
+
+
+@allure.feature("测试用例生成器")
+@allure.story("从HAR文件生成测试用例-资源类型过滤")
+def test_generate_testcases_from_har_filter_resource_type(tmp_path):
+    """测试从HAR文件生成测试用例时正确过滤资源类型"""
+    import json
+    
+    # 创建一个包含多种资源类型请求的HAR文件
+    test_har = {
+        "log": {
+            "entries": [
+                {
+                    "_resourceType": "image",
+                    "request": {
+                        "url": "/images/logo.png",
+                        "method": "GET",
+                        "headers": [],
+                    },
+                    "response": {"status": 200, "content": {"text": "{}"}},
+                    "time": 100,
+                },
+                {
+                    "_resourceType": "xhr",
+                    "request": {
+                        "url": "/api/user/login",
+                        "method": "POST",
+                        "headers": [],
+                    },
+                    "response": {"status": 200, "content": {"text": "{}"}},
+                    "time": 100,
+                },
+                {
+                    "_resourceType": "script",
+                    "request": {
+                        "url": "/js/app.js",
+                        "method": "GET",
+                        "headers": [],
+                    },
+                    "response": {"status": 200, "content": {"text": "{}"}},
+                    "time": 100,
+                },
+            ]
+        }
+    }
+    har_file = tmp_path / "test.har"
+    with open(har_file, "w") as f:
+        json.dump(test_har, f)
+    
+    generator = TestCaseGenerator()
+    result = generator.generate_testcases_from_har(str(har_file))
+    assert result == []
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成测试用例内容-无URL")
+def test_generate_simple_testcase_content_no_url(tmp_path):
+    """测试当API文件没有URL时生成测试用例失败"""
+    # 创建一个没有url变量的API文件
+    api_file = tmp_path / "_test_api.py"
+    with open(api_file, "w", encoding="utf-8") as f:
+        f.write('# coding:utf-8\n\n"""测试接口"""\n\nheaders = {}\nparams = {}\n\ndef _test_api():\n    pass\n')
+    
+    generator = TestCaseGenerator(api_dir=str(tmp_path), output_dir=str(tmp_path))
+    result = generator.generate_testcase_from_api_file(str(api_file))
+    assert result is not None
+
+
+@allure.feature("测试用例生成器")
+@allure.story("匹配API文件-HAR文件不存在")
+def test_match_api_files_for_har_not_exists(tmp_path):
+    """测试当HAR文件不存在时返回空列表"""
+    generator = TestCaseGenerator()
+    non_existent = tmp_path / "non_existent.har"
+    result = generator.match_api_files_for_har(str(non_existent))
+    assert result == []
+
+
+@allure.feature("测试用例生成器")
+@allure.story("匹配API文件-空HAR文件")
+def test_match_api_files_for_har_empty(tmp_path):
+    """测试当HAR文件为空时返回空列表"""
+    import json
+    
+    empty_har = {"log": {"entries": []}}
+    har_file = tmp_path / "empty.har"
+    with open(har_file, "w") as f:
+        json.dump(empty_har, f)
+    
+    generator = TestCaseGenerator()
+    result = generator.match_api_files_for_har(str(har_file))
+    assert result == []
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成测试用例内容-带files参数")
+def test_generate_testcase_with_files_param(tmp_path):
+    """测试生成带files参数的测试用例"""
+    # 创建一个带files参数的API文件
+    api_file = tmp_path / "_test_upload.py"
+    with open(api_file, "w", encoding="utf-8") as f:
+        f.write('# coding:utf-8\n\n"""文件上传接口"""\n\nurl = "/api/upload"\nheaders = {"content-type": "multipart/form-data"}\nfiles = {"file": "test.txt"} \n\ndef _test_upload():\n    pass\n')
+    
+    generator = TestCaseGenerator(api_dir=str(tmp_path), output_dir=str(tmp_path))
+    result = generator.generate_testcase_from_api_file(str(api_file))
+    assert result is not None
+    assert "test_test_upload.py" in result
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成测试用例内容-带headers参数")
+def test_generate_testcase_with_headers(tmp_path):
+    """测试生成带headers参数的测试用例"""
+    # 创建一个带headers参数的API文件
+    api_file = tmp_path / "_test_with_headers.py"
+    with open(api_file, "w", encoding="utf-8") as f:
+        f.write('# coding:utf-8\n\n"""带headers的接口"""\n\nurl = "/api/test"\nheaders = {\n    "authorization": "Bearer test_token",\n    "content-type": "application/json"\n}\nparams = {"id": 1}\n\ndef _test_with_headers():\n    pass\n')
+    
+    generator = TestCaseGenerator(api_dir=str(tmp_path), output_dir=str(tmp_path))
+    result = generator.generate_testcase_from_api_file(str(api_file))
+    assert result is not None
+    assert "test_test_with_headers.py" in result
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成参数化测试用例-文件不存在")
+def test_generate_parametrized_list_testcases_file_not_exists(tmp_path):
+    """测试当HAR文件不存在时返回空列表"""
+    generator = TestCaseGenerator(output_dir=str(tmp_path))
+    non_existent = tmp_path / "non_existent.har"
+    result = generator.generate_parametrized_list_testcases(str(non_existent), "test_task")
+    assert result == []

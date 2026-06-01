@@ -15,7 +15,6 @@ from .logger import get_logger, logger
 from .swagger_handler import SwaggerHandler
 from .testcase_generator import TestCaseGenerator
 from .utils import (
-    escape_string_for_python,
     format_headers_for_python,
     format_parameter_value,
     format_params_for_python,
@@ -32,7 +31,6 @@ __all__ = [
     "logger",
     "parse_api_file",
     "format_parameter_value",
-    "escape_string_for_python",
     "format_headers_for_python",
     "format_params_for_python",
 ]

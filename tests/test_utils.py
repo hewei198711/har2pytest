@@ -5,8 +5,7 @@
 import allure
 
 from har2pytest.utils import (
-    clear_api_cache,
-    escape_string_for_python,
+    _API_FILE_CACHE,
     format_parameter_value,
     parse_api_file,
 )
@@ -43,9 +42,8 @@ def test_parse_api_file_url():
 @allure.story("URL提取")
 def test_extract_url_from_api_file():
     """测试从API文件中提取URL（真实的API文件格式）"""
-    # 清除缓存
-    clear_api_cache()
-    
+
+    _API_FILE_CACHE.clear()
     # 测试真实的API文件格式
     test_content = '''from util.client import client
 
@@ -103,24 +101,6 @@ def test_format_parameter_value():
 
 
 @allure.feature("工具函数")
-@allure.story("字符串转义")
-def test_escape_string_for_python():
-    """测试字符串转义为Python格式"""
-    # 测试普通字符串
-    assert escape_string_for_python("test") == "test"
-
-    # 测试包含引号的字符串
-    assert escape_string_for_python('test"quote') == 'test"quote'
-    assert escape_string_for_python("test'quote") == "test'quote"
-
-    # 测试包含换行符的字符串
-    assert escape_string_for_python("test\nline") == "test\\nline"
-
-    # 测试包含制表符的字符串
-    assert escape_string_for_python("test\ttab") == "test\\ttab"
-
-
-@allure.feature("工具函数")
 @allure.story("Headers提取")
 def test_parse_api_file_headers():
     """测试从API文件中提取headers配置"""
@@ -151,9 +131,9 @@ def _user_login(data=data, headers=headers):
         assert result is not None
         headers = result["headers"]
         assert "channel" in headers
-        assert headers["channel"] == '"pc"'
+        assert headers["channel"] == "pc"
         assert "content-type" in headers
-        assert headers["content-type"] == '"application/json;charset=UTF-8"'
+        assert headers["content-type"] == "application/json;charset=UTF-8"
     finally:
         import os
 

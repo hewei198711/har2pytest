@@ -203,7 +203,7 @@ class URLMatcher:
                 result["has_path_params"] = bool(params)
                 result["function_name"] = self.generate_function_name(pattern)
                 self._match_cache[cache_key] = result.copy()
-                return result
+                return result.copy()
 
             # 尝试从Swagger匹配
             if self.swagger_data:
@@ -214,12 +214,12 @@ class URLMatcher:
                     result["has_path_params"] = bool(params)
                     result["function_name"] = self.generate_function_name(pattern)
                     self._match_cache[cache_key] = result.copy()
-                    return result
+                    return result.copy()
 
         result["pattern"] = url
         result["function_name"] = self.generate_function_name(url)
         self._match_cache[cache_key] = result.copy()
-        return result
+        return result.copy()
 
     @staticmethod
     def find_matching_api_file(
@@ -245,11 +245,21 @@ class URLMatcher:
             if not file_url:
                 continue
 
+            # 直接匹配
             if request_url == file_url or transformed_url == file_url:
                 return api_file
 
+            # 双向模式匹配
             matched, _ = URLMatcher.match_url_pattern(request_url, file_url)
             if matched:
+                return api_file
+
+            matched, _ = URLMatcher.match_url_pattern(file_url, request_url)
+            if matched:
+                return api_file
+
+            # URL 标准化匹配
+            if URLMatcher.normalize_url(file_url) == URLMatcher.normalize_url(request_url):
                 return api_file
 
         return None

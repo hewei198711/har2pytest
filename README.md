@@ -125,9 +125,6 @@ har2pytest swagger https://petstore.swagger.io/v2/api-docs --output apis --overw
 #### 3. 生成测试用例
 
 ```bash
-# 生成通用测试用例（简单模式，默认）
-har2pytest testcase api_request.har
-
 # 生成查询类参数化测试用例（不传mark）
 har2pytest testcase api_request.har --pattern list_query
 
@@ -145,7 +142,70 @@ har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/l
 har2pytest testcase api_request.har --pattern list_query --mark test_4295 --output my_tests
 ```
 
-#### 4. 查看HAR文件摘要
+#### 4. 从API文件生成测试用例 (`api2test` 命令)
+
+从已有的API文件直接生成测试用例，每个API文件对应一个测试用例。
+
+```bash
+# 使用默认参数（默认apis目录，输出到testcases目录）
+har2pytest api2test
+
+# 指定API目录和输出目录
+har2pytest api2test --api-dir apis --output testcases
+
+# 从单个API文件生成测试用例
+har2pytest api2test --file apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py
+
+# 从HAR文件生成测试用例（根据URL去重，查找对应API文件）
+har2pytest api2test --har api_request.har
+
+# 从HAR文件生成，指定API目录和输出目录
+har2pytest api2test --har api_request.har --api-dir apis --output testcases_from_har
+
+# 组合使用
+har2pytest api2test --api-dir apis --output testcases_new --file apis/mall_store_application/_appStore_appAndPc_store_graduation_addGraduationApply.py
+```
+
+**参数说明**：
+- `--api-dir`: 可选，API文件目录，默认为 `apis`
+- `--output`: 可选，输出目录，默认为 `testcases`
+- `--file`: 可选，指定单个API文件路径，用于生成单个测试用例
+- `--har`: 可选，指定HAR文件路径，从HAR文件中提取URL（去重）并查找对应API文件生成测试用例
+
+**生成的测试用例特点**：
+- 自动提取API文件中的参数和请求头信息
+- 支持 f-string 格式的请求头（如 `f"bearer {os.environ['access_token']}"`）
+- 生成的测试用例会自动使用 ruff 格式化
+- 每个API文件对应一个独立的测试用例文件
+
+**示例输出**：
+```python
+import os
+import allure
+from allure_commons.types import Severity
+from apis.mall_mgmt_application import _mgmt_prmt_luckyActivity_luckyActivityList
+
+@allure.severity(Severity.NORMAL)
+@allure.feature("mall_mgmt_application")
+@allure.story("/mgmt/prmt/luckyActivity/luckyActivityList")
+@allure.title("抽奖活动管理列表")
+def test_mgmt_prmt_luckyActivity_luckyActivityList():
+    params = {
+        "activityCode": '052202',
+        "pageNum": '1',
+        "pageSize": '10',
+    }
+    headers = {
+        "channel": "pc",
+        "client": "op",
+    }
+
+    with _mgmt_prmt_luckyActivity_luckyActivityList(params=params, headers=headers) as r:
+        assert r.status_code == 200
+        assert r.json()["code"] == 200
+```
+
+#### 5. 查看HAR文件摘要
 
 ```bash
 # 查看默认HAR文件
@@ -155,30 +215,9 @@ har2pytest summary
 har2pytest summary api_request.har
 ```
 
-#### 5. 测试用例生成详细说明
+#### 6. 测试用例生成详细说明
 
-##### 5.1 simple 模式（通用测试用例）
-
-用于生成简单的通用测试用例，将HAR文件中的每个请求转换为对应的API调用测试。
-
-```bash
-# 基本用法
-har2pytest testcase api_request.har
-
-# 自定义输出目录
-har2pytest testcase api_request.har --output testcases
-
-# 指定API文件目录
-har2pytest testcase api_request.har --api-dir apis --output testcases
-```
-
-**参数说明**：
-- `--api-dir`: 可选，API文件目录，默认为 `apis`
-- `--output`: 可选，输出目录，默认为 `testcases`
-
-**说明**：此模式调用 `generate_test_case_from_har()` 方法，将HAR文件中的请求转换为对应的API调用测试用例。
-
-##### 5.2 list_query 模式（查询类参数化测试）
+##### 6.1 list_query 模式（查询类参数化测试）
 
 用于生成查询接口的参数化测试用例，自动生成多参数组合测试。
 
@@ -199,7 +238,7 @@ har2pytest testcase api.har --pattern list_query --mark test_4291 --api-dir apis
 - `--api-dir`: 可选，API文件目录，默认为 `apis`
 - `--output`: 可选，输出目录，默认为 `testcases`
 
-##### 5.2 complex_scenario 模式（复杂场景流程测试）
+##### 6.3 complex_scenario 模式（复杂场景流程测试）
 
 用于生成复杂业务流程的测试用例，支持指定目标接口进行重点测试。
 
@@ -319,11 +358,6 @@ class TestCaseGenerator:
     def format_test_case_params(self, params_dict: Dict[str, Any]) -> str:
         # 格式化测试用例参数，正确处理列表和字典的缩进
         # 多行内容自动添加3个tab的距离，确保格式正确
-
-    def generate_test_case_from_har(self, har_file_path, output_subdir=None):
-        # 从HAR文件生成pytest用例，支持步骤化测试
-
-
 
     def match_api_files_for_har(self, har_file_path):
         # 根据HAR文件查找对应的API文件
@@ -777,3 +811,11 @@ done
   - 统一Swagger相关功能到 swagger_handler.py
   - 重命名 swagger_updater.py 为 swagger_handler.py，更准确反映功能
   - 优化模块间依赖关系，提高代码可维护性
+
+- **v1.3.0** - 新增API文件生成测试用例功能
+  - 新增 `api2test` 命令，从API文件直接生成测试用例
+  - 每个API文件对应生成一个独立的测试用例文件
+  - 自动提取API文件中的参数和请求头信息
+  - 支持 f-string 格式的请求头（如 `authorization` 字段）
+  - 测试用例生成后自动使用 ruff 格式化
+  - 修复 headers 解析逻辑，正确处理嵌套 `{}` 的情况

@@ -50,9 +50,7 @@ def monitor_performance(threshold: float = 8.0):
             thresholds = {"red": 30, "yellow": threshold, "green": 1}
             # 记录性能数据
             if elapsed > threshold:
-                logger.warning(
-                    f"{args} 接口响应时间超过阈值 ({threshold}s): {elapsed:.3f}s"
-                )
+                logger.warning(f"{args} 接口响应时间超过阈值 ({threshold}s): {elapsed:.3f}s")
                 # 添加到 Allure 报告
                 allure.attach(
                     f"{args[0]} 响应时间: {_value_with_color(elapsed, thresholds)} s",
@@ -110,10 +108,7 @@ class Client:
         elif "data" in kwargs:
             # 检查是否为文件上传请求（MultipartEncoder对象）
             data = kwargs["data"]
-            if (
-                hasattr(data, "__class__")
-                and "MultipartEncoder" in data.__class__.__name__
-            ):
+            if hasattr(data, "__class__") and "MultipartEncoder" in data.__class__.__name__:
                 log_data["data"] = "[文件上传请求 - MultipartEncoder对象]"
             else:
                 log_data["data"] = data
@@ -123,12 +118,8 @@ class Client:
     def _log_response(self, response: requests.Response):
         """结构化日志记录响应"""
         try:
-            body = (
-                response.json()
-                if "json" in response.headers.get("Content-Type", "")
-                else response.text[:500]
-            )
-        except:
+            body = response.json() if "json" in response.headers.get("Content-Type", "") else response.text[:500]
+        except Exception:
             body = response.text[:500]
 
         log_data = {
@@ -142,19 +133,11 @@ class Client:
         """向Allure添加完整请求/响应信息"""
         # 响应信息
         body = _parse_data(response)
-        # 安全地获取 code，确保 body 是字典
-        if isinstance(body, dict):
-            code = body.get("code", 200)
-        else:
-            # 如果 body 不是字典，设置默认 code
-            code = 200
 
         try:
             # 请求信息
             if response.request.method == "GET":
-                parsed_url = urlparse(
-                    response.request.url
-                )  # 从response.request获取原始URL
+                parsed_url = urlparse(response.request.url)  # 从response.request获取原始URL
                 params = parse_qs(parsed_url.query)  # 解析URL获取查询参数
                 if params:
                     allure.attach(
@@ -202,9 +185,7 @@ class Client:
                     attachment_type=allure.attachment_type.JSON,
                 )
         except Exception as e:
-            logger.error(
-                f"Add Allure request content err: {str(e)} - {response.request.url}"
-            )
+            logger.error(f"Add Allure request content err: {str(e)} - {response.request.url}")
         try:
             allure.attach(
                 json.dumps(
@@ -220,9 +201,7 @@ class Client:
                 attachment_type=allure.attachment_type.JSON,
             )
         except Exception as e:
-            logger.error(
-                f"Add Allure response content err: {str(e)} - {response.request.url} - {response.text}"
-            )
+            logger.error(f"Add Allure response content err: {str(e)} - {response.request.url} - {response.text}")
 
     @monitor_performance()
     def request(
@@ -245,9 +224,7 @@ class Client:
         self._log_request(method, url, **kwargs)
 
         try:
-            response = self.session.request(
-                method, url, timeout=final_timeout, verify=final_verify, **kwargs
-            )
+            response = self.session.request(method, url, timeout=final_timeout, verify=final_verify, **kwargs)
 
             # 记录响应
             self._log_response(response)
@@ -287,26 +264,19 @@ def _parse_body(response) -> Any:
         return None
 
     # 检查是否为文件上传请求（MultipartEncoder对象）
-    if (
-        hasattr(response.body, "__class__")
-        and "MultipartEncoder" in response.body.__class__.__name__
-    ):
+    if hasattr(response.body, "__class__") and "MultipartEncoder" in response.body.__class__.__name__:
         # 文件上传请求，返回友好的描述信息而不是尝试序列化MultipartEncoder
         return "[文件上传请求 - MultipartEncoder对象]"
 
     # 根据Content-Type选择解析方式
     content_type = response.headers.get("Content-Type", "")
     # 如果body是字节类型，先解码为字符串
-    body = (
-        response.body.decode("utf-8")
-        if isinstance(response.body, bytes)
-        else response.body
-    )
+    body = response.body.decode("utf-8") if isinstance(response.body, bytes) else response.body
 
     if "application/json" in content_type:
         try:
             return json.loads(body)
-        except:
+        except Exception:
             return body
 
     return body
@@ -320,10 +290,11 @@ def _parse_data(response) -> Any:
     if "application/json" in content_type:
         try:
             data = response.json()
-        except:
+        except Exception:
             data = response.text
     elif "text/html" in content_type:
         data = response.text
+
     elif "image/" in content_type:
         data = response.content
     else:
@@ -389,9 +360,7 @@ def _attach_to_allure():
                 attachment_type=allure.attachment_type.JSON,
             )
     except Exception as e:
-        logger.error(
-            f"Add Allure request content err: {str(e)} - {response.request.url}"
-        )
+        logger.error(f"Add Allure request content err: {str(e)} - {response.request.url}")
     try:
         allure.attach(
             json.dumps(
@@ -407,9 +376,7 @@ def _attach_to_allure():
             attachment_type=allure.attachment_type.JSON,
         )
     except Exception as e:
-        logger.error(
-            f"Add Allure response content err: {str(e)} - {response.request.url} - {response.text}"
-        )
+        logger.error(f"Add Allure response content err: {str(e)} - {response.request.url} - {response.text}")
 
 
 client = Client(base_url=os.environ["base_url"])

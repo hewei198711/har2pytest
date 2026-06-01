@@ -81,9 +81,7 @@ def rsa_encrypt(plaintext: str, public_key: str) -> str:
         raise RuntimeError(f"RSA加密失败: {e}")
 
 
-def encrypt_login_params(
-    username: str, password: str, channel: str = "", phone_no: str = ""
-) -> dict:
+def encrypt_login_params(username: str, password: str, channel: str = "", phone_no: str = "") -> dict:
     """
     加密登录参数
     :param username: 用户名

@@ -32,22 +32,6 @@ def format_parameter_value(value: Any) -> str:
     return result
 
 
-def escape_string_for_python(value: str) -> str:
-    """转义字符串以便在 Python 代码中使用。
-
-    处理特殊字符（如换行符、制表符等）的转义。
-
-    Args:
-        value: 要转义的字符串。
-
-    Returns:
-        str: 转义后的字符串。
-    """
-    value = value.replace("\\", "\\\\")
-    value = value.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
-    return value
-
-
 def deduplicate_values(values: list[Any]) -> list[Any]:
     """对值列表进行去重处理。
 
@@ -76,9 +60,9 @@ def format_python_file(filepath: str) -> None:
         filepath: 要格式化的文件路径。
     """
     try:
-        ruff_path = os.path.join(os.path.dirname(sys.executable), "ruff")
-        subprocess.run([ruff_path, "check", "--fix", filepath], capture_output=True, text=True)
-        subprocess.run([ruff_path, "format", filepath], capture_output=True, text=True)
+        # 使用 python -m ruff 来调用，这样更可靠
+        subprocess.run([sys.executable, "-m", "ruff", "check", "--fix", filepath], capture_output=True, text=True)
+        subprocess.run([sys.executable, "-m", "ruff", "format", filepath], capture_output=True, text=True)
         logger.info(f"使用ruff格式化文件: {filepath}")
     except Exception as e:
         logger.warning(f"格式化文件失败 {filepath}: {str(e)}")
@@ -122,7 +106,7 @@ _API_FILE_CACHE = {}
 def parse_api_file(filepath: str) -> dict:
     """从 API 文件中提取所有信息。
 
-    提取函数名、描述、URL、参数备注和请求头等信息。
+    提取函数名、描述、URL、参数备注、请求头和参数值等信息。
     结果会被缓存以提高性能。
 
     Args:
@@ -135,11 +119,23 @@ def parse_api_file(filepath: str) -> dict:
             - url: 接口 URL
             - param_remarks: 参数备注字典
             - headers: 请求头字典
+            - params: 参数值字典
+            - data: data参数字典
+            - files: files参数字典
     """
     if filepath in _API_FILE_CACHE:
         return _API_FILE_CACHE[filepath].copy()
 
-    result = {"function_name": None, "description": "", "url": None, "param_remarks": {}, "headers": {}}
+    result = {
+        "function_name": None,
+        "description": "",
+        "url": None,
+        "param_remarks": {},
+        "headers": {},
+        "params": {},
+        "data": {},
+        "files": {},
+    }
 
     try:
         basename = os.path.basename(filepath)
@@ -151,54 +147,76 @@ def parse_api_file(filepath: str) -> dict:
         with open(filepath, encoding="utf-8") as f:
             content = f.read()
 
-        # 提取描述和URL（支持单引号和双引号的docstring）
-        docstring_match = re.search(r'"""(.*?)"""|\'\'\'(.*?)\'\'\'', content, re.DOTALL)
-        docstring_url = None
+        # 提取描述和URL（仅支持双引号的docstring）
+        docstring_match = re.search(r'"""(.*?)"""', content, re.DOTALL)
         if docstring_match:
             # 获取第一个非空的捕获组
-            docstring_content = docstring_match.group(1) if docstring_match.group(1) else docstring_match.group(2)
+            docstring_content = docstring_match.group(1)
             lines = [line.strip() for line in docstring_content.split("\n") if line.strip()]
             if lines:
                 result["description"] = lines[0]
-                for line in lines[1:]:
-                    if line.startswith("/"):
-                        docstring_url = line
-                        break
+                result["url"]  = lines[1]
 
-        # 提取URL
-        url_match = re.search(r'url\s*=\s*(f)?["\']([^"\']+)["\']', content)
-        if url_match:
-            is_fstring = url_match.group(1) == "f"
-            result["url"] = docstring_url if is_fstring else url_match.group(2)
-
-        # 提取参数备注
-        for param_type in ["data", "params", "files"]:
-            data_match = re.search(rf"{param_type}\s*=\s*\{{[^}}]*\}}", content, re.DOTALL)
+        # 提取参数值和备注（params、data 和 files）
+        for param_type in ["params", "data", "files"]:
+            data_match = re.search(rf"{param_type}\s*=\s*{{.*?}}", content, re.DOTALL)
             if data_match:
-                param_matches = re.findall(r'"(\w+)"\s*:\s*([^#]+)\s*#\s*(.+?)\n', data_match.group(0))
+                # 提取整个字典块（从 { 到 }）
+                dict_str = data_match.group(0)
+                
+                # 先提取参数备注
+                param_matches = re.findall(r'"(\w+)"\s*:\s*([^#]+)\s*#\s*(.+?)\n', dict_str)
                 for param_name, _, remark in param_matches:
                     result["param_remarks"][param_name] = remark.strip()
+                
+                # 移除行尾注释后解析字典值
+                try:
+                    # 移除变量名赋值部分，只保留字典内容
+                    dict_str = dict_str.replace(f"{param_type} = ", "")
+                    lines = dict_str.split("\n")
+                    cleaned_lines = []
+                    for line in lines:
+                        if "#" in line:
+                            line = line.split("#")[0]
+                        cleaned_lines.append(line)
+                    dict_str = "\n".join(cleaned_lines)
+
+                    params_dict = eval(dict_str)
+                    if isinstance(params_dict, dict):
+                        result[param_type].update(params_dict)
+                    break # API文件只会有第一个参数类型
+                except Exception as e:
+                    logger.error(f"解析 {param_type} 字典失败: {str(e)}")
 
         # 提取headers
-        headers_match = re.search(r"headers\s*=\s*\{[^}]*\}", content, re.DOTALL)
-        if headers_match:
-            header_matches = re.findall(r'"(\w+[-]?\w+)"\s*:\s*("[^"]*"|f"[^"]*")', headers_match.group(0))
-            for key, value in header_matches:
-                result["headers"][key] = value.strip()
+        # 先定位 headers 字典范围，再提取键值对
+        headers_start = content.find("headers = {")
+        if headers_start != -1:
+            # 找到 headers 字典的结束位置（正确处理嵌套的大括号）
+            headers_start += len("headers = {")
+            brace_count = 1
+            headers_end = headers_start
+            while brace_count > 0 and headers_end < len(content):
+                if content[headers_end] == "{":
+                    brace_count += 1
+                elif content[headers_end] == "}":
+                    brace_count -= 1
+                headers_end += 1
+            
+            headers_content = "{" + content[headers_start:headers_end]
+            
+            header_pattern = r'"(\w+[-]?\w+)"\s*:\s*(f"[^"]*"|f\'[^\']*\'|"[^"]*"|\'[^\']*\')'
+            for key, value in re.findall(header_pattern, headers_content):
+                if value.startswith('f"') or value.startswith("f'"):
+                    result["headers"][key] = value
+                else:
+                    result["headers"][key] = value.strip('"').strip("'")
 
     except Exception as e:
         logger.error(f"读取API文件 {filepath} 失败: {str(e)}")
 
     _API_FILE_CACHE[filepath] = result.copy()
     return result
-
-
-def clear_api_cache():
-    """清除 API 文件解析缓存。
-
-    当 API 文件被修改后，需要调用此方法清除缓存以获取最新内容。
-    """
-    _API_FILE_CACHE.clear()
 
 
 def format_headers_for_python(headers: dict[str, str]) -> str:
@@ -224,6 +242,7 @@ def format_params_for_python(
     value_formatter: Callable | None = None,
     comments: dict = None,
     inline: bool = False,
+    indent: int = 4,
 ) -> str:
     """统一的参数格式化函数。
 
@@ -234,6 +253,7 @@ def format_params_for_python(
         value_formatter: 值格式化函数，默认使用 repr。
         comments: 参数注释字典，键为参数名，值为注释内容。
         inline: 是否使用内联格式（单行）。
+        indent: 缩进空格数，默认为 4。
 
     Returns:
         str: 格式化后的 Python 代码字符串。
@@ -247,15 +267,38 @@ def format_params_for_python(
     if comments is None:
         comments = {}
 
+    indent_str = " " * indent
     items = []
     for key, value in params.items():
         formatted_value = value_formatter(value)
         comment = comments.get(key, "")
         if comment:
-            items.append(f'"{key}": {formatted_value},  # {comment}')
+            items.append(f'{indent_str}"{key}": {formatted_value},  # {comment}')
         else:
-            items.append(f'"{key}": {formatted_value},')
+            items.append(f'{indent_str}"{key}": {formatted_value},')
 
     if inline:
         return "{" + ", ".join(items) + "}"
-    return "{\n" + "\n".join(items) + "\n}"
+    # 闭合花括号需要移除一层缩进（4个空格）
+    closing_brace_indent = " " * max(0, indent - 4)
+    return "{\n" + "\n".join(items) + "\n" + closing_brace_indent + "}"
+
+
+def merge_request_params(request_info: dict[str, Any]) -> dict[str, Any]:
+    """合并请求中的 query_params 和 post_data。
+    
+    Args:
+        request_info: 请求信息字典，包含 query_params 和 post_data
+        
+    Returns:
+        dict: 合并后的参数字典
+    """
+    params = {}
+    if request_info.get("query_params"):
+        params.update(request_info["query_params"])
+    if request_info.get("post_data"):
+        if isinstance(request_info["post_data"], dict):
+            params.update(request_info["post_data"])
+        else:
+            logger.debug(f"post_data不是字典类型，跳过合并: {type(request_info['post_data'])}")
+    return params

@@ -9,7 +9,9 @@ from .url_matcher import URLMatcher
 from .utils import (
     deduplicate_values,
     format_params_for_python,
+    format_python_file,
     get_output_dir,
+    merge_request_params,
     parse_api_file,
     write_test_file,
 )
@@ -88,6 +90,33 @@ class TestCaseGenerator:
                     api_files.append(os.path.join(root, file))
         return api_files
 
+    def _extract_service_package(self, api_file: str, index: int = 1) -> str:
+        """从 API 文件路径中提取服务包名称。
+
+        Args:
+            api_file: API 文件路径
+            index: 分割后取第几部分，默认1（apis.mall_center_user._xxx -> mall_center_user）
+
+        Returns:
+            服务包名称，如果提取失败返回 "default"
+        """
+        module_path = api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
+        parts = module_path.split(".")
+        if len(parts) >= abs(index) + 1:
+            return parts[index]
+        return "default"
+
+    def _generate_test_function_name(self, function_name: str) -> str:
+        """生成测试函数名称。
+
+        Args:
+            function_name: 原始函数名称
+
+        Returns:
+            格式化后的测试函数名称，格式为 test_xxx
+        """
+        return f"test_{function_name.lstrip('_')}"
+
     def _get_swagger_doc_for_url(self, url: str) -> dict | None:
         """根据 URL 获取对应的 Swagger 文档。
 
@@ -141,38 +170,6 @@ class TestCaseGenerator:
                 matched_files.append(matched_file)
 
         return matched_files
-
-    def extract_params_from_har_request(self, request_info: dict[str, Any]) -> dict[str, Any] | None:
-        """从 HAR 请求信息中提取参数字典。
-
-        从 HAR 请求中提取查询参数、POST 数据和路径参数，合并为统一的参数字典。
-
-        Args:
-            request_info: HAR 请求信息字典，包含 method、url、post_data、query_params 等字段
-
-        Returns:
-            参数字典，如果没有有效参数则返回 None
-        """
-        method = request_info["method"].upper()
-        url = request_info["url"]
-        post_data = request_info.get("post_data")
-        query_params = request_info.get("query_params", {})
-
-        params = {}
-
-        if query_params:
-            params.update(query_params)
-
-        if method == "POST" and post_data and isinstance(post_data, dict):
-            params.update(post_data)
-
-        # 提取路径参数
-        self._prepare_url_matcher(url)
-        _, path_params, _ = self.url_matcher.match_with_swagger(url)
-        if path_params:
-            params.update(path_params)
-
-        return params if params else None
 
     def _is_valid_param(self, value: Any) -> bool:
         """判断参数值是否有效。
@@ -266,7 +263,8 @@ class TestCaseGenerator:
             normalized_req_url = URLMatcher.normalize_url(req["url"])
 
             if normalized_req_url == normalized_api_url:
-                api_params = self.extract_params_from_har_request(req)
+                # 直接合并 query_params 和 post_data
+                api_params = merge_request_params(req)
                 if isinstance(api_params, dict) and api_params:
                     all_requests_params.append(api_params)
 
@@ -278,68 +276,6 @@ class TestCaseGenerator:
                     request_method = req.get("method", "GET")
 
         return all_params, all_requests_params, request_method
-
-    def _find_target_api_file(self, api_files: list[str], target_url: str) -> str | None:
-        """查找目标 API 文件。
-
-        从 API 文件列表中查找与目标 URL 匹配的 API 文件。
-
-        Args:
-            api_files: API 文件路径列表
-            target_url: 目标 URL
-
-        Returns:
-            匹配的 API 文件路径，如果未找到则返回 None
-        """
-        for api_file in api_files:
-            api_info = self._get_api_file_info(api_file)
-            file_url = api_info.get("url")
-            if not file_url:
-                continue
-
-            if file_url == target_url:
-                return api_file
-
-            matched, _ = URLMatcher.match_url_pattern(target_url, file_url)
-            if matched:
-                return api_file
-
-            matched, _ = URLMatcher.match_url_pattern(file_url, target_url)
-            if matched:
-                return api_file
-
-            if URLMatcher.normalize_url(file_url) == URLMatcher.normalize_url(target_url):
-                return api_file
-
-        return None
-
-    def generate_test_case_from_har(self, har_file_path: str, output_subdir: str = None) -> str | None:
-        """从 HAR 文件生成 pytest 用例文件。
-
-        Args:
-            har_file_path: HAR 文件路径
-            output_subdir: 输出子目录名称
-
-        Returns:
-            生成的测试用例文件路径，如果生成失败则返回 None
-        """
-        if not os.path.exists(har_file_path):
-            logger.info(f"HAR文件不存在: {har_file_path}")
-            return None
-
-        api_files = self.match_api_files_for_har(har_file_path)
-        if not api_files:
-            logger.info(f"未找到HAR文件 {har_file_path} 对应的API文件")
-            return None
-
-        output_dir = get_output_dir(self.output_dir, output_subdir)
-        test_filename = f"test_{os.path.splitext(os.path.basename(har_file_path))[0]}.py"
-        test_filepath = os.path.join(output_dir, test_filename)
-
-        test_content = self.generate_test_case_content(har_file_path, api_files)
-        write_test_file(test_filepath, test_content)
-
-        return test_filepath
 
     def generate_parametrized_list_testcases(self, har_file_path: str, task_id: str) -> list[str]:
         """生成查询类参数化测试用例。
@@ -453,25 +389,21 @@ class TestCaseGenerator:
             logger.info(f"未找到HAR文件 {har_file_path} 对应的API文件")
             return None
 
-        if task_id and task_id.startswith("test_"):
-            task_id = task_id[5:]
-
-        target_api_file = self._find_target_api_file(api_files, target_url)
+        target_api_file = URLMatcher.find_matching_api_file(target_url, api_files)
         if not target_api_file:
             logger.info(f"未找到指定URL对应的API文件: {target_url}")
             return None
 
-        output_dir = get_output_dir(self.output_dir, task_id)
-        api_info = self._get_api_file_info(target_api_file)
-        clean_function_name = api_info["function_name"].lstrip("_")
-        test_filename = f"test_{clean_function_name}.py"
-        test_filepath = os.path.join(output_dir, test_filename)
 
-        test_content = self.generate_test_case_content(har_file_path, api_files, task_id, target_api_file, target_url)
+        test_content = self.generate_test_case_content(har_file_path, api_files, task_id, target_api_file)
 
         if not test_content:
             return None
 
+        output_dir = get_output_dir(self.output_dir, task_id)
+        api_info = self._get_api_file_info(target_api_file)
+        test_filename = f"test{api_info['function_name']}.py"
+        test_filepath = os.path.join(output_dir, test_filename)
         write_test_file(test_filepath, test_content)
         return test_filepath
 
@@ -482,7 +414,6 @@ class TestCaseGenerator:
         api_files: list[str],
         task_id: str = None,
         target_api_file: str = None,
-        target_url: str = None,
     ) -> str:
         """生成 pytest 用例文件内容。
 
@@ -491,17 +422,12 @@ class TestCaseGenerator:
             api_files: API 文件路径列表
             task_id: 任务 ID
             target_api_file: 目标 API 文件路径（可选）
-            target_url: 目标 URL（可选）
 
         Returns:
             测试用例文件内容字符串
         """
-        # 此方法保持原有实现不变，只添加缓存优化
-        requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
 
-        # 预加载所有API文件信息到缓存
-        for api_file in api_files:
-            self._get_api_file_info(api_file)
+        requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
 
         content = [
             "import os",
@@ -513,21 +439,39 @@ class TestCaseGenerator:
 
         imports = []
         for api_file in api_files:
-            module_path = api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
-            result = parse_api_file(api_file)
+            result = self._get_api_file_info(api_file)
             function_name = result["function_name"]
             if function_name:
-                # 提取服务包名称（apis.mall_center_user._xxx -> mall_center_user）
-                parts = module_path.split(".")
-                if len(parts) >= 2:
-                    service_package = parts[1]
-                    imports.append(f"from apis.{service_package} import {function_name}")
-                else:
-                    imports.append(f"from {module_path} import {function_name}")
+                service_package = self._extract_service_package(api_file)
+                imports.append(f"from apis.{service_package} import {function_name}")
 
         if imports:
             content.extend(imports)
             content.append("")
+
+        # 添加 test_headers fixture（从 API 文件获取）
+        headers_content = [
+            "@pytest.fixture(scope=\"module\")",
+            "def test_headers():",
+            "    return {",
+        ]
+        
+        # 获取 headers 内容
+        if target_api_file:
+            api_info = self._get_api_file_info(target_api_file)
+            api_headers = api_info.get("headers", {})
+            if api_headers:
+                for key, value in api_headers.items():
+                    if (value.startswith('f"') and value.endswith('"')) or (value.startswith("f'") and value.endswith("'")):
+                        headers_content.append(f'        "{key}": {value},')
+                    else:
+                        headers_content.append(f'        "{key}": "{value}",')
+        
+        headers_content.extend([
+            "    }",
+            "",
+        ])
+        content.extend(headers_content)
 
         # 提取接口信息
         feature_name = "建议输入被测接口所属的微服务，如 mall_store_application"
@@ -536,12 +480,10 @@ class TestCaseGenerator:
 
         if target_api_file:
             # 提取服务名称
-            module_path = target_api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
-            if len(module_path.split(".")) > 1:
-                feature_name = module_path.split(".")[1]
+            feature_name = self._extract_service_package(target_api_file)
 
             # 提取接口描述和URL
-            result = parse_api_file(target_api_file)
+            result = self._get_api_file_info(target_api_file)
             api_description = result["description"]
             api_url = result["url"]
             if api_description:
@@ -549,9 +491,9 @@ class TestCaseGenerator:
             if api_url:
                 story_name = api_url
 
-        # 添加测试标记和接口说明
+        # 添加测试标记
         if task_id:
-            content.append(f"@pytest.mark.test_{task_id}")
+            content.append(f"@pytest.mark.{task_id}")
 
         content.extend(
             [
@@ -564,24 +506,16 @@ class TestCaseGenerator:
 
         # 生成测试函数名称
         if target_api_file:
-            clean_function_name = parse_api_file(target_api_file)["function_name"].lstrip("_")
-            test_function_name = f"def test_{clean_function_name}():"
+            test_function_name = f"def test{result['function_name']}(test_headers):"
         else:
-            test_function_name = "def test_har_api_flow():"
+            test_function_name = "def test_har_api_flow(test_headers):"
         content.append(test_function_name)
 
         content.extend(
             [
                 "",
                 "    # 初始化测试数据字典，用于在步骤间传递数据",
-                "    test_data = {",
-                '        "headers": {',
-                '            "channel": "pc",',
-                '            "client": "op",',
-                '            "content-type": "application/json;charset=UTF-8",',
-                '            "authorization": f"bearer {os.environ[\'access_token\']}",',
-                "        },",
-                "    }",
+                "    test_data = {}",
                 "",
             ]
         )
@@ -590,28 +524,28 @@ class TestCaseGenerator:
         name_counters = {}
         for i, request_info in enumerate(requests):
             url = request_info["url"]
-            method = request_info["method"]
 
-            api_function = None
+            api_function_name = None
             api_description = None
+            api_info = None
             for api_file in api_files:
-                result = parse_api_file(api_file)
-                file_url = result["url"]
+                api_info = self._get_api_file_info(api_file)
+                file_url = api_info["url"]
                 # 1. 直接相等匹配
                 if file_url == url:
-                    api_function = result["function_name"]
-                    api_description = result["description"]
+                    api_function_name = api_info["function_name"]
+                    api_description = api_info["description"]
                     break
                 # 2. 如果API文件URL包含路径参数模板，尝试匹配
                 elif file_url and "{" in file_url and "}" in file_url:
                     url_pattern, _, _ = URLMatcher({"paths": {file_url: {}}}).match_with_swagger(url)
                     if url_pattern == file_url:
-                        api_function = result["function_name"]
-                        api_description = result["description"]
+                        api_function_name = api_info["function_name"]
+                        api_description = api_info["description"]
                         break
 
-            if api_function:
-                clean_function_name = api_function.lstrip("_")
+            if api_function_name:
+                clean_function_name = api_function_name.lstrip("_")
 
                 if clean_function_name not in name_counters:
                     name_counters[clean_function_name] = 0
@@ -633,68 +567,38 @@ class TestCaseGenerator:
                 else:
                     data_key = function_parts[0] if function_parts else f"response_{i + 1}"
 
-                api_params = self.extract_params_from_har_request(request_info)
-                if api_params:
-                    api_params = format_params_for_python(api_params)
-
+                # 生成函数签名
                 content.extend([f'    @allure.step("{api_description}")', f"    def {step_name}():", ""])
 
-                if api_params:
-                    content_type = request_info.get("content_type", "")
-                    is_file_upload = method == "POST" and content_type.startswith("multipart/form-data")
-
-                    if is_file_upload:
-                        # 处理文件上传请求
-                        content.extend(
-                            [
-                                "        files = {",
-                            ]
-                        )
-
-                        # 添加原始参数
-                        if api_params:
-                            params_lines = api_params.strip().split("\n")
-                            # 跳过第一行（" {"）和最后一行（"        }"）
-                            for line in params_lines[1:-1]:
-                                if line.strip():
-                                    content.append(f"            {line}")
-
-                        # 添加文件参数
-                        content.extend(['            "file": "data/示例文件.png"', "        }"])
-                        content.extend(
-                            [f"        with {api_function}(files=files, headers=test_data['headers']) as r:"]
-                        )
-                    elif method == "POST":
-                        content.extend(
-                            [
-                                f"        data = {api_params}",
-                                f"        with {api_function}(data=data, headers=test_data['headers']) as r:",
-                            ]
-                        )
-                    else:
-                        content.extend(
-                            [
-                                f"        params = {api_params}",
-                                f"        with {api_function}(params=params, headers=test_data['headers']) as r:",
-                            ]
-                        )
+                # 使用已获取的 API 文件信息
+                files_def = api_info.get("files", {})
+                data_def = api_info.get("data", {})
+                params_def = api_info.get("params", {})
+                
+                if files_def:
+                    # API 文件定义了 files 参数
+                    files_str = format_params_for_python(files_def)
+                    content.extend([f"        files = {files_str}", ""])
+                    content.extend(
+                        [f"        with {api_function_name}(files=files, headers=test_headers) as r:"]
+                    )
+                elif data_def:
+                    # API 文件定义了 data 参数
+                    data_str = format_params_for_python(data_def)
+                    content.extend([f"        data = {data_str}", ""])
+                    content.extend(
+                        [f"        with {api_function_name}(data=data, headers=test_headers) as r:"]
+                    )
+                elif params_def:
+                    # API 文件定义了 params 参数
+                    params_str = format_params_for_python(params_def)
+                    content.extend([f"        params = {params_str}", ""])
+                    content.extend(
+                        [f"        with {api_function_name}(params=params, headers=test_headers) as r:"]
+                    )
                 else:
-                    content_type = request_info.get("content_type", "")
-                    is_file_upload = method == "POST" and content_type.startswith("multipart/form-data")
-
-                    if is_file_upload:
-                        content.extend(
-                            [
-                                "        files = {",
-                                '            "storageType": "PublicCloud",',
-                                '            "clientKey": "mall-center-product",',
-                                '            "file": "data/示例文件.png"',
-                                "        }",
-                                f"        with {api_function}(files=files, headers=test_data['headers']) as r:",
-                            ]
-                        )
-                    else:
-                        content.extend([f"        with {api_function}(headers=test_data['headers']) as r:"])
+                    # 没有参数时，直接调用函数
+                    content.extend([f"        with {api_function_name}(headers=test_headers) as r:"])
 
                 content.extend(
                     [
@@ -1005,3 +909,242 @@ class TestCaseGenerator:
             "            assert r.json()['code'] == 200",
             "",
         ]
+
+    def generate_testcase_from_api_file(self, api_file: str) -> str | None:
+        """从单个API文件生成测试用例。
+
+        Args:
+            api_file: API 文件路径
+
+        Returns:
+            生成的测试用例文件路径，如果生成失败则返回 None
+        """
+        if not os.path.exists(api_file):
+            logger.error(f"API文件不存在: {api_file}")
+            return None
+
+        api_info = self._get_api_file_info(api_file)
+        function_name = api_info.get("function_name")
+        if not function_name:
+            logger.error(f"无法从API文件提取函数名: {api_file}")
+            return None
+
+        # 生成测试用例内容
+        test_content = self._generate_simple_testcase_content(api_file)
+        if not test_content:
+            return None
+
+        # 生成输出路径
+        clean_function_name = function_name.lstrip("_")
+        test_filename = f"test_{clean_function_name}.py"
+        test_filepath = os.path.join(self.output_dir, test_filename)
+
+        # 确保输出目录存在
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        write_test_file(test_filepath, test_content)
+
+        # 格式化生成的文件
+        format_python_file(test_filepath)
+
+        return test_filepath
+
+    def generate_testcases_from_api_dir(self, api_dir: str = None) -> list[str]:
+        """从API目录下所有API文件生成测试用例。
+
+        Args:
+            api_dir: API 文件目录，默认为配置的默认目录
+
+        Returns:
+            生成的测试用例文件路径列表
+        """
+        api_dir = api_dir or self.api_dir
+
+        if not os.path.exists(api_dir):
+            logger.error(f"API目录不存在: {api_dir}")
+            return []
+
+        api_files = self._get_all_api_files()
+        if not api_files:
+            logger.info(f"未找到API文件: {api_dir}")
+            return []
+
+        generated_files = []
+        for api_file in api_files:
+            try:
+                test_file = self.generate_testcase_from_api_file(api_file)
+                if test_file:
+                    generated_files.append(test_file)
+            except Exception as e:
+                logger.error(f"生成测试用例失败 {api_file}: {str(e)}")
+
+        return generated_files
+
+    def generate_testcases_from_har(self, har_file_path: str) -> list[str]:
+        """从 HAR 文件生成独立的测试用例文件。
+
+        从 HAR 文件中提取不同的 URL 请求（去重），查找对应的 API 文件，
+        为每个请求生成独立的测试用例文件。
+
+        Args:
+            har_file_path: HAR 文件路径
+
+        Returns:
+            生成的测试用例文件路径列表
+        """
+        if not os.path.exists(har_file_path):
+            logger.error(f"HAR文件不存在: {har_file_path}")
+            return []
+
+        requests = self.har_parser.extract_requests_from_har(har_file_path)
+        if not requests:
+            logger.error(f"HAR文件解析失败或未找到有效请求: {har_file_path}")
+            return []
+
+        # 对 URL 进行去重，保留原始顺序
+        seen_urls = set()
+        unique_requests = []
+        for req in requests:
+            url = req["url"]
+            if url not in seen_urls:
+                seen_urls.add(url)
+                unique_requests.append(req)
+
+        logger.info(f"HAR文件中共有 {len(requests)} 个请求，去重后 {len(unique_requests)} 个唯一URL")
+
+        # 获取所有 API 文件
+        api_files_list = self._get_all_api_files()
+        if not api_files_list:
+            logger.error(f"未找到API文件，目录可能不存在或为空: {self.api_dir}")
+            return []
+
+        # 预处理 URL 映射
+        request_url_map = {}
+        for request in unique_requests:
+            request_url = request["url"]
+            self._prepare_url_matcher(request_url)
+            url_info = self.url_matcher.get_url_info(request_url)
+            request_url_map[request_url] = url_info["pattern"] or request_url
+
+        generated_files = []
+        for request in unique_requests:
+            request_url = request["url"]
+            matched_file = URLMatcher.find_matching_api_file(
+                request_url, api_files_list, request_url_map
+            )
+
+            if matched_file:
+                try:
+                    test_file = self.generate_testcase_from_api_file(matched_file)
+                    if test_file:
+                        generated_files.append(test_file)
+                        logger.info(f"  ✓ {request_url} -> {matched_file}")
+                except Exception as e:
+                    logger.error(f"生成测试用例失败 {request_url}: {str(e)}")
+            else:
+                logger.warning(f"  ✗ 未找到匹配的API文件: {request_url}")
+
+        return generated_files
+
+    def _generate_simple_testcase_content(self, api_file: str) -> str | None:
+        """生成简单测试用例内容。
+
+        Args:
+            api_file: API 文件路径
+
+        Returns:
+            测试用例内容字符串，如果生成失败则返回 None
+        """
+        api_info = self._get_api_file_info(api_file)
+        function_name = api_info.get("function_name")
+        description = api_info.get("description", "")
+        url = api_info.get("url", "")
+        params = api_info.get("params", {})
+        data = api_info.get("data", {})
+        files = api_info.get("files", {})
+        headers = api_info.get("headers", {})
+
+        if not function_name:
+            return None
+
+        # 提取服务包名称（使用 -2 获取倒数第二部分）
+        service_package = self._extract_service_package(api_file, index=-2)
+
+        # 生成测试用例内容
+        content = []
+
+        # 导入部分
+        content.extend(
+            [
+                "import os",
+                "",
+                "import allure",
+                "from allure_commons.types import Severity",
+                "",
+                f"from apis.{service_package} import {function_name}",
+                "",
+            ]
+        )
+
+        # Allure 装饰器
+        content.extend(
+            [
+                "@allure.severity(Severity.NORMAL)",
+                f'@allure.feature("{service_package}")',
+                f'@allure.story("{url}")',
+                f'@allure.title("{description}")',
+                f"def {self._generate_test_function_name(function_name)}():",
+                "",
+            ]
+        )
+
+        # 参数部分（params）
+        if params:
+            params_str = format_params_for_python(params, indent=8)
+            content.append(f"    params = {params_str}")
+            content.append("")
+
+        # 参数部分（data）
+        if data:
+            data_str = format_params_for_python(data, indent=8)
+            content.append(f"    data = {data_str}")
+            content.append("")
+
+        # 参数部分（files）
+        if files:
+            files_str = format_params_for_python(files, indent=8)
+            content.append(f"    files = {files_str}")
+            content.append("")
+
+        # 请求头部分
+        if headers:
+            content.append("    headers = {")
+            for key, value in headers.items():
+                if isinstance(value, str) and (value.startswith('f"') or value.startswith("f'")):
+                    # 保留 f-string
+                    content.append(f'        "{key}": {value},')
+                elif isinstance(value, str):
+                    content.append(f'        "{key}": "{value}",')
+                else:
+                    content.append(f'        "{key}": {value},')
+            content.append("    }")
+            content.append("")
+
+        # 构建函数调用参数
+        call_args = []
+        if params:
+            call_args.append("params=params")
+        if data:
+            call_args.append("data=data")
+        if files:
+            call_args.append("files=files")
+        if headers:
+            call_args.append("headers=headers")
+
+        # 测试主体
+        args_str = ", ".join(call_args)
+        content.append(f"    with {function_name}({args_str}) as r:")
+        content.append("        assert r.status_code == 200")
+        content.append('        assert r.json()["code"] == 200')
+
+        return "\n".join(content)

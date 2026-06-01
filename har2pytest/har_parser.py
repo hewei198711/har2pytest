@@ -9,6 +9,7 @@ from urllib.parse import unquote
 
 from .config import APIConfig
 from .logger import logger
+from .url_matcher import URLMatcher
 
 
 class HARParser:
@@ -95,6 +96,7 @@ class HARParser:
                 headers[header["name"]] = header["value"]
 
             # 过滤 headers
+
             headers = self._filter_headers(headers)
 
             query_params = {}
@@ -130,7 +132,7 @@ class HARParser:
                     except json.JSONDecodeError:
                         post_data = post_data_text
                 else:
-                    raise Exception(f"{full_url} 不支持的Content-Type: {content_type}, 请检查")
+                    raise ValueError(f"不支持的Content-Type: {content_type}, URL: {full_url}")
 
             # 响应内容
             response_content = None
@@ -142,22 +144,15 @@ class HARParser:
                     response_content = response_text
 
             # 清理 URL，移除 query 参数
-            clean_url = full_url
-            # 如果配置了 base_urls，尝试匹配并移除前缀
+            clean_url = full_url  # 默认值
             if self.base_urls:
-                for base_url in self.base_urls:
-                    if full_url.startswith(base_url):
-                        clean_url = full_url[len(base_url) :]
-                        break
+                clean_url = URLMatcher.normalize_url(full_url, self.base_urls)
+            # 如果没有配置 base_urls，尝试使用 origin header
             else:
-                # 如果没有配置 base_urls，尝试从 headers 中获取 origin
                 origin = headers.get("origin", headers.get("Origin", ""))
                 if origin and full_url.startswith(origin):
-                    clean_url = full_url[len(origin) :]
+                    clean_url = URLMatcher.normalize_url(full_url[len(origin):])
                     logger.debug(f"使用 origin header 作为 base URL: {origin}")
-
-            if "?" in clean_url:
-                clean_url = clean_url.split("?")[0]
 
             request_info = {
                 "method": request.get("method", "GET"),
@@ -198,11 +193,13 @@ class HARParser:
             dict[str, Any]: 过滤后的参数字典。
         """
         if not isinstance(data, dict):
-            return data
+            logger.warning(f"期望dict类型，实际收到 {type(data)}，跳过过滤")
+            return data if data else {}
 
         filtered_data = {}
+        invalid_params = APIConfig.INVALID_PARAMS()
         for key, value in data.items():
-            if key not in APIConfig.INVALID_PARAMS():
+            if key not in invalid_params:
                 filtered_data[key] = value
             else:
                 logger.debug(f"过滤无效参数: {key} = {value}")

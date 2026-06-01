@@ -56,7 +56,7 @@ def test_config_file_loading():
         "DEFAULT_API_DIR": "test_api",
         "TESTCASE_DIR": "test_testcases",
         "SERVICE_MAPPING": {"api": "test_service"},
-        "SWAGGER_DOC_URLS": {"test_service": "https://test.example.com/swagger"}
+        "SWAGGER_DOC_URLS": {"test_service": "https://test.example.com/swagger"},
     }
 
     with open("test_config.json", "w", encoding="utf-8") as f:

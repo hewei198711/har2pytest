@@ -1,6 +1,7 @@
 import os
 
 from requests_toolbelt import MultipartEncoder
+
 from util.client import client
 
 files = {
