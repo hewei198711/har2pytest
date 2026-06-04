@@ -8,6 +8,7 @@ from .swagger_handler import SwaggerHandler
 from .url_matcher import URLMatcher
 from .utils import (
     deduplicate_values,
+    format_parameter_value,
     format_params_for_python,
     format_python_file,
     get_output_dir,
@@ -58,6 +59,8 @@ class TestCaseGenerator:
         # API文件缓存
         self._api_file_cache = {}
 
+    # ==================== API 文件处理相关 ====================
+
     def _get_api_file_info(self, api_file: str) -> dict:
         """获取 API 文件信息（带缓存）。
 
@@ -106,17 +109,6 @@ class TestCaseGenerator:
             return parts[index]
         return "default"
 
-    def _generate_test_function_name(self, function_name: str) -> str:
-        """生成测试函数名称。
-
-        Args:
-            function_name: 原始函数名称
-
-        Returns:
-            格式化后的测试函数名称，格式为 test_xxx
-        """
-        return f"test_{function_name.lstrip('_')}"
-
     def _get_swagger_doc_for_url(self, url: str) -> dict | None:
         """根据 URL 获取对应的 Swagger 文档。
 
@@ -163,13 +155,15 @@ class TestCaseGenerator:
 
         api_files_list = self._get_all_api_files()
 
-        matched_files = []
-        for request in requests:
-            matched_file = URLMatcher.find_matching_api_file(request["url"], api_files_list, request_url_map)
-            if matched_file and matched_file not in matched_files:
-                matched_files.append(matched_file)
+        matched_files = set()
+        for url in request_url_map.keys():
+            matched_file = URLMatcher.find_matching_api_file(url, api_files_list, request_url_map)
+            if matched_file:
+                matched_files.add(matched_file)
 
-        return matched_files
+        return list(matched_files)
+
+    # ==================== 参数处理相关 ====================
 
     def _is_valid_param(self, value: Any) -> bool:
         """判断参数值是否有效。
@@ -272,12 +266,18 @@ class TestCaseGenerator:
                         if self._is_valid_param(param_value):
                             all_params.add(param_name)
 
-                if request_method == "GET":
-                    request_method = req.get("method", "GET")
+                # 只获取第一个匹配请求的方法
+                request_method = req.get("method", "GET")
 
+        logger.info(f"提取到的参数: {all_params}")
+        logger.info(f"提取到的请求参数: {all_requests_params}")
+        logger.info(f"提取到的请求方法: {request_method}")
+        
         return all_params, all_requests_params, request_method
 
-    def generate_parametrized_list_testcases(self, har_file_path: str, task_id: str) -> list[str]:
+    # ==================== 测试用例生成入口 ====================
+
+    def generate_parametrized_list_testcases(self, har_file_path: str, task_id: str, target_url: str = None) -> list[str]:
         """生成查询类参数化测试用例。
 
         为每个匹配的 API 生成独立的参数化测试文件。
@@ -285,6 +285,7 @@ class TestCaseGenerator:
         Args:
             har_file_path: HAR 文件路径
             task_id: 任务 ID，用于命名输出目录
+            target_url: 目标接口 URL（可选，指定后只生成该接口的测试用例）
 
         Returns:
             生成的测试用例文件路径列表
@@ -297,15 +298,18 @@ class TestCaseGenerator:
             logger.info(f"未找到HAR文件 {har_file_path} 对应的API文件")
             return []
 
-        if task_id and task_id.startswith("test_"):
-            task_id = task_id[5:]
-
         output_dir = get_output_dir(self.output_dir, task_id)
         generated_files = []
 
         for api_file in api_files:
             try:
                 api_info = self._get_api_file_info(api_file)
+                
+                # 如果指定了 target_url，则只处理匹配的 API
+                if target_url:
+                    if api_info["url"] != target_url:
+                        continue
+                
                 clean_function_name = api_info["function_name"].lstrip("_")
                 test_filename = f"test_{clean_function_name}.py"
                 test_filepath = os.path.join(output_dir, test_filename)
@@ -322,7 +326,9 @@ class TestCaseGenerator:
         return generated_files
 
     def generate_parametrized_test_content(self, har_file_path: str, api_file: str, task_id: str) -> str | None:
-        """生成参数化测试用例内容。
+        """生成参数化列表测试用例内容（list_query 模式）。
+
+        根据 HAR 文件和 API 文件生成基于参数化的列表查询测试用例。
 
         Args:
             har_file_path: HAR 文件路径
@@ -345,15 +351,16 @@ class TestCaseGenerator:
         if not all_requests_params:
             return None
 
-        module_path = api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
-        service_package = module_path.split(".")[1] if len(module_path.split(".")) > 1 else "default"
         clean_function_name = function_name.lstrip("_")
 
-        # 生成测试用例内容
-        content = self._generate_test_case_imports(service_package, function_name, task_id)
+        # 提取接口信息（复用 complex_scenario 模式的方法）
+        feature_name, story_name = self._extract_api_info(api_file)
+
+        # 生成测试用例内容（单函数模式，需要 pytest）
+        content = self._generate_test_case_imports(service_package=feature_name, function_name=function_name, task_id=task_id, import_pytest=True)
         content.extend(
             self._generate_test_case_description(
-                api_info["description"], api_info["url"], service_package, all_params, api_info["param_remarks"]
+                story_name, feature_name, severity="NORMAL"
             )
         )
         content.extend(self._generate_test_class_setup())
@@ -361,7 +368,7 @@ class TestCaseGenerator:
         param_items = self.normalize_params_for_parametrization(all_requests_params)
         content.extend(
             self._generate_parametrized_test_methods(
-                param_items, api_info["description"], clean_function_name, request_method, api_info["param_remarks"]
+                param_items, api_info["description"], function_name, request_method, api_info["param_remarks"]
             )
         )
 
@@ -394,8 +401,7 @@ class TestCaseGenerator:
             logger.info(f"未找到指定URL对应的API文件: {target_url}")
             return None
 
-
-        test_content = self.generate_test_case_content(har_file_path, api_files, task_id, target_api_file)
+        test_content = self.generate_scenario_test_content(har_file_path, api_files, task_id, target_api_file)
 
         if not test_content:
             return None
@@ -407,15 +413,16 @@ class TestCaseGenerator:
         write_test_file(test_filepath, test_content)
         return test_filepath
 
-    # 以下方法保持不变，只是添加缓存优化
-    def generate_test_case_content(
+    def generate_scenario_test_content(
         self,
         har_file_path: str,
         api_files: list[str],
         task_id: str = None,
         target_api_file: str = None,
     ) -> str:
-        """生成 pytest 用例文件内容。
+        """生成复杂场景流程测试用例内容（complex_scenario 模式）。
+
+        根据 HAR 文件和多个 API 文件生成场景化的流程测试用例，包含多个步骤函数的调用链。
 
         Args:
             har_file_path: HAR 文件路径
@@ -424,36 +431,323 @@ class TestCaseGenerator:
             target_api_file: 目标 API 文件路径（可选）
 
         Returns:
-            测试用例文件内容字符串
+            场景流程测试用例文件内容字符串
         """
-
+        # 1. 提取请求
         requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
 
-        content = [
-            "import os",
-            "import pytest",
-            "import allure",
-            "from allure_commons.types import Severity",
+        # 2. 生成导入语句（多函数模式，不需要 pytest）
+        content = self._generate_test_case_imports(api_files=api_files, task_id=task_id, import_pytest=False)
+
+        # 3. 提取接口信息
+        feature_name, story_name = self._extract_api_info(target_api_file)
+
+        # 4. 生成测试用例描述（使用 CRITICAL 级别）
+        content.extend(
+            self._generate_test_case_description(
+                story_name, feature_name, severity="CRITICAL"
+            )
+        )
+
+        # 5. 添加测试类和 setup_class 方法
+        content.extend(self._generate_test_class_setup(target_api_file))
+
+        # 6. 生成测试方法定义
+        content.extend(self._generate_scenario_test_method_definition(target_api_file))
+
+        # 7. 生成步骤函数和步骤调用
+        step_functions = self._generate_scenario_step_functions(content, requests, api_files)
+        
+        # 生成步骤调用
+        if step_functions:
+            content.append("        # 执行所有测试步骤")
+            for step_func in step_functions:
+                content.append(f"        {step_func}()")
+            content.append("")
+
+        return "\n".join(content)
+
+    # ==================== 场景测试用例内容生成辅助方法 ====================
+
+    def _extract_api_info(self, target_api_file: str) -> tuple:
+        """从 API 文件提取接口信息。
+
+        Args:
+            target_api_file: 目标 API 文件路径
+
+        Returns:
+            (feature_name, story_name) 元组
+        """
+        feature_name = ""
+        story_name = ""
+
+        if target_api_file:
+            # 提取服务名称
+            feature_name = self._extract_service_package(target_api_file)
+
+            # 提取接口描述和URL
+            result = self._get_api_file_info(target_api_file)
+            api_url = result["url"]
+            if api_url:
+                story_name = api_url
+
+        return feature_name, story_name
+
+    def _generate_scenario_test_method_definition(self, target_api_file: str) -> list[str]:
+        """生成场景测试方法定义。
+
+        Args:
+            target_api_file: 目标 API 文件路径
+
+        Returns:
+            测试方法定义代码行列表
+        """
+        if target_api_file:
+            api_info = self._get_api_file_info(target_api_file)
+            clean_function_name = api_info["function_name"].lstrip("_")
+            test_function_name = f"    def test_{clean_function_name}(self):"
+        else:
+            test_function_name = "    def test_har_api_flow(self):"
+
+        return [
+            test_function_name,
+            "",
+            "        # 初始化测试数据字典，用于在步骤间传递数据",
+            "        test_data = {}",
             "",
         ]
 
-        imports = []
-        for api_file in api_files:
-            result = self._get_api_file_info(api_file)
-            function_name = result["function_name"]
-            if function_name:
-                service_package = self._extract_service_package(api_file)
-                imports.append(f"from apis.{service_package} import {function_name}")
+    def _generate_scenario_step_functions(
+        self, content: list[str], requests: list, api_files: list[str]
+    ) -> list[str]:
+        """生成场景测试步骤函数。
 
-        if imports:
-            content.extend(imports)
+        Args:
+            content: 内容列表（会被修改）
+            requests: 请求信息列表
+            api_files: API 文件路径列表
+
+        Returns:
+            步骤函数名称列表
+        """
+        step_functions = []
+        name_counters = {}
+
+        for i, request_info in enumerate(requests):
+            url = request_info["url"]
+
+            api_function_name, api_description, api_info = self._match_api_function(url, api_files)
+
+            if api_function_name:
+                step_name = self._generate_step_function_name(api_function_name, name_counters)
+                step_functions.append(step_name)
+
+                # 生成数据键名
+                clean_func_name = api_function_name.lstrip("_")
+                func_parts = clean_func_name.split("_")
+                data_key = "_".join(func_parts[-2:]) if len(func_parts) >= 2 else (func_parts[0] if func_parts else f"response_{i + 1}")
+
+                # 生成函数签名
+                content.extend([f'        @allure.step("{api_description}")', f"        def {step_name}():", ""])
+
+                # 生成步骤函数体
+                self._generate_step_function_body(content, api_function_name, api_info)
+
+                # 生成断言
+                content.extend([
+                    "                assert r.status_code == 200",
+                    "                assert r.json()['code'] == 200",
+                    f"                test_data['{data_key}'] = r.json()",
+                    "",
+                ])
+
+        return step_functions
+
+    def _match_api_function(self, url: str, api_files: list[str]) -> tuple:
+        """匹配 URL 对应的 API 函数。
+
+        Args:
+            url: 请求 URL
+            api_files: API 文件路径列表
+
+        Returns:
+            (api_function_name, api_description, api_info) 元组
+        """
+        for api_file in api_files:
+            api_info = self._get_api_file_info(api_file)
+            file_url = api_info["url"]
+            # 1. 直接相等匹配
+            if file_url == url:
+                return api_info["function_name"], api_info["description"], api_info
+            # 2. 如果API文件URL包含路径参数模板，尝试匹配
+            elif file_url and "{" in file_url and "}" in file_url:
+                url_pattern, _, _ = URLMatcher({"paths": {file_url: {}}}).match_with_swagger(url)
+                if url_pattern == file_url:
+                    return api_info["function_name"], api_info["description"], api_info
+        return None, None, None
+
+    def _generate_step_function_name(self, api_function_name: str, name_counters: dict) -> str:
+        """生成步骤函数名称。
+
+        Args:
+            api_function_name: API 函数名称
+            name_counters: 名称计数器字典（会被修改）
+
+        Returns:
+            步骤函数名称
+        """
+        clean_function_name = api_function_name.lstrip("_")
+
+        if clean_function_name not in name_counters:
+            name_counters[clean_function_name] = 0
+
+        count = name_counters[clean_function_name]
+
+        if count == 0:
+            step_name = f"step_{clean_function_name}"
+        else:
+            step_name = f"step_{count}_{clean_function_name}"
+
+        name_counters[clean_function_name] += 1
+        return step_name
+
+    def _generate_step_function_body(self, content: list[str], api_function_name: str, api_info: dict):
+        """生成步骤函数体。
+
+        Args:
+            content: 内容列表（会被修改）
+            api_function_name: API 函数名称
+            api_info: API 信息字典
+        """
+        files_def = api_info.get("files", {})
+        data_def = api_info.get("data", {})
+        params_def = api_info.get("params", {})
+
+        if files_def:
+            # API 文件定义了 files 参数
+            files_str = format_params_for_python(files_def)
+            content.extend([f"            files = {files_str}", ""])
+            content.extend(
+                [f"            with {api_function_name}(files=files, headers=self.headers) as r:"]
+            )
+        elif data_def:
+            # API 文件定义了 data 参数
+            data_str = format_params_for_python(data_def)
+            content.extend([f"            data = {data_str}", ""])
+            content.extend(
+                [f"            with {api_function_name}(data=data, headers=self.headers) as r:"]
+            )
+        elif params_def:
+            # API 文件定义了 params 参数
+            params_str = format_params_for_python(params_def)
+            content.extend([f"            params = {params_str}", ""])
+            content.extend(
+                [f"            with {api_function_name}(params=params, headers=self.headers) as r:"]
+            )
+        else:
+            # 没有参数时，直接调用函数
+            content.extend([f"            with {api_function_name}(headers=self.headers) as r:"])
+
+    # ==================== 测试用例内容生成通用方法 ====================
+
+    def _generate_test_case_imports(
+        self, 
+        api_files: list[str] = None,
+        service_package: str = None, 
+        function_name: str = None, 
+        task_id: str = None,
+        import_pytest: bool = True
+    ) -> list[str]:
+        """生成测试用例的导入部分。
+
+        Args:
+            api_files: API 文件路径列表（用于多函数导入）
+            service_package: 服务包名称（用于单函数导入）
+            function_name: API 函数名称（用于单函数导入）
+            task_id: 任务 ID
+            import_pytest: 是否导入 pytest（默认为 True）
+
+        Returns:
+            导入语句列表
+        """
+        content = [
+            "import os",
+            "",
+        ]
+        
+        if import_pytest:
+            content.append("import pytest")
+        
+        content.extend([
+            "import allure",
+            "from allure_commons.types import Severity",
+            "",
+        ])
+
+        if api_files:
+            # 多函数模式：按服务包分组导入
+            service_imports = {}
+            for api_file in api_files:
+                result = self._get_api_file_info(api_file)
+                func_name = result["function_name"]
+                if func_name:
+                    pkg = self._extract_service_package(api_file)
+                    if pkg not in service_imports:
+                        service_imports[pkg] = []
+                    service_imports[pkg].append(func_name)
+            
+            for pkg, functions in service_imports.items():
+                if len(functions) > 1:
+                    content.append(f"from apis.{pkg} import (")
+                    for func in functions:
+                        content.append(f"    {func},")
+                    content.append(")")
+                else:
+                    content.append(f"from apis.{pkg} import {functions[0]}")
+                content.append("")
+        elif service_package and function_name:
+            # 单函数模式
+            content.append(f"from apis.{service_package} import {function_name}")
             content.append("")
 
-        # 添加 test_headers fixture（从 API 文件获取）
+        if task_id:
+            content.append(f"@pytest.mark.{task_id}")
+        
+        return content
+
+    def _generate_test_case_description(
+        self, api_url: str, service_package: str, severity: str = "NORMAL"
+    ) -> list[str]:
+        """生成测试用例的描述部分。
+
+        Args:
+            api_url: API URL
+            service_package: 服务包名称
+            severity: 测试用例严重级别，可选值：NORMAL、CRITICAL、MINOR、MAJOR、BLOCKER
+
+        Returns:
+            描述语句列表
+        """
+        return [
+            f"@allure.severity(Severity.{severity})",
+            f"@allure.feature('{service_package}')",
+            f"@allure.story('{api_url}')",
+        ]
+
+    def _generate_test_class_setup(self, target_api_file: str = None) -> list[str]:
+        """生成测试类的 setup 方法。
+
+        Args:
+            target_api_file: 目标 API 文件路径（可选，用于获取自定义 headers）
+
+        Returns:
+            setup 方法代码行列表
+        """
         headers_content = [
-            "@pytest.fixture(scope=\"module\")",
-            "def test_headers():",
-            "    return {",
+            "class TestClass:",
+            "",
+            "    def setup_class(self):",
+            "        self.headers = {",
         ]
         
         # 获取 headers 内容
@@ -463,241 +757,31 @@ class TestCaseGenerator:
             if api_headers:
                 for key, value in api_headers.items():
                     if (value.startswith('f"') and value.endswith('"')) or (value.startswith("f'") and value.endswith("'")):
-                        headers_content.append(f'        "{key}": {value},')
+                        headers_content.append(f'            "{key}": {value},')
                     else:
-                        headers_content.append(f'        "{key}": "{value}",')
+                        headers_content.append(f'            "{key}": "{value}",')
+        else:
+            # 默认 headers
+            headers_content.extend([
+                '            "channel": "pc",',
+                '            "client": "op",',
+                '            "authorization": f"bearer {os.environ[\'access_token\']}",',
+            ])
         
         headers_content.extend([
-            "    }",
-            "",
-        ])
-        content.extend(headers_content)
-
-        # 提取接口信息
-        feature_name = "建议输入被测接口所属的微服务，如 mall_store_application"
-        story_name = "建议输入被测接口，如 /appStore/order/orderSign/signCommit"
-        title_name = "建议输入测试用例名称，如 提交订单"
-
-        if target_api_file:
-            # 提取服务名称
-            feature_name = self._extract_service_package(target_api_file)
-
-            # 提取接口描述和URL
-            result = self._get_api_file_info(target_api_file)
-            api_description = result["description"]
-            api_url = result["url"]
-            if api_description:
-                title_name = api_description
-            if api_url:
-                story_name = api_url
-
-        # 添加测试标记
-        if task_id:
-            content.append(f"@pytest.mark.{task_id}")
-
-        content.extend(
-            [
-                "@allure.severity(Severity.CRITICAL)",
-                f"@allure.feature('{feature_name}')",
-                f"@allure.story('{story_name}')",
-                f"@allure.title('{title_name}')",
-            ]
-        )
-
-        # 生成测试函数名称
-        if target_api_file:
-            test_function_name = f"def test{result['function_name']}(test_headers):"
-        else:
-            test_function_name = "def test_har_api_flow(test_headers):"
-        content.append(test_function_name)
-
-        content.extend(
-            [
-                "",
-                "    # 初始化测试数据字典，用于在步骤间传递数据",
-                "    test_data = {}",
-                "",
-            ]
-        )
-
-        step_functions = []
-        name_counters = {}
-        for i, request_info in enumerate(requests):
-            url = request_info["url"]
-
-            api_function_name = None
-            api_description = None
-            api_info = None
-            for api_file in api_files:
-                api_info = self._get_api_file_info(api_file)
-                file_url = api_info["url"]
-                # 1. 直接相等匹配
-                if file_url == url:
-                    api_function_name = api_info["function_name"]
-                    api_description = api_info["description"]
-                    break
-                # 2. 如果API文件URL包含路径参数模板，尝试匹配
-                elif file_url and "{" in file_url and "}" in file_url:
-                    url_pattern, _, _ = URLMatcher({"paths": {file_url: {}}}).match_with_swagger(url)
-                    if url_pattern == file_url:
-                        api_function_name = api_info["function_name"]
-                        api_description = api_info["description"]
-                        break
-
-            if api_function_name:
-                clean_function_name = api_function_name.lstrip("_")
-
-                if clean_function_name not in name_counters:
-                    name_counters[clean_function_name] = 0
-
-                count = name_counters[clean_function_name]
-
-                if count == 0:
-                    step_name = f"step_{clean_function_name}"
-                else:
-                    step_name = f"step_{count}_{clean_function_name}"
-
-                name_counters[clean_function_name] += 1
-
-                step_functions.append(step_name)
-
-                function_parts = clean_function_name.split("_")
-                if len(function_parts) >= 2:
-                    data_key = "_".join(function_parts[-2:])
-                else:
-                    data_key = function_parts[0] if function_parts else f"response_{i + 1}"
-
-                # 生成函数签名
-                content.extend([f'    @allure.step("{api_description}")', f"    def {step_name}():", ""])
-
-                # 使用已获取的 API 文件信息
-                files_def = api_info.get("files", {})
-                data_def = api_info.get("data", {})
-                params_def = api_info.get("params", {})
-                
-                if files_def:
-                    # API 文件定义了 files 参数
-                    files_str = format_params_for_python(files_def)
-                    content.extend([f"        files = {files_str}", ""])
-                    content.extend(
-                        [f"        with {api_function_name}(files=files, headers=test_headers) as r:"]
-                    )
-                elif data_def:
-                    # API 文件定义了 data 参数
-                    data_str = format_params_for_python(data_def)
-                    content.extend([f"        data = {data_str}", ""])
-                    content.extend(
-                        [f"        with {api_function_name}(data=data, headers=test_headers) as r:"]
-                    )
-                elif params_def:
-                    # API 文件定义了 params 参数
-                    params_str = format_params_for_python(params_def)
-                    content.extend([f"        params = {params_str}", ""])
-                    content.extend(
-                        [f"        with {api_function_name}(params=params, headers=test_headers) as r:"]
-                    )
-                else:
-                    # 没有参数时，直接调用函数
-                    content.extend([f"        with {api_function_name}(headers=test_headers) as r:"])
-
-                content.extend(
-                    [
-                        "            assert r.status_code == 200",
-                        "            assert r.json()['code'] == 200",
-                        f"            test_data['{data_key}'] = r.json()",
-                        "",
-                    ]
-                )
-
-        if step_functions:
-            content.append("    # 执行所有测试步骤")
-            for step_func in step_functions:
-                content.append(f"    {step_func}()")
-            content.append("")
-
-        return "\n".join(content)
-
-    def _generate_test_case_imports(self, service_package: str, function_name: str, task_id: str) -> list[str]:
-        """生成测试用例的导入部分。
-
-        Args:
-            service_package: 服务包名称
-            function_name: API 函数名称
-            task_id: 任务 ID
-
-        Returns:
-            导入语句列表
-        """
-        content = [
-            "import os",
-            "import pytest",
-            "import allure",
-            "from allure_commons.types import Severity",
-            "",
-            f"from apis.{service_package} import {function_name}",
-            "",
-        ]
-        if task_id:
-            content.append(f"@pytest.mark.test_{task_id}")
-        return content
-
-    def _generate_test_case_description(
-        self, api_description: str, api_url: str, service_package: str, all_params: set, param_remarks: dict
-    ) -> list[str]:
-        """生成测试用例的描述部分。
-
-        Args:
-            api_description: API 描述信息
-            api_url: API URL
-            service_package: 服务包名称
-            all_params: 参数名集合
-            param_remarks: 参数备注字典
-
-        Returns:
-            描述语句列表
-        """
-        content = [
-            f"@allure.feature('{service_package}')",
-            f"@allure.story('{api_url}')",
-            f'@allure.description("""接口说明：\n- 接口名称：{api_description}',
-            f"- 接口地址：{api_url}",
-            "",
-            "主要参数说明：",
-        ]
-
-        for param_name in all_params:
-            remark = param_remarks.get(param_name, "# TODO 请填写参数备注")
-            if "TODO" in remark:
-                remark = "# TODO 请填写参数备注"
-            content.append(f"- {param_name}：{remark}")
-
-        content.append('""")')
-        return content
-
-    def _generate_test_class_setup(self) -> list[str]:
-        """生成测试类的 setup 方法。
-
-        Returns:
-            setup 方法代码行列表
-        """
-        return [
-            "class TestClass:",
-            "",
-            "    def setup_class(self):",
-            "        self.headers = {",
-            '            "channel": "pc",',
-            '            "client": "op",',
-            '            "content-type": "application/json;charset=UTF-8",',
-            '            "authorization": f"bearer {os.environ[\'access_token\']}",',
             "        }",
             "",
-        ]
+        ])
+        
+        return headers_content
+
+    # ==================== 参数化测试方法生成辅助方法 ====================
 
     def _generate_parametrized_test_methods(
         self,
         param_items: list,
         api_description: str,
-        clean_function_name: str,
+        function_name: str,
         request_method: str,
         param_remarks: dict,
     ) -> list[str]:
@@ -706,7 +790,7 @@ class TestCaseGenerator:
         Args:
             param_items: 参数化数据列表
             api_description: API 描述信息
-            clean_function_name: 清理后的函数名称
+            function_name: API 函数名称（带下划线前缀）
             request_method: 请求方法
             param_remarks: 参数备注字典
 
@@ -714,6 +798,7 @@ class TestCaseGenerator:
             参数化测试方法代码行列表
         """
         content = []
+        clean_function_name = function_name.lstrip("_")
 
         for idx, item in enumerate(param_items):
             param_name = next((k for k in item if k != "other_params"), None)
@@ -732,7 +817,7 @@ class TestCaseGenerator:
                 )
             )
             content.extend(self._generate_test_method_body(param_var_name, param_name, other_params, is_combination))
-            content.extend(self._generate_test_method_assertions(clean_function_name, param_var_name))
+            content.extend(self._generate_test_method_assertions(function_name, param_var_name))
 
         return content
 
@@ -749,11 +834,7 @@ class TestCaseGenerator:
         """
         parametrize_values = self._generate_parametrize_values(param_values, is_combination)
 
-        if is_combination:
-            param_names = param_name.split(",")
-            decorator_line = f'    @pytest.mark.parametrize("{", ".join(param_names)}, p", ['
-        else:
-            decorator_line = f'    @pytest.mark.parametrize("{param_name}, p", ['
+        decorator_line = f'    @pytest.mark.parametrize("{param_name}", ['
 
         content = [decorator_line]
         for i, value in enumerate(parametrize_values):
@@ -775,30 +856,13 @@ class TestCaseGenerator:
         parametrize_values = []
         if is_combination:
             for value_tuple in param_values:
-                formatted_values = [self._format_value(v) for v in value_tuple]
-                formatted_values.append("Severity.NORMAL")
+                formatted_values = [format_parameter_value(v) for v in value_tuple]
                 parametrize_values.append(f"({', '.join(formatted_values)})")
         else:
             for value in param_values:
-                formatted_value = self._format_value(value)
-                parametrize_values.append(f"({formatted_value}, Severity.NORMAL)")
+                formatted_value = format_parameter_value(value)
+                parametrize_values.append(f"{formatted_value}")
         return parametrize_values
-
-    @staticmethod
-    def _format_value(value: Any) -> str:
-        """格式化单个值为 Python 字符串表示。
-
-        Args:
-            value: 需要格式化的值
-
-        Returns:
-            格式化后的字符串
-        """
-        if value is None:
-            return "None"
-        if isinstance(value, str):
-            return f'"{value}"'
-        return str(value)
 
     def _generate_test_method_definition(
         self,
@@ -833,7 +897,7 @@ class TestCaseGenerator:
             param_desc_str = "-".join(param_descriptions)
             return [
                 f'    @allure.title("{api_description}-成功路径: {param_desc_str} 查询")',
-                f"    def test_{param_count}_{clean_function_name}(self, {', '.join(param_names)}, p):",
+                f"    def test_{param_count}_{clean_function_name}(self, {', '.join(param_names)}):",
             ]
         else:
             param_description = param_remarks.get(param_name, param_name)
@@ -841,7 +905,7 @@ class TestCaseGenerator:
                 param_description = param_description.split(" ")[0]
             return [
                 f'    @allure.title("{api_description}-成功路径: {param_description} 查询")',
-                f"    def test_{param_count}_{clean_function_name}(self, {param_name}, p):",
+                f"    def test_{param_count}_{clean_function_name}(self, {param_name}):",
             ]
 
     def _generate_test_method_body(
@@ -859,9 +923,6 @@ class TestCaseGenerator:
             测试方法体代码行列表
         """
         content = [
-            "",
-            "        # 用例级别",
-            "        allure.dynamic.severity(p)",
             "",
             f"        {param_var_name} = {{",
         ]
@@ -909,242 +970,3 @@ class TestCaseGenerator:
             "            assert r.json()['code'] == 200",
             "",
         ]
-
-    def generate_testcase_from_api_file(self, api_file: str) -> str | None:
-        """从单个API文件生成测试用例。
-
-        Args:
-            api_file: API 文件路径
-
-        Returns:
-            生成的测试用例文件路径，如果生成失败则返回 None
-        """
-        if not os.path.exists(api_file):
-            logger.error(f"API文件不存在: {api_file}")
-            return None
-
-        api_info = self._get_api_file_info(api_file)
-        function_name = api_info.get("function_name")
-        if not function_name:
-            logger.error(f"无法从API文件提取函数名: {api_file}")
-            return None
-
-        # 生成测试用例内容
-        test_content = self._generate_simple_testcase_content(api_file)
-        if not test_content:
-            return None
-
-        # 生成输出路径
-        clean_function_name = function_name.lstrip("_")
-        test_filename = f"test_{clean_function_name}.py"
-        test_filepath = os.path.join(self.output_dir, test_filename)
-
-        # 确保输出目录存在
-        os.makedirs(self.output_dir, exist_ok=True)
-
-        write_test_file(test_filepath, test_content)
-
-        # 格式化生成的文件
-        format_python_file(test_filepath)
-
-        return test_filepath
-
-    def generate_testcases_from_api_dir(self, api_dir: str = None) -> list[str]:
-        """从API目录下所有API文件生成测试用例。
-
-        Args:
-            api_dir: API 文件目录，默认为配置的默认目录
-
-        Returns:
-            生成的测试用例文件路径列表
-        """
-        api_dir = api_dir or self.api_dir
-
-        if not os.path.exists(api_dir):
-            logger.error(f"API目录不存在: {api_dir}")
-            return []
-
-        api_files = self._get_all_api_files()
-        if not api_files:
-            logger.info(f"未找到API文件: {api_dir}")
-            return []
-
-        generated_files = []
-        for api_file in api_files:
-            try:
-                test_file = self.generate_testcase_from_api_file(api_file)
-                if test_file:
-                    generated_files.append(test_file)
-            except Exception as e:
-                logger.error(f"生成测试用例失败 {api_file}: {str(e)}")
-
-        return generated_files
-
-    def generate_testcases_from_har(self, har_file_path: str) -> list[str]:
-        """从 HAR 文件生成独立的测试用例文件。
-
-        从 HAR 文件中提取不同的 URL 请求（去重），查找对应的 API 文件，
-        为每个请求生成独立的测试用例文件。
-
-        Args:
-            har_file_path: HAR 文件路径
-
-        Returns:
-            生成的测试用例文件路径列表
-        """
-        if not os.path.exists(har_file_path):
-            logger.error(f"HAR文件不存在: {har_file_path}")
-            return []
-
-        requests = self.har_parser.extract_requests_from_har(har_file_path)
-        if not requests:
-            logger.error(f"HAR文件解析失败或未找到有效请求: {har_file_path}")
-            return []
-
-        # 对 URL 进行去重，保留原始顺序
-        seen_urls = set()
-        unique_requests = []
-        for req in requests:
-            url = req["url"]
-            if url not in seen_urls:
-                seen_urls.add(url)
-                unique_requests.append(req)
-
-        logger.info(f"HAR文件中共有 {len(requests)} 个请求，去重后 {len(unique_requests)} 个唯一URL")
-
-        # 获取所有 API 文件
-        api_files_list = self._get_all_api_files()
-        if not api_files_list:
-            logger.error(f"未找到API文件，目录可能不存在或为空: {self.api_dir}")
-            return []
-
-        # 预处理 URL 映射
-        request_url_map = {}
-        for request in unique_requests:
-            request_url = request["url"]
-            self._prepare_url_matcher(request_url)
-            url_info = self.url_matcher.get_url_info(request_url)
-            request_url_map[request_url] = url_info["pattern"] or request_url
-
-        generated_files = []
-        for request in unique_requests:
-            request_url = request["url"]
-            matched_file = URLMatcher.find_matching_api_file(
-                request_url, api_files_list, request_url_map
-            )
-
-            if matched_file:
-                try:
-                    test_file = self.generate_testcase_from_api_file(matched_file)
-                    if test_file:
-                        generated_files.append(test_file)
-                        logger.info(f"  ✓ {request_url} -> {matched_file}")
-                except Exception as e:
-                    logger.error(f"生成测试用例失败 {request_url}: {str(e)}")
-            else:
-                logger.warning(f"  ✗ 未找到匹配的API文件: {request_url}")
-
-        return generated_files
-
-    def _generate_simple_testcase_content(self, api_file: str) -> str | None:
-        """生成简单测试用例内容。
-
-        Args:
-            api_file: API 文件路径
-
-        Returns:
-            测试用例内容字符串，如果生成失败则返回 None
-        """
-        api_info = self._get_api_file_info(api_file)
-        function_name = api_info.get("function_name")
-        description = api_info.get("description", "")
-        url = api_info.get("url", "")
-        params = api_info.get("params", {})
-        data = api_info.get("data", {})
-        files = api_info.get("files", {})
-        headers = api_info.get("headers", {})
-
-        if not function_name:
-            return None
-
-        # 提取服务包名称（使用 -2 获取倒数第二部分）
-        service_package = self._extract_service_package(api_file, index=-2)
-
-        # 生成测试用例内容
-        content = []
-
-        # 导入部分
-        content.extend(
-            [
-                "import os",
-                "",
-                "import allure",
-                "from allure_commons.types import Severity",
-                "",
-                f"from apis.{service_package} import {function_name}",
-                "",
-            ]
-        )
-
-        # Allure 装饰器
-        content.extend(
-            [
-                "@allure.severity(Severity.NORMAL)",
-                f'@allure.feature("{service_package}")',
-                f'@allure.story("{url}")',
-                f'@allure.title("{description}")',
-                f"def {self._generate_test_function_name(function_name)}():",
-                "",
-            ]
-        )
-
-        # 参数部分（params）
-        if params:
-            params_str = format_params_for_python(params, indent=8)
-            content.append(f"    params = {params_str}")
-            content.append("")
-
-        # 参数部分（data）
-        if data:
-            data_str = format_params_for_python(data, indent=8)
-            content.append(f"    data = {data_str}")
-            content.append("")
-
-        # 参数部分（files）
-        if files:
-            files_str = format_params_for_python(files, indent=8)
-            content.append(f"    files = {files_str}")
-            content.append("")
-
-        # 请求头部分
-        if headers:
-            content.append("    headers = {")
-            for key, value in headers.items():
-                if isinstance(value, str) and (value.startswith('f"') or value.startswith("f'")):
-                    # 保留 f-string
-                    content.append(f'        "{key}": {value},')
-                elif isinstance(value, str):
-                    content.append(f'        "{key}": "{value}",')
-                else:
-                    content.append(f'        "{key}": {value},')
-            content.append("    }")
-            content.append("")
-
-        # 构建函数调用参数
-        call_args = []
-        if params:
-            call_args.append("params=params")
-        if data:
-            call_args.append("data=data")
-        if files:
-            call_args.append("files=files")
-        if headers:
-            call_args.append("headers=headers")
-
-        # 测试主体
-        args_str = ", ".join(call_args)
-        content.append(f"    with {function_name}({args_str}) as r:")
-        content.append("        assert r.status_code == 200")
-        content.append('        assert r.json()["code"] == 200')
-
-        return "\n".join(content)

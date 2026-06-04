@@ -126,10 +126,10 @@ har2pytest swagger https://petstore.swagger.io/v2/api-docs --output apis --overw
 
 ```bash
 # 生成查询类参数化测试用例（不传mark）
-har2pytest testcase api_request.har --pattern list_query
+har2pytest testcase api_request.har --pattern list_query --url /api/user/list
 
 # 生成查询类参数化测试用例（传mark）
-har2pytest testcase api_request.har --pattern list_query --mark test_4295
+har2pytest testcase api_request.har --pattern list_query --url /api/user/list --mark test_4295
 
 
 # 生成复杂场景测试用例（不传mark）
@@ -139,73 +139,10 @@ har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/l
 har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
 
 # 自定义输出目录
-har2pytest testcase api_request.har --pattern list_query --mark test_4295 --output my_tests
+har2pytest testcase api_request.har --pattern list_query --url /api/user/list --mark test_4295 --output my_tests
 ```
 
-#### 4. 从API文件生成测试用例 (`api2test` 命令)
-
-从已有的API文件直接生成测试用例，每个API文件对应一个测试用例。
-
-```bash
-# 使用默认参数（默认apis目录，输出到testcases目录）
-har2pytest api2test
-
-# 指定API目录和输出目录
-har2pytest api2test --api-dir apis --output testcases
-
-# 从单个API文件生成测试用例
-har2pytest api2test --file apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py
-
-# 从HAR文件生成测试用例（根据URL去重，查找对应API文件）
-har2pytest api2test --har api_request.har
-
-# 从HAR文件生成，指定API目录和输出目录
-har2pytest api2test --har api_request.har --api-dir apis --output testcases_from_har
-
-# 组合使用
-har2pytest api2test --api-dir apis --output testcases_new --file apis/mall_store_application/_appStore_appAndPc_store_graduation_addGraduationApply.py
-```
-
-**参数说明**：
-- `--api-dir`: 可选，API文件目录，默认为 `apis`
-- `--output`: 可选，输出目录，默认为 `testcases`
-- `--file`: 可选，指定单个API文件路径，用于生成单个测试用例
-- `--har`: 可选，指定HAR文件路径，从HAR文件中提取URL（去重）并查找对应API文件生成测试用例
-
-**生成的测试用例特点**：
-- 自动提取API文件中的参数和请求头信息
-- 支持 f-string 格式的请求头（如 `f"bearer {os.environ['access_token']}"`）
-- 生成的测试用例会自动使用 ruff 格式化
-- 每个API文件对应一个独立的测试用例文件
-
-**示例输出**：
-```python
-import os
-import allure
-from allure_commons.types import Severity
-from apis.mall_mgmt_application import _mgmt_prmt_luckyActivity_luckyActivityList
-
-@allure.severity(Severity.NORMAL)
-@allure.feature("mall_mgmt_application")
-@allure.story("/mgmt/prmt/luckyActivity/luckyActivityList")
-@allure.title("抽奖活动管理列表")
-def test_mgmt_prmt_luckyActivity_luckyActivityList():
-    params = {
-        "activityCode": '052202',
-        "pageNum": '1',
-        "pageSize": '10',
-    }
-    headers = {
-        "channel": "pc",
-        "client": "op",
-    }
-
-    with _mgmt_prmt_luckyActivity_luckyActivityList(params=params, headers=headers) as r:
-        assert r.status_code == 200
-        assert r.json()["code"] == 200
-```
-
-#### 5. 查看HAR文件摘要
+#### 4. 查看HAR文件摘要
 
 ```bash
 # 查看默认HAR文件
@@ -215,30 +152,31 @@ har2pytest summary
 har2pytest summary api_request.har
 ```
 
-#### 6. 测试用例生成详细说明
+#### 5. 测试用例生成详细说明
 
-##### 6.1 list_query 模式（查询类参数化测试）
+##### 5.1 list_query 模式（查询类参数化测试）
 
 用于生成查询接口的参数化测试用例，自动生成多参数组合测试。
 
 ```bash
 # 基本用法
-har2pytest testcase 兑换单代客售后.har --pattern list_query
+har2pytest testcase 兑换单列表.har --pattern list_query --url /user/order/getStoreAgentOrderList
 
 # 指定测试标记（会生成 @pytest.mark.test_4291）
-har2pytest testcase 兑换单代客售后.har --pattern list_query --mark test_4291
+har2pytest testcase 兑换单代客售后.har --pattern list_query --url /user/order/getStoreAgentOrderList --mark test_4291
 
 # 自定义API目录和输出目录
-har2pytest testcase api.har --pattern list_query --mark test_4291 --api-dir apis --output testcases
+har2pytest testcase api.har --pattern list_query --url /api/user/list --mark test_4291 --api-dir apis --output testcases
 ```
 
 **参数说明**：
 - `--pattern list_query`: 指定为查询类参数化测试模式
+- `--url`: 必填，目标接口URL，工具会生成该接口的参数化测试用例
 - `--mark test_xxx`: 可选，测试标记，会在测试用例中添加 `@pytest.mark.test_xxx` 装饰器
 - `--api-dir`: 可选，API文件目录，默认为 `apis`
 - `--output`: 可选，输出目录，默认为 `testcases`
 
-##### 6.3 complex_scenario 模式（复杂场景流程测试）
+##### 5.2 complex_scenario 模式（复杂场景流程测试）
 
 用于生成复杂业务流程的测试用例，支持指定目标接口进行重点测试。
 
@@ -707,7 +645,7 @@ class TestClass:
 - 支持新的HTTP方法：扩展 `APIGenerator.generate_file_content` 方法
 - 自定义文档解析：继承 `SwaggerHandler` 类
 - 添加新的输出格式：扩展 `APIGenerator` 类
-- 自定义测试用例模板：修改 `TestCaseGenerator.generate_test_case_content` 方法
+- 自定义测试用例模板：修改 `TestCaseGenerator.generate_scenario_test_content` 方法
 - 扩展断言逻辑：在测试用例生成方法中添加更多验证规则
 
 ## 最佳实践

@@ -86,7 +86,7 @@ def main():
         help="测试用例模式: list_query(查询类参数化) 或 complex_scenario(复杂场景)",
     )
     tc_parser.add_argument("--mark", "-m", help="测试标记（如 test_4291）")
-    tc_parser.add_argument("--url", "-u", help="目标接口URL（complex_scenario模式必填）")
+    tc_parser.add_argument("--url", "-u", help="目标接口URL（可选，指定后只生成该接口的测试用例）")
     tc_parser.add_argument("--output", "-o", default="testcases", help="输出目录")
     tc_parser.add_argument("--api-dir", default="apis", help="API文件目录")
 
@@ -115,34 +115,6 @@ def main():
     swagger_parser.add_argument("--overwrite", "-f", action="store_true", help="强制覆盖现有文件")
     swagger_parser.add_argument("--path", "-p", help="只生成指定的API路径（如 /pet/{petId}）")
 
-    # api2test 子命令 - 从API文件生成测试用例
-    api2test_parser = subparsers.add_parser(
-        "api2test",
-        help="从API文件生成测试用例",
-        description="从API文件直接生成pytest测试用例，每个API文件对应一个测试用例",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""示例用法:
-  # 从API目录生成所有测试用例
-  har2pytest api2test
-
-  # 指定API目录和输出目录
-  har2pytest api2test --api-dir apis --output testcases
-
-  # 从单个API文件生成测试用例
-  har2pytest api2test --file apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py
-
-  # 从HAR文件生成测试用例（根据URL去重，查找对应API文件）
-  har2pytest api2test --har api_request.har
-
-  # 从HAR文件生成，指定API目录和输出目录
-  har2pytest api2test --har api_request.har --api-dir apis --output testcases_from_har
-""",
-    )
-    api2test_parser.add_argument("--api-dir", default="apis", help="API文件目录")
-    api2test_parser.add_argument("--output", "-o", default="testcases", help="测试用例输出目录")
-    api2test_parser.add_argument("--file", "-f", help="单个API文件路径（可选，指定后只处理该文件）")
-    api2test_parser.add_argument("--har", help="HAR文件路径（可选，指定后从HAR文件中的URL查找对应API文件生成测试用例）")
-
     # 解析参数
     args = parser.parse_args()
 
@@ -162,8 +134,6 @@ def main():
         handle_testcase(args)
     elif args.command == "swagger":
         handle_swagger(args)
-    elif args.command == "api2test":
-        handle_api2test(args)
     elif args.command == "help":
         parser.print_help()
     else:
@@ -241,12 +211,19 @@ def handle_testcase(args):
         task_id = task_id[5:]
 
     if pattern == "list_query":
+        # 验证必填参数
+        if not target_url:
+            logger.error("错误: list_query 模式必须指定 --url 参数")
+            logger.error("使用示例: har2pytest testcase api.har --pattern list_query --url /api/user/list")
+            return
+
         logger.info(f"生成查询类参数化测试用例: {har_file}")
         logger.info(f"任务ID: {task_id}")
+        logger.info(f"目标接口: {target_url}")
         logger.info("-" * 50)
 
         generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
-        test_files = generator.generate_parametrized_list_testcases(har_file, task_id)
+        test_files = generator.generate_parametrized_list_testcases(har_file, task_id, target_url)
 
         logger.info("-" * 50)
         if test_files:
@@ -276,57 +253,6 @@ def handle_testcase(args):
             logger.info(f"成功生成测试用例文件: {test_file.replace('\\', '/')}")
         else:
             logger.info("生成测试用例文件失败")
-
-
-def handle_api2test(args):
-    """处理 api2test 命令 - 从API文件生成测试用例"""
-    api_dir = args.api_dir
-    output_dir = args.output
-    api_file = args.file
-    har_file = args.har
-
-    logger.info("从API文件生成测试用例")
-    logger.info(f"API目录: {api_dir}")
-    logger.info(f"输出目录: {output_dir}")
-    if api_file:
-        logger.info(f"目标文件: {api_file}")
-    if har_file:
-        logger.info(f"HAR文件: {har_file}")
-    logger.info("-" * 50)
-
-    generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
-
-    if har_file:
-        # 从HAR文件生成测试用例
-        test_files = generator.generate_testcases_from_har(har_file)
-
-        logger.info("-" * 50)
-        if test_files:
-            logger.info(f"成功生成 {len(test_files)} 个测试用例文件:")
-            for test_file in test_files:
-                logger.info(f"  - {test_file.replace('\\', '/')}")
-        else:
-            logger.info("未生成任何测试用例文件")
-    elif api_file:
-        # 从单个API文件生成测试用例
-        test_file = generator.generate_testcase_from_api_file(api_file)
-
-        logger.info("-" * 50)
-        if test_file:
-            logger.info(f"成功生成测试用例文件: {test_file.replace('\\', '/')}")
-        else:
-            logger.info("生成测试用例文件失败")
-    else:
-        # 从API目录生成所有测试用例
-        test_files = generator.generate_testcases_from_api_dir(api_dir)
-
-        logger.info("-" * 50)
-        if test_files:
-            logger.info(f"成功生成 {len(test_files)} 个测试用例文件:")
-            for test_file in test_files:
-                logger.info(f"  - {test_file.replace('\\', '/')}")
-        else:
-            logger.info("未生成任何测试用例文件")
 
 
 if __name__ == "__main__":

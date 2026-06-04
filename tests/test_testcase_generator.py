@@ -321,8 +321,8 @@ def test_match_api_files_for_har_no_match(tmp_path):
 
 @allure.feature("测试用例生成器")
 @allure.story("生成测试用例内容")
-def test_generate_test_case_content(tmp_path):
-    """测试生成测试用例内容"""
+def test_generate_scenario_test_content(tmp_path):
+    """测试生成场景测试用例内容"""
     import json
 
     # 创建测试HAR文件
@@ -370,7 +370,7 @@ def _user_login(data=data, access_token=access_token):
 
     try:
         generator = TestCaseGenerator(api_dir=str(api_dir))
-        content = generator.generate_test_case_content(
+        content = generator.generate_scenario_test_content(
             har_file_path=str(har_file),
             api_files=[str(api_file)],
             task_id="test_task",
@@ -800,7 +800,9 @@ def test_generate_parametrize_values_single():
     result = generator._generate_parametrize_values(values, is_combination=False)
 
     assert len(result) == 3
-    assert all("Severity.NORMAL" in r for r in result)
+    assert '"value1"' in result
+    assert '"value2"' in result
+    assert '"value3"' in result
 
 
 @allure.feature("测试用例生成器")
@@ -813,7 +815,8 @@ def test_generate_parametrize_values_combination():
     result = generator._generate_parametrize_values(values, is_combination=True)
 
     assert len(result) == 2
-    assert all("Severity.NORMAL" in r for r in result)
+    assert '("2026-01-01", "2026-01-31")' in result
+    assert '("2026-02-01", "2026-02-28")' in result
 
 
 @allure.feature("测试用例生成器")
@@ -916,8 +919,8 @@ def test_testcase_generator_init_custom():
 
 @allure.feature("测试用例生成器")
 @allure.story("生成测试用例内容-无API文件")
-def test_generate_test_case_content_no_api_files(tmp_path):
-    """测试生成测试用例内容但没有API文件时生成默认内容"""
+def test_generate_scenario_test_content_no_api_files(tmp_path):
+    """测试生成场景测试用例内容但没有API文件时生成默认内容"""
     import json
 
     test_har = {
@@ -943,14 +946,14 @@ def test_generate_test_case_content_no_api_files(tmp_path):
 
     try:
         generator = TestCaseGenerator(api_dir=str(tmp_path / "nonexistent"), base_urls=[])
-        content = generator.generate_test_case_content(
+        content = generator.generate_scenario_test_content(
             har_file_path=str(har_file),
             api_files=[],
         )
 
         assert content is not None
         assert "import os" in content
-        assert "pytest" in content
+        assert "allure" in content
     finally:
         pass
 
@@ -1057,8 +1060,8 @@ def _user_detail(data=data, access_token=access_token):
 
 @allure.feature("测试用例生成器")
 @allure.story("路径URL生成测试用例-带路径参数的URL生成测试用例内容")
-def test_generate_test_case_content_with_path_params(tmp_path):
-    """测试带路径参数的URL生成测试用例内容"""
+def test_generate_scenario_test_content_with_path_params(tmp_path):
+    """测试带路径参数的URL生成场景测试用例内容"""
     import json
 
     swagger_data = {
@@ -1124,7 +1127,7 @@ def _order_items_detail(data=data, access_token=access_token):
     generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
 
     try:
-        content = generator.generate_test_case_content(
+        content = generator.generate_scenario_test_content(
             har_file_path=str(har_file),
             api_files=[str(api_file)],
             target_api_file=str(api_file),
@@ -1539,101 +1542,7 @@ def test_get_all_api_files_dir_not_exists(tmp_path):
     assert result == []
 
 
-@allure.feature("测试用例生成器")
-@allure.story("生成测试函数名称")
-def test_generate_test_function_name():
-    """测试_generate_test_function_name方法"""
-    generator = TestCaseGenerator()
-    
-    # 测试带下划线前缀的函数名
-    assert generator._generate_test_function_name("_user_login") == "test_user_login"
-    
-    # 测试不带下划线前缀的函数名
-    assert generator._generate_test_function_name("user_login") == "test_user_login"
-    
-    # 测试多个下划线前缀
-    assert generator._generate_test_function_name("___private_func") == "test_private_func"
 
-
-@allure.feature("测试用例生成器")
-@allure.story("从API文件生成测试用例-文件不存在")
-def test_generate_testcase_from_api_file_not_exists(tmp_path):
-    """测试当API文件不存在时返回None"""
-    generator = TestCaseGenerator(output_dir=str(tmp_path))
-    non_existent_file = tmp_path / "non_existent.py"
-    result = generator.generate_testcase_from_api_file(str(non_existent_file))
-    assert result is None
-
-
-@allure.feature("测试用例生成器")
-@allure.story("从API文件生成测试用例-无法提取函数名")
-
-
-
-@allure.feature("测试用例生成器")
-@allure.story("从HAR文件生成测试用例-资源类型过滤")
-def test_generate_testcases_from_har_filter_resource_type(tmp_path):
-    """测试从HAR文件生成测试用例时正确过滤资源类型"""
-    import json
-    
-    # 创建一个包含多种资源类型请求的HAR文件
-    test_har = {
-        "log": {
-            "entries": [
-                {
-                    "_resourceType": "image",
-                    "request": {
-                        "url": "/images/logo.png",
-                        "method": "GET",
-                        "headers": [],
-                    },
-                    "response": {"status": 200, "content": {"text": "{}"}},
-                    "time": 100,
-                },
-                {
-                    "_resourceType": "xhr",
-                    "request": {
-                        "url": "/api/user/login",
-                        "method": "POST",
-                        "headers": [],
-                    },
-                    "response": {"status": 200, "content": {"text": "{}"}},
-                    "time": 100,
-                },
-                {
-                    "_resourceType": "script",
-                    "request": {
-                        "url": "/js/app.js",
-                        "method": "GET",
-                        "headers": [],
-                    },
-                    "response": {"status": 200, "content": {"text": "{}"}},
-                    "time": 100,
-                },
-            ]
-        }
-    }
-    har_file = tmp_path / "test.har"
-    with open(har_file, "w") as f:
-        json.dump(test_har, f)
-    
-    generator = TestCaseGenerator()
-    result = generator.generate_testcases_from_har(str(har_file))
-    assert result == []
-
-
-@allure.feature("测试用例生成器")
-@allure.story("生成测试用例内容-无URL")
-def test_generate_simple_testcase_content_no_url(tmp_path):
-    """测试当API文件没有URL时生成测试用例失败"""
-    # 创建一个没有url变量的API文件
-    api_file = tmp_path / "_test_api.py"
-    with open(api_file, "w", encoding="utf-8") as f:
-        f.write('# coding:utf-8\n\n"""测试接口"""\n\nheaders = {}\nparams = {}\n\ndef _test_api():\n    pass\n')
-    
-    generator = TestCaseGenerator(api_dir=str(tmp_path), output_dir=str(tmp_path))
-    result = generator.generate_testcase_from_api_file(str(api_file))
-    assert result is not None
 
 
 @allure.feature("测试用例生成器")
@@ -1660,36 +1569,6 @@ def test_match_api_files_for_har_empty(tmp_path):
     generator = TestCaseGenerator()
     result = generator.match_api_files_for_har(str(har_file))
     assert result == []
-
-
-@allure.feature("测试用例生成器")
-@allure.story("生成测试用例内容-带files参数")
-def test_generate_testcase_with_files_param(tmp_path):
-    """测试生成带files参数的测试用例"""
-    # 创建一个带files参数的API文件
-    api_file = tmp_path / "_test_upload.py"
-    with open(api_file, "w", encoding="utf-8") as f:
-        f.write('# coding:utf-8\n\n"""文件上传接口"""\n\nurl = "/api/upload"\nheaders = {"content-type": "multipart/form-data"}\nfiles = {"file": "test.txt"} \n\ndef _test_upload():\n    pass\n')
-    
-    generator = TestCaseGenerator(api_dir=str(tmp_path), output_dir=str(tmp_path))
-    result = generator.generate_testcase_from_api_file(str(api_file))
-    assert result is not None
-    assert "test_test_upload.py" in result
-
-
-@allure.feature("测试用例生成器")
-@allure.story("生成测试用例内容-带headers参数")
-def test_generate_testcase_with_headers(tmp_path):
-    """测试生成带headers参数的测试用例"""
-    # 创建一个带headers参数的API文件
-    api_file = tmp_path / "_test_with_headers.py"
-    with open(api_file, "w", encoding="utf-8") as f:
-        f.write('# coding:utf-8\n\n"""带headers的接口"""\n\nurl = "/api/test"\nheaders = {\n    "authorization": "Bearer test_token",\n    "content-type": "application/json"\n}\nparams = {"id": 1}\n\ndef _test_with_headers():\n    pass\n')
-    
-    generator = TestCaseGenerator(api_dir=str(tmp_path), output_dir=str(tmp_path))
-    result = generator.generate_testcase_from_api_file(str(api_file))
-    assert result is not None
-    assert "test_test_with_headers.py" in result
 
 
 @allure.feature("测试用例生成器")
