@@ -4,13 +4,12 @@ from urllib.parse import urlencode
 from util.client import client
 
 data = {
-    "grantdtlId": "2043868590615973888",  # 电子礼券发放id号
+    "grantdtlId": 0,  # 电子礼券发放id号
 }
 
 headers = {
-    "channel": "pc",
-    "client": "op",
     "authorization": f"bearer {os.environ['access_token']}",
+    "content-length": "0",
     "content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
 }
 

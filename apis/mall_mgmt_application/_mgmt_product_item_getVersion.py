@@ -3,13 +3,12 @@ import os
 from util.client import client
 
 params = {
-    "verId": "13965",  # verId
+    "verId": "",  # verId
 }
 
 headers = {
-    "channel": "pc",
-    "client": "op",
     "authorization": f"bearer {os.environ['access_token']}",
+    "content-length": "0",
 }
 
 

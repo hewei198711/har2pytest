@@ -3,13 +3,12 @@ import os
 from util.client import client
 
 params = {
-    "dataType": "AUDIT_STAUTS",  # 数据类型
+    "dataType": "",  # 数据类型
 }
 
 headers = {
-    "channel": "pc",
-    "client": "op",
     "authorization": f"bearer {os.environ['access_token']}",
+    "content-length": "0",
 }
 
 

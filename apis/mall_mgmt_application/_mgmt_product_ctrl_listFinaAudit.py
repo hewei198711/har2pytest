@@ -3,20 +3,21 @@ import os
 from util.client import client
 
 data = {
-    "auditStauts": 1,  # 审核状态 1-所有，2-待审核，3-已通过，4-未通过
-    "endTime": None,  # 结束时间时间戳
-    "startTime": None,  # 开始时间时间戳
+    "auditStauts": 0,  # 审核状态 1-所有，2-待审核，3-已通过，4-未通过
+    "endTime": 0,  # 结束时间时间戳
+    "pageNum": 0,  # 页码
+    "pageSize": 0,  # 页面大小
     "serialNo": "",  # 商品编码
+    "slogan": "",  # 宣传标语
+    "startTime": 0,  # 开始时间时间戳
+    "tagTitle": "",  # 产品标签
     "title": "",  # 商品名称
-    "pageNum": 1,  # 页码
-    "pageSize": 10,  # 页面大小
+    "trademarkTitle": "",  # 商标产品名称
 }
 
 headers = {
-    "channel": "pc",
-    "client": "op",
-    "content-type": "application/json;charset=UTF-8",
     "authorization": f"bearer {os.environ['access_token']}",
+    "content-length": "0",
 }
 
 

@@ -3,14 +3,13 @@ import os
 from util.client import client
 
 params = {
-    "couponNumber": "ww051901",  # couponNumber
-    "couponId": "",  # couponId
+    "couponId": 0,  # couponId
+    "couponNumber": "",  # couponNumber
 }
 
 headers = {
-    "channel": "pc",
-    "client": "op",
     "authorization": f"bearer {os.environ['access_token']}",
+    "content-length": "0",
 }
 
 

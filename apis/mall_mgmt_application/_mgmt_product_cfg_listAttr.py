@@ -3,14 +3,13 @@ import os
 from util.client import client
 
 params = {
-    "pageNum": "0",  # 页码
-    "pageSize": "0",  # 页面大小
+    "pageNum": "",  # 页码
+    "pageSize": "",  # 页面大小
 }
 
 headers = {
-    "channel": "pc",
-    "client": "op",
     "authorization": f"bearer {os.environ['access_token']}",
+    "content-length": "0",
 }
 
 

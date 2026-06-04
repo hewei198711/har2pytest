@@ -3,19 +3,17 @@ import os
 from util.client import client
 
 data = {
-    "createTimeMin": None,  # 创建时间始 yyyy-MM-dd HH:mm:ss
-    "createTimeMax": None,  # 创建时间末 yyyy-MM-dd HH:mm:ss
-    "remarkCode": None,  # 文案编号
-    "remark": None,  # 文案
-    "pageNum": 1,  # 当前页
-    "pageSize": 10,  # 每页数量
+    "createTimeMax": "",  # 创建时间末 yyyy-MM-dd HH:mm:ss
+    "createTimeMin": "",  # 创建时间始 yyyy-MM-dd HH:mm:ss
+    "pageNum": 0,  # 当前页
+    "pageSize": 0,  # 每页数量
+    "remark": "",  # 文案
+    "remarkCode": "",  # 文案编号
 }
 
 headers = {
-    "channel": "pc",
-    "client": "op",
-    "content-type": "application/json;charset=UTF-8",
     "authorization": f"bearer {os.environ['access_token']}",
+    "content-length": "0",
 }
 
 

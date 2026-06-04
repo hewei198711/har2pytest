@@ -3,18 +3,19 @@ import os
 from util.client import client
 
 data = {
-    "versionId": "13965",  # 商品版本id
-    "pageNum": 1,  # 页码
-    "pageSize": 20,  # 页面大小
-    "operator": None,  # 操作人
-    "auditTypeResult": None,  # 审核意见 0-全部，1-产品审核通过，2-产品审核不通过，3-财务审核通过，4-财务审核不通过
+    "auditTypeResult": 0,  # 审核意见 0-全部，1-产品审核通过，2-产品审核不通过，3-财务审核通过，4-财务审核不通过
+    "endTime": 0,  # 结束时间时间戳
+    "operator": "",  # 操作人
+    "pageNum": 0,  # 页码
+    "pageSize": 0,  # 页面大小
+    "productId": "",  # 商品id
+    "startTime": 0,  # 开始时间时间戳
+    "versionId": "",  # 商品版本id
 }
 
 headers = {
-    "channel": "pc",
-    "client": "op",
-    "content-type": "application/json;charset=UTF-8",
     "authorization": f"bearer {os.environ['access_token']}",
+    "content-length": "0",
 }
 
 

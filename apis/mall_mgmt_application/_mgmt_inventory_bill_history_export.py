@@ -1,0 +1,42 @@
+import os
+
+from util.client import client
+
+params = {
+    "companyCode": "",  # 分公司编号
+    "isBadAssetStore": 0,  # 是否不良资产门店, 0->否 1->是';
+    "month": 0,  # 月份，格式为：yyyyMM
+    "pageNum": 0,  # 页数
+    "pageSize": 0,  # 页大小
+    "productCode": "",  # 产品编号
+    "stock": 0,  # 库存
+    "stockOperator": 0,  # 库存运算符: 1为'>='，2为'>'，3为'<=',4为'<'
+    "storeCode": "",  # 服务中心编号
+}
+
+headers = {
+    "authorization": f"bearer {os.environ['access_token']}",
+    "content-length": "0",
+}
+
+
+def _mgmt_inventory_bill_history_export(params=params, headers=headers):
+    """
+    导出库存历史列表
+    /mgmt/inventory/bill/history-export
+
+    参数说明:
+    - companyCode: 分公司编号
+    - isBadAssetStore: 是否不良资产门店, 0->否 1->是';
+    - month: 月份，格式为：yyyyMM
+    - pageNum: 页数
+    - pageSize: 页大小
+    - productCode: 产品编号
+    - stock: 库存
+    - stockOperator: 库存运算符: 1为'>='，2为'>'，3为'<=',4为'<'
+    - storeCode: 服务中心编号
+    """
+
+    url = "/mgmt/inventory/bill/history-export"
+    with client.get(url=url, params=params, headers=headers) as r:
+        return r

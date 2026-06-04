@@ -3,16 +3,14 @@ import os
 from util.client import client
 
 data = {
-    "versionId": "13965",  # 版本id
-    "auditResult": 1,  # 审核结果 1-通过，2-不通过
-    "remarks": "同意此产品通过审核",  # 说明
+    "auditResult": 0,  # 审核结果 1-通过，2-不通过
+    "remarks": "",  # 说明
+    "versionId": "",  # 版本id
 }
 
 headers = {
-    "channel": "pc",
-    "client": "op",
-    "content-type": "application/json;charset=UTF-8",
     "authorization": f"bearer {os.environ['access_token']}",
+    "content-length": "0",
 }
 
 
