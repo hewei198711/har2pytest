@@ -21,6 +21,7 @@ class TestClass:
             "authorization": f"bearer {os.environ['access_token']}",
         }
 
+    @allure.title("抽奖活动管理列表")
     def test_mgmt_prmt_luckyActivity_luckyActivityList(self):
 
         # 初始化测试数据字典，用于在步骤间传递数据

@@ -918,47 +918,6 @@ def test_testcase_generator_init_custom():
 
 
 @allure.feature("测试用例生成器")
-@allure.story("生成测试用例内容-无API文件")
-def test_generate_scenario_test_content_no_api_files(tmp_path):
-    """测试生成场景测试用例内容但没有API文件时生成默认内容"""
-    import json
-
-    test_har = {
-        "log": {
-            "entries": [
-                {
-                    "_resourceType": "xhr",
-                    "request": {
-                        "url": "https://example.com/api/user/login",
-                        "method": "POST",
-                        "headers": [],
-                    },
-                    "response": {"status": 200, "content": {"text": "{}"}},
-                    "time": 100,
-                }
-            ]
-        }
-    }
-
-    har_file = tmp_path / "test.har"
-    with open(har_file, "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
-
-    try:
-        generator = TestCaseGenerator(api_dir=str(tmp_path / "nonexistent"), base_urls=[])
-        content = generator.generate_scenario_test_content(
-            har_file_path=str(har_file),
-            api_files=[],
-        )
-
-        assert content is not None
-        assert "import os" in content
-        assert "allure" in content
-    finally:
-        pass
-
-
-@allure.feature("测试用例生成器")
 @allure.story("匹配API文件-HAR文件不存在")
 def test_match_api_files_for_har_file_not_exists():
     """测试HAR文件不存在时的匹配"""

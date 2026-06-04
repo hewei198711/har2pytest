@@ -398,7 +398,7 @@ class TestCaseGenerator:
 
         target_api_file = URLMatcher.find_matching_api_file(target_url, api_files)
         if not target_api_file:
-            logger.info(f"未找到指定URL对应的API文件: {target_url}")
+            logger.error(f"未找到指定URL对应的API文件: {target_url}")
             return None
 
         test_content = self.generate_scenario_test_content(har_file_path, api_files, task_id, target_api_file)
@@ -497,19 +497,18 @@ class TestCaseGenerator:
         """生成场景测试方法定义。
 
         Args:
-            target_api_file: 目标 API 文件路径
+            target_api_file: 目标 API 文件路径（必选）
 
         Returns:
             测试方法定义代码行列表
         """
-        if target_api_file:
-            api_info = self._get_api_file_info(target_api_file)
-            clean_function_name = api_info["function_name"].lstrip("_")
-            test_function_name = f"    def test_{clean_function_name}(self):"
-        else:
-            test_function_name = "    def test_har_api_flow(self):"
+        api_info = self._get_api_file_info(target_api_file)
+        clean_function_name = api_info["function_name"].lstrip("_")
+        api_description = api_info.get("description", clean_function_name)
+        test_function_name = f"    def test_{clean_function_name}(self):"
 
         return [
+            f'    @allure.title("{api_description}")',
             test_function_name,
             "",
             "        # 初始化测试数据字典，用于在步骤间传递数据",
@@ -536,9 +535,13 @@ class TestCaseGenerator:
         for i, request_info in enumerate(requests):
             url = request_info["url"]
 
-            api_function_name, api_description, api_info = self._match_api_function(url, api_files)
-
-            if api_function_name:
+            # 使用 URLMatcher 查找匹配的 API 文件
+            matched_api_file = URLMatcher.find_matching_api_file(url, api_files)
+            
+            if matched_api_file:
+                api_info = self._get_api_file_info(matched_api_file)
+                api_function_name = api_info["function_name"]
+                api_description = api_info["description"]
                 step_name = self._generate_step_function_name(api_function_name, name_counters)
                 step_functions.append(step_name)
 
@@ -562,29 +565,6 @@ class TestCaseGenerator:
                 ])
 
         return step_functions
-
-    def _match_api_function(self, url: str, api_files: list[str]) -> tuple:
-        """匹配 URL 对应的 API 函数。
-
-        Args:
-            url: 请求 URL
-            api_files: API 文件路径列表
-
-        Returns:
-            (api_function_name, api_description, api_info) 元组
-        """
-        for api_file in api_files:
-            api_info = self._get_api_file_info(api_file)
-            file_url = api_info["url"]
-            # 1. 直接相等匹配
-            if file_url == url:
-                return api_info["function_name"], api_info["description"], api_info
-            # 2. 如果API文件URL包含路径参数模板，尝试匹配
-            elif file_url and "{" in file_url and "}" in file_url:
-                url_pattern, _, _ = URLMatcher({"paths": {file_url: {}}}).match_with_swagger(url)
-                if url_pattern == file_url:
-                    return api_info["function_name"], api_info["description"], api_info
-        return None, None, None
 
     def _generate_step_function_name(self, api_function_name: str, name_counters: dict) -> str:
         """生成步骤函数名称。
@@ -896,7 +876,7 @@ class TestCaseGenerator:
                 param_descriptions.append(desc)
             param_desc_str = "-".join(param_descriptions)
             return [
-                f'    @allure.title("{api_description}-成功路径: {param_desc_str} 查询")',
+                f'    @allure.title("{api_description}: {param_desc_str} 查询")',
                 f"    def test_{param_count}_{clean_function_name}(self, {', '.join(param_names)}):",
             ]
         else:
@@ -904,7 +884,7 @@ class TestCaseGenerator:
             if " " in param_description:
                 param_description = param_description.split(" ")[0]
             return [
-                f'    @allure.title("{api_description}-成功路径: {param_description} 查询")',
+                f'    @allure.title("{api_description}: {param_description} 查询")',
                 f"    def test_{param_count}_{clean_function_name}(self, {param_name}):",
             ]
 
