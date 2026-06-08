@@ -6,8 +6,7 @@ data = {
     "commitTimeStart": "",  # 下单开始时间
     "giftPromotionId": 0,  # 礼物活动ID
     "orderNo": "",  # 订单号
-    "orderStatusList": [],  # 订单状态集合（参考OrderStatus枚举）：
-1:待支付, -5:待收礼, 2:待发货, 3:待收货, 99:已完成, 4:已取消, 5:已退款
+    "orderStatusList": [],  # 订单状态集合（参考OrderStatus枚举）：1:待支付, -5:待收礼, 2:待发货, 3:待收货, 99:已完成, 4:已取消, 5:已退款
     "pageNum": 0,  # 分页页码
     "pageSize": 0,  # 分页大小
     "payTimeEnd": "",  # 支付结束时间

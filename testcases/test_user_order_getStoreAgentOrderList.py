@@ -22,7 +22,7 @@ class TestClass:
     @allure.title("PC店铺查询兑换订单列表: 兑换流水号 查询")
     def test_0_user_order_getStoreAgentOrderList(self, orderNo):
 
-        data = {
+        params = {
             "orderNo": orderNo,
             "exchangeType": None,
             "customerPhone": None,
@@ -38,7 +38,7 @@ class TestClass:
             "exchangeTimeBegin": None,
             "exchangeTimeEnd": None,
         }
-        with _user_order_getStoreAgentOrderList(data=data, headers=self.headers) as r:
+        with _user_order_getStoreAgentOrderList(data=params, headers=self.headers) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
 
@@ -46,7 +46,7 @@ class TestClass:
     @allure.title("PC店铺查询兑换订单列表: 兑换产品类型 查询")
     def test_1_user_order_getStoreAgentOrderList(self, exchangeType):
 
-        data = {
+        params = {
             "exchangeType": exchangeType,
             "orderNo": "",
             "customerPhone": None,
@@ -62,7 +62,7 @@ class TestClass:
             "exchangeTimeBegin": None,
             "exchangeTimeEnd": None,
         }
-        with _user_order_getStoreAgentOrderList(data=data, headers=self.headers) as r:
+        with _user_order_getStoreAgentOrderList(data=params, headers=self.headers) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
 
@@ -70,7 +70,7 @@ class TestClass:
     @allure.title("PC店铺查询兑换订单列表: 核销时间-核销时间 查询")
     def test_2_user_order_getStoreAgentOrderList(self, hxTimeBegin, hxTimeEnd):
 
-        data = {
+        params = {
             "hxTimeBegin": hxTimeBegin,
             "hxTimeEnd": hxTimeEnd,
             "orderNo": "",
@@ -86,7 +86,7 @@ class TestClass:
             "exchangeTimeBegin": None,
             "exchangeTimeEnd": None,
         }
-        with _user_order_getStoreAgentOrderList(data=data, headers=self.headers) as r:
+        with _user_order_getStoreAgentOrderList(data=params, headers=self.headers) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
 
@@ -94,7 +94,7 @@ class TestClass:
     @allure.title("PC店铺查询兑换订单列表: 顾客手机号 查询")
     def test_3_user_order_getStoreAgentOrderList(self, customerPhone):
 
-        data = {
+        params = {
             "customerPhone": customerPhone,
             "orderNo": "",
             "exchangeType": "",
@@ -109,7 +109,7 @@ class TestClass:
             "exchangeTimeBegin": None,
             "exchangeTimeEnd": None,
         }
-        with _user_order_getStoreAgentOrderList(data=data, headers=self.headers) as r:
+        with _user_order_getStoreAgentOrderList(data=params, headers=self.headers) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
 
@@ -117,7 +117,7 @@ class TestClass:
     @allure.title("PC店铺查询兑换订单列表: 顾客卡号 查询")
     def test_4_user_order_getStoreAgentOrderList(self, customerCard):
 
-        data = {
+        params = {
             "customerCard": customerCard,
             "orderNo": "",
             "exchangeType": "",
@@ -132,7 +132,7 @@ class TestClass:
             "exchangeTimeBegin": None,
             "exchangeTimeEnd": None,
         }
-        with _user_order_getStoreAgentOrderList(data=data, headers=self.headers) as r:
+        with _user_order_getStoreAgentOrderList(data=params, headers=self.headers) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
 
@@ -140,7 +140,7 @@ class TestClass:
     @allure.title("PC店铺查询兑换订单列表: 顾客姓名 查询")
     def test_5_user_order_getStoreAgentOrderList(self, customerName):
 
-        data = {
+        params = {
             "customerName": customerName,
             "orderNo": "",
             "exchangeType": "",
@@ -155,7 +155,7 @@ class TestClass:
             "exchangeTimeBegin": None,
             "exchangeTimeEnd": None,
         }
-        with _user_order_getStoreAgentOrderList(data=data, headers=self.headers) as r:
+        with _user_order_getStoreAgentOrderList(data=params, headers=self.headers) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
 
@@ -163,7 +163,7 @@ class TestClass:
     @allure.title("PC店铺查询兑换订单列表: 批量兑换单号 查询")
     def test_6_user_order_getStoreAgentOrderList(self, batchOrderNo):
 
-        data = {
+        params = {
             "batchOrderNo": batchOrderNo,
             "orderNo": "",
             "exchangeType": "",
@@ -178,7 +178,7 @@ class TestClass:
             "exchangeTimeBegin": None,
             "exchangeTimeEnd": None,
         }
-        with _user_order_getStoreAgentOrderList(data=data, headers=self.headers) as r:
+        with _user_order_getStoreAgentOrderList(data=params, headers=self.headers) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
 
@@ -186,7 +186,7 @@ class TestClass:
     @allure.title("PC店铺查询兑换订单列表: 兑换时间-兑换时间 查询")
     def test_7_user_order_getStoreAgentOrderList(self, exchangeTimeBegin, exchangeTimeEnd):
 
-        data = {
+        params = {
             "exchangeTimeBegin": exchangeTimeBegin,
             "exchangeTimeEnd": exchangeTimeEnd,
             "orderNo": "",
@@ -201,7 +201,7 @@ class TestClass:
             "pageNum": 1,
             "pageSize": 10,
         }
-        with _user_order_getStoreAgentOrderList(data=data, headers=self.headers) as r:
+        with _user_order_getStoreAgentOrderList(data=params, headers=self.headers) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
 
@@ -209,7 +209,7 @@ class TestClass:
     @allure.title("PC店铺查询兑换订单列表: 开单人卡号 查询")
     def test_8_user_order_getStoreAgentOrderList(self, creatorCard):
 
-        data = {
+        params = {
             "creatorCard": creatorCard,
             "orderNo": "",
             "exchangeType": "",
@@ -223,7 +223,7 @@ class TestClass:
             "pageNum": 1,
             "pageSize": 10,
         }
-        with _user_order_getStoreAgentOrderList(data=data, headers=self.headers) as r:
+        with _user_order_getStoreAgentOrderList(data=params, headers=self.headers) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
 
@@ -233,7 +233,7 @@ class TestClass:
     @allure.title("PC店铺查询兑换订单列表: 开单人卡号-订单状态 1 查询")
     def test_9_user_order_getStoreAgentOrderList(self, creatorCard, orderStatus):
 
-        data = {
+        params = {
             "creatorCard": creatorCard,
             "orderStatus": orderStatus,
             "orderNo": "",
@@ -247,7 +247,7 @@ class TestClass:
             "pageNum": 1,
             "pageSize": 10,
         }
-        with _user_order_getStoreAgentOrderList(data=data, headers=self.headers) as r:
+        with _user_order_getStoreAgentOrderList(data=params, headers=self.headers) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200
 
@@ -255,7 +255,7 @@ class TestClass:
     @allure.title("PC店铺查询兑换订单列表: 订单状态 查询")
     def test_10_user_order_getStoreAgentOrderList(self, orderStatus):
 
-        data = {
+        params = {
             "orderStatus": orderStatus,
             "orderNo": "",
             "exchangeType": "",
@@ -269,6 +269,6 @@ class TestClass:
             "pageNum": 1,
             "pageSize": 10,
         }
-        with _user_order_getStoreAgentOrderList(data=data, headers=self.headers) as r:
+        with _user_order_getStoreAgentOrderList(data=params, headers=self.headers) as r:
             assert r.status_code == 200
             assert r.json()["code"] == 200

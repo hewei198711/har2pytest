@@ -61,8 +61,9 @@ def format_python_file(filepath: str) -> None:
     """
     try:
         # 使用 python -m ruff 来调用，这样更可靠
-        subprocess.run([sys.executable, "-m", "ruff", "check", "--fix", filepath], capture_output=True, text=True)
-        subprocess.run([sys.executable, "-m", "ruff", "format", filepath], capture_output=True, text=True)
+        # 指定 encoding='utf-8' 避免 Windows 系统上的编码问题
+        subprocess.run([sys.executable, "-m", "ruff", "check", "--fix", filepath], capture_output=True, text=True, encoding='utf-8')
+        subprocess.run([sys.executable, "-m", "ruff", "format", filepath], capture_output=True, text=True, encoding='utf-8')
         logger.info(f"使用ruff格式化文件: {filepath}")
     except Exception as e:
         logger.warning(f"格式化文件失败 {filepath}: {str(e)}")
@@ -273,7 +274,9 @@ def format_params_for_python(
         formatted_value = value_formatter(value)
         comment = comments.get(key, "")
         if comment:
-            items.append(f'{indent_str}"{key}": {formatted_value},  # {comment}')
+            # 将注释中的换行符替换为空格，避免语法错误
+            safe_comment = comment.replace('\n', ' ').replace('\r', ' ')
+            items.append(f'{indent_str}"{key}": {formatted_value},  # {safe_comment}')
         else:
             items.append(f'{indent_str}"{key}": {formatted_value},')
 

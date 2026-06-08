@@ -198,6 +198,51 @@ har2pytest testcase api.har --pattern complex_scenario --url /api/user/login --m
 - `--api-dir`: 可选，API文件目录，默认为 `apis`
 - `--output`: 可选，输出目录，默认为 `testcases`
 
+##### 5.3 batch 模式（批量生成测试用例）
+
+用于批量生成多个API接口的测试用例，根据API描述自动选择生成模式。
+
+```bash
+# 基本用法（单个API文件）
+har2pytest testcase api.har --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py
+
+# 多个API文件（逗号分隔）
+har2pytest testcase api.har --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py,apis/mall_mgmt_application/_mgmt_prmt_state_luckyActivity.py
+
+# 指定测试标记
+har2pytest testcase api.har --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py --mark test_4291
+
+# 自定义目录
+har2pytest testcase api.har --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py --api-dir apis --output testcases
+```
+
+**参数说明**：
+- `--pattern batch`: 指定为批量生成模式
+- `--api-files`: 必填，API文件路径列表，多个文件用逗号分隔
+- `--mark test_xxx`: 可选，测试标记，会在测试用例中添加 `@pytest.mark.test_xxx` 装饰器
+- `--api-dir`: 可选，API文件目录，默认为 `apis`
+- `--output`: 可选，输出目录，默认为 `testcases`
+
+**batch 模式特性**：
+
+1. **自动选择生成模式**：
+   - 如果API描述中包含"列表"关键字，使用 `list_query` 模式生成参数化测试用例
+   - 其他情况使用 `complex_scenario` 模式生成场景测试用例
+
+2. **智能跳过机制**：
+   - 如果测试用例文件已存在，自动跳过该API文件
+   - 避免重复生成，节省时间
+
+3. **状态参数解析**：
+   - 自动识别参数备注中的状态字段（包含"状态"关键字的备注）
+   - 从备注中提取所有状态值用于参数化测试
+   - 支持格式：`状态 -1：已驳回 0：待审核（默认）1：审核通过`
+
+4. **参数化策略**：
+   - 为API文件中的每个非空参数生成一条测试用例
+   - 分页参数（pageNum、pageSize等）自动作为其他参数处理
+   - 空值参数自动跳过
+
 **注意**：
 - `--mark` 参数非必传，不传时测试用例中不会有 `@pytest.mark.test_**` 标记
 - `--mark` 参数支持 `test_xxx` 格式，工具会自动去掉 `test_` 前缀

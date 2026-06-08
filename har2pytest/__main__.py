@@ -82,13 +82,14 @@ def main():
     tc_parser.add_argument(
         "--pattern",
         default="list_query",
-        choices=["list_query", "complex_scenario"],
-        help="测试用例模式: list_query(查询类参数化) 或 complex_scenario(复杂场景)",
+        choices=["list_query", "complex_scenario", "batch"],
+        help="测试用例模式: list_query(查询类参数化)、complex_scenario(复杂场景) 或 batch(批量生成)",
     )
     tc_parser.add_argument("--mark", "-m", help="测试标记（如 test_4291）")
     tc_parser.add_argument("--url", "-u", help="目标接口URL（可选，指定后只生成该接口的测试用例）")
     tc_parser.add_argument("--output", "-o", default="testcases", help="输出目录")
     tc_parser.add_argument("--api-dir", default="apis", help="API文件目录")
+    tc_parser.add_argument("--api-files", help="指定API文件集合（batch模式使用，多个文件用逗号分隔）")
 
     # swagger 子命令
     swagger_parser = subparsers.add_parser(
@@ -253,6 +254,35 @@ def handle_testcase(args):
             logger.info(f"成功生成测试用例文件: {test_file.replace('\\', '/')}")
         else:
             logger.info("生成测试用例文件失败")
+
+    elif pattern == "batch":
+        # batch 模式：批量生成测试用例（直接从API文件读取参数）
+        api_files_arg = args.api_files
+        if not api_files_arg:
+            logger.error("错误: batch 模式必须指定 --api-files 参数")
+            logger.error("使用示例: har2pytest testcase api.har --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py")
+            return
+
+        # 解析 API 文件列表（支持逗号分隔）
+        api_files_list = [f.strip() for f in api_files_arg.split(",")]
+
+        logger.info("批量生成测试用例（从API文件读取参数）")
+        logger.info(f"API文件数量: {len(api_files_list)}")
+        logger.info(f"任务ID: {task_id}")
+        logger.info("-" * 50)
+
+        generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
+        result = generator.generate_batch_testcases(api_files_list, task_id)
+
+        logger.info("-" * 50)
+        logger.info(f"总API文件数: {result['total']}")
+        logger.info(f"跳过（已存在）: {result['skipped']}")
+        logger.info(f"成功生成: {result['generated']}")
+        logger.info(f"失败: {result['failed']}")
+        if result["generated_files"]:
+            logger.info("生成的文件:")
+            for f in result["generated_files"]:
+                logger.info(f"  - {f.replace('\\', '/')}")
 
 
 if __name__ == "__main__":

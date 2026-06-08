@@ -1538,3 +1538,61 @@ def test_generate_parametrized_list_testcases_file_not_exists(tmp_path):
     non_existent = tmp_path / "non_existent.har"
     result = generator.generate_parametrized_list_testcases(str(non_existent), "test_task")
     assert result == []
+
+
+@allure.feature("测试用例生成器")
+@allure.story("解析状态参数")
+def test_parse_state_values():
+    """测试从参数备注中解析状态值"""
+    generator = TestCaseGenerator()
+
+    # 测试中文冒号
+    remark = "状态 -1：已驳回 0：待审核（默认）1：审核通过"
+    result = generator._parse_state_values(remark)
+    assert result == [-1, 0, 1]
+
+    # 测试英文冒号
+    remark = "状态 -1:已驳回 0:待审核（默认）1:审核通过"
+    result = generator._parse_state_values(remark)
+    assert result == [-1, 0, 1]
+
+    # 测试没有状态字段的备注
+    remark = "用户ID"
+    result = generator._parse_state_values(remark)
+    assert result == []
+
+    # 测试空备注
+    remark = ""
+    result = generator._parse_state_values(remark)
+    assert result == []
+
+    # 测试负数状态
+    remark = "状态 -2：已删除 -1：已驳回 0：待审核 1：审核通过"
+    result = generator._parse_state_values(remark)
+    assert result == [-2, -1, 0, 1]
+
+
+@allure.feature("测试用例生成器")
+@allure.story("参数化-状态参数")
+def test_normalize_params_with_state_param():
+    """测试参数化时识别状态参数"""
+    generator = TestCaseGenerator()
+
+    requests_params = [
+        {"status": "0", "pageNum": "1", "pageSize": "10"},
+        {"status": "1", "pageNum": "1", "pageSize": "10"},
+    ]
+
+    param_remarks = {
+        "status": "状态 -1：已驳回 0：待审核（默认）1：审核通过",
+        "pageNum": "页码",
+        "pageSize": "每页数量",
+    }
+
+    result = generator.normalize_params_for_parametrization(requests_params, param_remarks)
+
+    # 应该识别出状态参数，并从备注中提取所有状态值
+    assert len(result) == 1
+    assert "status" in result[0]
+    assert result[0]["status"] == [-1, 0, 1]
+    assert result[0]["other_params"] == {"pageNum": "1", "pageSize": "10"}

@@ -4,7 +4,7 @@ import pytest
 
 if __name__ == "__main__":
     # 设置配置为test环境
-    os.environ["access_token"] = "30b2cf5f-59a4-4526-8bf2-4b0439abaade"
+    os.environ["access_token"] = "98ae2f58-f4c6-46d2-8474-d279e0e34857"
     os.environ["PYTHONIOENCODING"] = "utf-8"
     os.environ["uc_env"] = "test"
     os.environ["base_url"] = f"https://uc-{os.environ['uc_env']}.perfect99.com/api"
@@ -17,6 +17,6 @@ if __name__ == "__main__":
             "--clean-alluredir",
             "-v",
             "-s",
-            r"testcases\test_user_order_getStoreAgentOrderList.py",
+            r"testcases/test_mgmt_weshop_pageWechatShopPvLog.py",
         ]
     )
