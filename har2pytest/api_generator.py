@@ -77,7 +77,7 @@ class APIGenerator:
         # 处理headers（保持不变）
         headers_to_include = APIConfig.HEADERS_TO_INCLUDE()
         if isinstance(headers_to_include, dict):
-            headers_to_include = headers_to_include = set(h.lower() for h in headers_to_include.keys())
+            headers_to_include = set(h.lower() for h in headers_to_include.keys())
 
         headers = {}
         for key, value in raw_headers.items():
@@ -352,8 +352,7 @@ class APIGenerator:
             param_name: 参数名称
             path_params: 路径参数
             query_params: 查询参数
-            need_urlencode: 是否需要urlencode
-            url: 请求URL
+            is_need_urlencode: 是否需要urlencode
 
         Returns:
             List[str]: HTTP方法代码列表
@@ -363,8 +362,6 @@ class APIGenerator:
         if method == "GET":
             if query_params:
                 function_def.append("    with client.get(url=url, params=params, headers=headers) as r:")
-            elif path_params:
-                function_def.append("    with client.get(url=url, headers=headers) as r:")
             else:
                 function_def.append("    with client.get(url=url, headers=headers) as r:")
         elif method == "POST":

@@ -110,6 +110,8 @@ class TestCaseGenerator:
             return parts[index]
         return "default"
 
+    # ==================== Swagger/URL 匹配相关 ====================
+
     def _get_swagger_doc_for_url(self, url: str) -> dict | None:
         """根据 URL 获取对应的 Swagger 文档。
 
@@ -183,22 +185,109 @@ class TestCaseGenerator:
             return len(value) > 0
         return True
 
+    def _parse_state_values(self, remark: str) -> list:
+        """从参数备注中解析状态值。
+
+        Args:
+            remark: 参数备注字符串，支持两种格式：
+                    格式1: "状态 -1：已驳回 0：待审核（默认）1：审核通过"
+                    格式2: "状态(1待审核2待开始3进行中4已结束5已驳回6草稿)"
+
+        Returns:
+            状态值列表，如 [-1, 0, 1]
+        """
+        state_values = []
+        import re
+
+        # 尝试格式1: 匹配数字后跟冒号（中文或英文）
+        matches = re.findall(r'(-?\d+)\s*[:：]', remark)
+        if matches:
+            for match in matches:
+                try:
+                    state_values.append(int(match))
+                except ValueError:
+                    pass
+            return state_values
+
+        # 尝试格式2: 匹配括号内的连续数字
+        bracket_match = re.search(r'\((.*?)\)', remark)
+        if bracket_match:
+            content = bracket_match.group(1)
+            number_matches = re.findall(r'-?\d+', content)
+            for match in number_matches:
+                try:
+                    state_values.append(int(match))
+                except ValueError:
+                    pass
+
+        return state_values
+
+    def _build_param_items_from_api(self, api_params: dict, param_remarks: dict, is_batch_mode: bool = False) -> list[dict]:
+        """从 API 文件参数构建参数化项列表。
+
+        遍历 API 文件中的所有参数，过滤分页参数，处理状态参数特殊逻辑，
+        为每个非分页参数构建一个参数化项。
+
+        Args:
+            api_params: API 文件中的所有参数（包括 params 和 data）
+            param_remarks: 参数备注字典
+            is_batch_mode: 是否为 batch 模式（为 True 时包含空值参数）
+
+        Returns:
+            参数化项列表，每个元素包含参数名、参数值列表和其他参数
+        """
+        param_items = []
+        pagination_params = set(APIConfig.PAGINATION_PARAMS())
+
+        for param_name, param_value in api_params.items():
+            # 跳过分页参数
+            if param_name in pagination_params:
+                continue
+
+            # 收集其他参数
+            other_params = {}
+            for name, value in api_params.items():
+                if name != param_name:
+                    other_params[name] = value
+
+            # 检查是否为状态参数
+            if param_name in param_remarks and "状态" in param_remarks[param_name]:
+                state_values = self._parse_state_values(param_remarks[param_name])
+                if state_values:
+                    if isinstance(param_value, list):
+                        param_items.append({param_name: [[v] for v in state_values], "other_params": other_params})
+                    else:
+                        param_items.append({param_name: state_values, "other_params": other_params})
+                elif self._is_valid_param(param_value):
+                    param_items.append({param_name: [param_value], "other_params": other_params})
+                elif is_batch_mode:
+                    param_items.append({param_name: [param_value], "other_params": other_params})
+            elif self._is_valid_param(param_value):
+                param_items.append({param_name: [param_value], "other_params": other_params})
+            elif is_batch_mode:
+                if param_value == "" or param_value is None:
+                    param_items.append({param_name: [""], "other_params": other_params})
+                elif isinstance(param_value, list) and len(param_value) == 0:
+                    param_items.append({param_name: [[]], "other_params": other_params})
+                else:
+                    param_items.append({param_name: [param_value], "other_params": other_params})
+
+        return param_items
+
     def normalize_params_for_parametrization(self, requests_params: list[dict[str, Any]], param_remarks: dict = None) -> list[dict]:
         """标准化参数化数据结构。
 
         将多个请求的参数整理为适合 pytest 参数化的格式，支持单参数和组合参数。
-        支持从参数备注中解析状态参数。
+        过滤分页参数，对有效参数进行去重归类。
 
         Args:
             requests_params: 多个请求的参数字典列表
-            param_remarks: 参数备注字典（可选）
 
         Returns:
             标准化后的参数化数据列表，每个元素包含参数名、参数值列表和其他参数
         """
         param_value_map = {}
         pagination_params = set(APIConfig.PAGINATION_PARAMS())
-        param_remarks = param_remarks or {}
 
         for req in requests_params:
             valid_params = {}
@@ -235,55 +324,9 @@ class TestCaseGenerator:
         # 构建最终结果并去重
         merged_result = []
         for param_name, data in param_value_map.items():
-            # 检查是否为状态参数
-            if param_name in param_remarks and "状态" in param_remarks[param_name]:
-                # 从备注中解析状态值
-                state_values = self._parse_state_values(param_remarks[param_name])
-                if state_values:
-                    merged_result.append({param_name: state_values, "other_params": data["other_params"]})
-                    continue
-
             merged_result.append({param_name: deduplicate_values(data["values"]), "other_params": data["other_params"]})
 
         return merged_result
-
-    def _parse_state_values(self, remark: str) -> list:
-        """从参数备注中解析状态值。
-
-        Args:
-            remark: 参数备注字符串，支持两种格式：
-                    格式1: "状态 -1：已驳回 0：待审核（默认）1：审核通过"
-                    格式2: "状态(1待审核2待开始3进行中4已结束5已驳回6草稿)"
-
-        Returns:
-            状态值列表，如 [-1, 0, 1]
-        """
-        state_values = []
-        import re
-        
-        # 尝试格式1: 匹配数字后跟冒号（中文或英文）
-        matches = re.findall(r'(-?\d+)\s*[:：]', remark)
-        if matches:
-            for match in matches:
-                try:
-                    state_values.append(int(match))
-                except ValueError:
-                    pass
-            return state_values
-        
-        # 尝试格式2: 匹配括号内的连续数字
-        bracket_match = re.search(r'\((.*?)\)', remark)
-        if bracket_match:
-            content = bracket_match.group(1)
-            # 提取所有数字
-            number_matches = re.findall(r'-?\d+', content)
-            for match in number_matches:
-                try:
-                    state_values.append(int(match))
-                except ValueError:
-                    pass
-        
-        return state_values
 
     def _extract_requests_for_url(self, requests: list, api_url: str) -> tuple[set, list, str]:
         """提取指定 URL 的请求参数。
@@ -322,10 +365,10 @@ class TestCaseGenerator:
         logger.info(f"提取到的参数: {all_params}")
         logger.info(f"提取到的请求参数: {all_requests_params}")
         logger.info(f"提取到的请求方法: {request_method}")
-        
+
         return all_params, all_requests_params, request_method
 
-    # ==================== 测试用例生成入口 ====================
+    # ==================== 测试用例生成入口方法 ====================
 
     def generate_parametrized_list_testcases(self, har_file_path: str, task_id: str, target_url: str = None) -> list[str]:
         """生成查询类参数化测试用例。
@@ -354,12 +397,12 @@ class TestCaseGenerator:
         for api_file in api_files:
             try:
                 api_info = self._get_api_file_info(api_file)
-                
+
                 # 如果指定了 target_url，则只处理匹配的 API
                 if target_url:
                     if api_info["url"] != target_url:
                         continue
-                
+
                 clean_function_name = api_info["function_name"].lstrip("_")
                 test_filename = f"test_{clean_function_name}.py"
                 test_filepath = os.path.join(output_dir, test_filename)
@@ -374,113 +417,6 @@ class TestCaseGenerator:
                 logger.error(f"生成测试用例文件失败 {api_file}: {str(e)}")
 
         return generated_files
-
-    def generate_parametrized_test_content(self, har_file_path: str, api_file: str, task_id: str) -> str | None:
-        """生成参数化列表测试用例内容（list_query 模式）。
-
-        根据 HAR 文件和 API 文件生成基于参数化的列表查询测试用例。
-        如果 HAR 文件不存在或无法提取参数，则直接从 API 文件读取参数（batch模式）。
-
-        Args:
-            har_file_path: HAR 文件路径（可选，为None时表示batch模式）
-            api_file: API 文件路径
-            task_id: 任务 ID
-
-        Returns:
-            参数化测试用例内容字符串，如果生成失败则返回 None
-        """
-        api_info = self._get_api_file_info(api_file)
-        function_name = api_info["function_name"]
-
-        if not function_name:
-            return None
-
-        clean_function_name = function_name.lstrip("_")
-
-        # 提取接口信息（复用 complex_scenario 模式的方法）
-        feature_name, story_name = self._extract_api_info(api_file)
-
-        # 获取 API 文件中的所有参数（包括 params 和 data）
-        api_params = {}
-        if api_info.get("params"):
-            api_params.update(api_info["params"])
-        if api_info.get("data"):
-            api_params.update(api_info["data"])
-
-        # 过滤分页参数
-        pagination_params = set(APIConfig.PAGINATION_PARAMS())
-        
-        # 构建参数化项：为每个参数生成一条测试用例
-        param_items = []
-        
-        # 如果有HAR文件，先尝试从HAR文件提取参数（原有逻辑）
-        if har_file_path and os.path.exists(har_file_path):
-            requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
-            all_params, all_requests_params, request_method = self._extract_requests_for_url(requests, api_info["url"])
-            
-            if all_requests_params:
-                param_items = self.normalize_params_for_parametrization(all_requests_params, api_info["param_remarks"])
-        
-        # 如果从HAR文件没有提取到参数，或者是batch模式，从API文件读取参数
-        if not param_items:
-            for param_name, param_value in api_params.items():
-                # 跳过分页参数（在 other_params 中处理）
-                if param_name in pagination_params:
-                    continue
-                
-                # 收集其他参数（包括分页参数）
-                other_params = {}
-                for name, value in api_params.items():
-                    if name != param_name:
-                        other_params[name] = value
-                
-                # 检查是否为状态参数
-                if param_name in api_info["param_remarks"] and "状态" in api_info["param_remarks"][param_name]:
-                    # 从备注中解析所有状态值
-                    state_values = self._parse_state_values(api_info["param_remarks"][param_name])
-                    if state_values:
-                        # 如果原始参数是列表类型，每个状态值包装成列表
-                        if isinstance(param_value, list):
-                            param_items.append({param_name: [[v] for v in state_values], "other_params": other_params})
-                        else:
-                            param_items.append({param_name: state_values, "other_params": other_params})
-                    elif self._is_valid_param(param_value):
-                        param_items.append({param_name: [param_value], "other_params": other_params})
-                    elif har_file_path is None:
-                        # batch 模式：为所有参数生成测试用例
-                        param_items.append({param_name: [param_value], "other_params": other_params})
-                elif self._is_valid_param(param_value):
-                    # 非空参数直接使用
-                    param_items.append({param_name: [param_value], "other_params": other_params})
-                elif har_file_path is None:
-                    # batch 模式：为所有参数生成测试用例，包括空值参数
-                    if param_value == "" or param_value is None:
-                        param_items.append({param_name: [""], "other_params": other_params})
-                    elif isinstance(param_value, list) and len(param_value) == 0:
-                        param_items.append({param_name: [[]], "other_params": other_params})
-                    else:
-                        param_items.append({param_name: [param_value], "other_params": other_params})
-
-        if not param_items:
-            logger.warning(f"API文件 {api_file} 中没有有效的测试参数")
-            return None
-
-        # 生成测试用例内容（单函数模式，需要 pytest）
-        content = self._generate_test_case_imports(service_package=feature_name, function_name=function_name, task_id=task_id, import_pytest=True)
-        content.extend(
-            self._generate_test_case_description(
-                story_name, feature_name, severity="NORMAL"
-            )
-        )
-        content.extend(self._generate_test_class_setup())
-
-        content.extend(
-            self._generate_parametrized_test_methods(
-                param_items, api_info["description"], function_name, "GET", api_info["param_remarks"]
-            )
-        )
-
-        return "\n".join(content)
 
     def generate_scenario_testcase(self, har_file_path: str, target_url: str, task_id: str) -> str | None:
         """生成复杂场景流程测试用例。
@@ -520,6 +456,183 @@ class TestCaseGenerator:
         test_filepath = os.path.join(output_dir, test_filename)
         write_test_file(test_filepath, test_content)
         return test_filepath
+
+    def generate_batch_testcases(
+        self, api_files_list: list[str], task_id: str = None
+    ) -> dict:
+        """批量生成测试用例（直接从API文件读取参数）。
+
+        Args:
+            api_files_list: API 文件路径列表
+            task_id: 任务 ID
+
+        Returns:
+            包含生成结果的字典：{
+                'total': 总数,
+                'skipped': 跳过数量,
+                'generated': 生成数量,
+                'failed': 失败数量,
+                'generated_files': 生成的文件列表
+            }
+        """
+        # 展开目录路径，获取所有 API 文件
+        expanded_api_files = []
+        for api_path in api_files_list:
+            if os.path.isdir(api_path):
+                # 如果是目录，遍历目录下所有 .py 文件（排除 __init__.py）
+                py_files = [
+                    os.path.join(root, f)
+                    for root, _, files in os.walk(api_path)
+                    for f in files
+                    if f.endswith(".py") and not f.startswith("__")
+                ]
+                expanded_api_files.extend(py_files)
+                logger.info(f"发现目录 {api_path}，包含 {len(py_files)} 个 API 文件")
+            elif os.path.isfile(api_path):
+                # 如果是文件，直接添加（排除 __init__.py）
+                if not os.path.basename(api_path) == "__init__.py":
+                    expanded_api_files.append(api_path)
+            else:
+                logger.warning(f"路径不存在: {api_path}")
+
+        result = {
+            "total": len(expanded_api_files),
+            "skipped": 0,
+            "generated": 0,
+            "failed": 0,
+            "generated_files": [],
+        }
+
+        for api_file in expanded_api_files:
+            try:
+                # 检查 API 文件是否存在
+                if not os.path.exists(api_file):
+                    logger.warning(f"API 文件不存在，跳过: {api_file}")
+                    result["failed"] += 1
+                    continue
+
+                # 获取 API 信息
+                api_info = self._get_api_file_info(api_file)
+                if not api_info or not api_info.get("function_name"):
+                    logger.warning(f"无法解析 API 文件，跳过: {api_file}")
+                    result["failed"] += 1
+                    continue
+
+                # 检查测试用例文件是否已存在
+                clean_function_name = api_info["function_name"].lstrip("_")
+                test_filename = f"test_{clean_function_name}.py"
+                output_dir = get_output_dir(self.output_dir, task_id)
+                test_filepath = os.path.join(output_dir, test_filename)
+
+                if os.path.exists(test_filepath):
+                    logger.info(f"测试用例文件已存在，跳过: {test_filename}")
+                    result["skipped"] += 1
+                    continue
+
+                # 根据 API 描述判断使用哪种模式
+                api_description = api_info.get("description", "")
+
+                if "列表" in api_description:
+                    # 使用 list_query 模式（直接从API文件读取参数）
+                    logger.info(f"使用 list_query 模式生成: {clean_function_name}")
+                    test_content = self.generate_parametrized_test_content(None, api_file, task_id)
+                    if test_content:
+                        write_test_file(test_filepath, test_content)
+                        result["generated"] += 1
+                        result["generated_files"].append(test_filepath)
+                        logger.info(f"成功生成: {test_filename}")
+                    else:
+                        logger.warning(f"生成失败: {test_filename}")
+                        result["failed"] += 1
+                else:
+                    # 使用 complex_scenario 模式（直接从API文件读取参数）
+                    logger.info(f"使用 complex_scenario 模式生成: {clean_function_name}")
+                    test_content = self.generate_scenario_test_content(None, [api_file], task_id, api_file)
+                    if test_content:
+                        write_test_file(test_filepath, test_content)
+                        result["generated"] += 1
+                        result["generated_files"].append(test_filepath)
+                        logger.info(f"成功生成: {test_filename}")
+                    else:
+                        logger.warning(f"生成失败: {test_filename}")
+                        result["failed"] += 1
+
+            except Exception as e:
+                logger.error(f"处理 API 文件时出错 {api_file}: {e}")
+                result["failed"] += 1
+
+        return result
+
+    # ==================== 测试用例内容生成 ====================
+
+    def generate_parametrized_test_content(self, har_file_path: str, api_file: str, task_id: str) -> str | None:
+        """生成参数化列表测试用例内容（list_query 模式）。
+
+        根据 HAR 文件和 API 文件生成基于参数化的列表查询测试用例。
+        如果 HAR 文件不存在或无法提取参数，则直接从 API 文件读取参数（batch模式）。
+
+        Args:
+            har_file_path: HAR 文件路径（可选，为None时表示batch模式）
+            api_file: API 文件路径
+            task_id: 任务 ID
+
+        Returns:
+            参数化测试用例内容字符串，如果生成失败则返回 None
+        """
+        api_info = self._get_api_file_info(api_file)
+        function_name = api_info["function_name"]
+
+        if not function_name:
+            return None
+
+        clean_function_name = function_name.lstrip("_")
+
+        # 提取接口信息（复用 complex_scenario 模式的方法）
+        feature_name, story_name = self._extract_api_info(api_file)
+
+        # 获取 API 文件中的所有参数（包括 params 和 data）
+        api_params = {}
+        if api_info.get("params"):
+            api_params.update(api_info["params"])
+        if api_info.get("data"):
+            api_params.update(api_info["data"])
+
+        # 构建参数化项
+        has_har = har_file_path is not None and os.path.exists(har_file_path)
+        param_items = []
+
+        # 如果有HAR文件，从HAR文件提取参数
+        if has_har:
+            requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
+            all_params, all_requests_params, request_method = self._extract_requests_for_url(requests, api_info["url"])
+
+            if all_requests_params:
+                param_items = self.normalize_params_for_parametrization(all_requests_params, api_info["param_remarks"])
+
+        # 只有batch模式（没有HAR文件）才从API文件读取参数
+        if not param_items and not has_har:
+            param_items = self._build_param_items_from_api(api_params, api_info["param_remarks"], is_batch_mode=True)
+
+        if not param_items:
+            logger.warning(f"API文件 {api_file} 中没有有效的测试参数")
+            return None
+
+        # 生成测试用例内容（单函数模式，需要 pytest）
+        content = self._generate_test_case_imports(service_package=feature_name, function_name=function_name, task_id=task_id, import_pytest=True)
+        content.extend(
+            self._generate_test_case_description(
+                story_name, feature_name, severity="NORMAL"
+            )
+        )
+        content.extend(self._generate_test_class_setup(api_file))
+
+        content.extend(
+            self._generate_parametrized_test_methods(
+                param_items, api_info["description"], function_name, "GET", api_info["param_remarks"]
+            )
+        )
+
+        return "\n".join(content)
 
     def generate_scenario_test_content(
         self,
@@ -565,7 +678,7 @@ class TestCaseGenerator:
 
         # 7. 生成步骤函数和步骤调用
         step_functions = self._generate_scenario_step_functions(content, requests, api_files)
-        
+
         # 生成步骤调用
         if step_functions:
             content.append("        # 执行所有测试步骤")
@@ -575,7 +688,7 @@ class TestCaseGenerator:
 
         return "\n".join(content)
 
-    # ==================== 场景测试用例内容生成辅助方法 ====================
+    # ==================== 场景测试辅助方法 ====================
 
     def _get_requests_from_source(self, har_file_path: str, api_files: list[str], target_api_file: str) -> list:
         """从 HAR 文件或 API 文件获取请求信息。
@@ -593,7 +706,7 @@ class TestCaseGenerator:
         # 优先从 HAR 文件获取请求
         if har_file_path and os.path.exists(har_file_path):
             return self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
-        
+
         # 如果没有 HAR 文件，则从 API 文件构建请求信息
         requests = []
         if target_api_file and os.path.exists(target_api_file):
@@ -610,7 +723,7 @@ class TestCaseGenerator:
                     "api_file": target_api_file,
                 }
                 requests.append(request_info)
-        
+
         return requests
 
     def _extract_api_info(self, target_api_file: str) -> tuple:
@@ -681,7 +794,7 @@ class TestCaseGenerator:
 
             # 使用 URLMatcher 查找匹配的 API 文件
             matched_api_file = URLMatcher.find_matching_api_file(url, api_files)
-            
+
             if matched_api_file:
                 api_info = self._get_api_file_info(matched_api_file)
                 api_function_name = api_info["function_name"]
@@ -751,7 +864,7 @@ class TestCaseGenerator:
             post_data = request_info.get("post_data", {})
             method = request_info.get("method", "").upper()
             content_type = request_info.get("content_type", "")
-            
+
             # 判断是否为文件上传
             is_file_upload = method == "POST" and content_type.startswith("multipart/form-data")
         else:
@@ -762,7 +875,7 @@ class TestCaseGenerator:
             if files_def:
                 post_data = files_def
                 is_file_upload = True
-            
+
         if is_file_upload:
             # 文件上传请求，使用 files 参数
             files_str = format_params_for_python(post_data if post_data else {})
@@ -788,13 +901,13 @@ class TestCaseGenerator:
             # 没有参数时，直接调用函数
             content.extend([f"            with {api_function_name}(headers=self.headers) as r:"])
 
-    # ==================== 测试用例内容生成通用方法 ====================
+    # ==================== 通用方法 ====================
 
     def _generate_test_case_imports(
-        self, 
+        self,
         api_files: list[str] = None,
-        service_package: str = None, 
-        function_name: str = None, 
+        service_package: str = None,
+        function_name: str = None,
         task_id: str = None,
         import_pytest: bool = True
     ) -> list[str]:
@@ -814,10 +927,10 @@ class TestCaseGenerator:
             "import os",
             "",
         ]
-        
+
         if import_pytest:
             content.append("import pytest")
-        
+
         content.extend([
             "import allure",
             "from allure_commons.types import Severity",
@@ -835,7 +948,7 @@ class TestCaseGenerator:
                     if pkg not in service_imports:
                         service_imports[pkg] = []
                     service_imports[pkg].append(func_name)
-            
+
             for pkg, functions in service_imports.items():
                 if len(functions) > 1:
                     content.append(f"from apis.{pkg} import (")
@@ -852,7 +965,7 @@ class TestCaseGenerator:
 
         if task_id:
             content.append(f"@pytest.mark.{task_id}")
-        
+
         return content
 
     def _generate_test_case_description(
@@ -889,7 +1002,7 @@ class TestCaseGenerator:
             "    def setup_class(self):",
             "        self.headers = {",
         ]
-        
+
         # 获取 headers 内容
         if target_api_file:
             api_info = self._get_api_file_info(target_api_file)
@@ -907,15 +1020,15 @@ class TestCaseGenerator:
                 '            "client": "op",',
                 '            "authorization": f"bearer {os.environ[\'access_token\']}",',
             ])
-        
+
         headers_content.extend([
             "        }",
             "",
         ])
-        
+
         return headers_content
 
-    # ==================== 参数化测试方法生成辅助方法 ====================
+    # ==================== 参数化测试辅助方法 ====================
 
     def _generate_parametrized_test_methods(
         self,
@@ -1105,113 +1218,8 @@ class TestCaseGenerator:
             断言代码行列表
         """
         return [
-            f"        with {function_name}(data={param_var_name}, headers=self.headers) as r:",
+            f"        with {function_name}({param_var_name}={param_var_name}, headers=self.headers) as r:",
             "            assert r.status_code == 200",
             "            assert r.json()['code'] == 200",
             "",
         ]
-
-    def generate_batch_testcases(
-        self, api_files_list: list[str], task_id: str = None
-    ) -> dict:
-        """批量生成测试用例（直接从API文件读取参数）。
-
-        Args:
-            api_files_list: API 文件路径列表
-            task_id: 任务 ID
-
-        Returns:
-            包含生成结果的字典：{
-                'total': 总数,
-                'skipped': 跳过数量,
-                'generated': 生成数量,
-                'failed': 失败数量,
-                'generated_files': 生成的文件列表
-            }
-        """
-        # 展开目录路径，获取所有 API 文件
-        expanded_api_files = []
-        for api_path in api_files_list:
-            if os.path.isdir(api_path):
-                # 如果是目录，遍历目录下所有 .py 文件（排除 __init__.py）
-                py_files = [
-                    f for f in glob.glob(os.path.join(api_path, "*.py")) 
-                    if not os.path.basename(f) == "__init__.py"
-                ]
-                expanded_api_files.extend(py_files)
-                logger.info(f"发现目录 {api_path}，包含 {len(py_files)} 个 API 文件")
-            elif os.path.isfile(api_path):
-                # 如果是文件，直接添加（排除 __init__.py）
-                if not os.path.basename(api_path) == "__init__.py":
-                    expanded_api_files.append(api_path)
-            else:
-                logger.warning(f"路径不存在: {api_path}")
-
-        result = {
-            "total": len(expanded_api_files),
-            "skipped": 0,
-            "generated": 0,
-            "failed": 0,
-            "generated_files": [],
-        }
-
-        for api_file in expanded_api_files:
-            try:
-                # 检查 API 文件是否存在
-                if not os.path.exists(api_file):
-                    logger.warning(f"API 文件不存在，跳过: {api_file}")
-                    result["failed"] += 1
-                    continue
-
-                # 获取 API 信息
-                api_info = self._get_api_file_info(api_file)
-                if not api_info or not api_info.get("function_name"):
-                    logger.warning(f"无法解析 API 文件，跳过: {api_file}")
-                    result["failed"] += 1
-                    continue
-
-                # 检查测试用例文件是否已存在
-                clean_function_name = api_info["function_name"].lstrip("_")
-                test_filename = f"test_{clean_function_name}.py"
-                output_dir = get_output_dir(self.output_dir, task_id)
-                test_filepath = os.path.join(output_dir, test_filename)
-
-                if os.path.exists(test_filepath):
-                    logger.info(f"测试用例文件已存在，跳过: {test_filename}")
-                    result["skipped"] += 1
-                    continue
-
-                # 根据 API 描述判断使用哪种模式
-                api_description = api_info.get("description", "")
-                api_url = api_info.get("url", "")
-
-                if "列表" in api_description:
-                    # 使用 list_query 模式（直接从API文件读取参数）
-                    logger.info(f"使用 list_query 模式生成: {clean_function_name}")
-                    test_content = self.generate_parametrized_test_content(None, api_file, task_id)
-                    if test_content:
-                        write_test_file(test_filepath, test_content)
-                        result["generated"] += 1
-                        result["generated_files"].append(test_filepath)
-                        logger.info(f"成功生成: {test_filename}")
-                    else:
-                        logger.warning(f"生成失败: {test_filename}")
-                        result["failed"] += 1
-                else:
-                    # 使用 complex_scenario 模式（直接从API文件读取参数）
-                    logger.info(f"使用 complex_scenario 模式生成: {clean_function_name}")
-                    test_content = self.generate_scenario_test_content(None, [api_file], task_id, api_file)
-                    if test_content:
-                        write_test_file(test_filepath, test_content)
-                        result["generated"] += 1
-                        result["generated_files"].append(test_filepath)
-                        logger.info(f"成功生成: {test_filename}")
-                    else:
-                        logger.warning(f"生成失败: {test_filename}")
-                        result["failed"] += 1
-
-            except Exception as e:
-                logger.error(f"处理 API 文件时出错 {api_file}: {e}")
-                result["failed"] += 1
-
-        return result

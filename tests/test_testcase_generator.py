@@ -1573,9 +1573,9 @@ def test_parse_state_values():
 
 
 @allure.feature("测试用例生成器")
-@allure.story("参数化-状态参数")
+@allure.story("参数化-状态参数使用HAR原始值")
 def test_normalize_params_with_state_param():
-    """测试参数化时识别状态参数"""
+    """测试参数化时状态参数使用HAR原始值去重，不解析API备注中的状态枚举。"""
     generator = TestCaseGenerator()
 
     requests_params = [
@@ -1591,8 +1591,649 @@ def test_normalize_params_with_state_param():
 
     result = generator.normalize_params_for_parametrization(requests_params, param_remarks)
 
-    # 应该识别出状态参数，并从备注中提取所有状态值
+    # parametrized_list 模式使用 HAR 原始值，不展开状态枚举
     assert len(result) == 1
     assert "status" in result[0]
-    assert result[0]["status"] == [-1, 0, 1]
+    assert result[0]["status"] == ["0", "1"]
     assert result[0]["other_params"] == {"pageNum": "1", "pageSize": "10"}
+
+
+# ==================== 三种模式单元测试 ====================
+
+
+@allure.feature("测试用例生成器")
+@allure.story("parametrized_list 模式 - API自定义headers")
+def test_parametrized_list_with_custom_headers(tmp_path):
+    """测试 parametrized_list 模式使用 API 文件中的自定义 headers。
+
+    验证点：_generate_test_class_setup(api_file) 正确从 API 文件提取自定义 headers。
+    """
+    import json
+
+    # 创建测试HAR文件
+    test_har = {
+        "log": {
+            "entries": [
+                {
+                    "_resourceType": "xhr",
+                    "request": {
+                        "url": "https://example.com/api/order/list",
+                        "method": "GET",
+                        "headers": [{"name": "origin", "value": "https://example.com"}],
+                        "queryString": [{"name": "status", "value": "1"}],
+                    },
+                    "response": {"status": 200, "content": {"text": "{}"}},
+                    "time": 50,
+                },
+            ]
+        }
+    }
+
+    har_file = tmp_path / "test.har"
+    with open(har_file, "w", encoding="utf-8") as f:
+        json.dump(test_har, f)
+
+    # 创建带自定义 headers 的 API 文件
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    api_file = api_dir / "_order_list.py"
+    with open(api_file, "w", encoding="utf-8") as f:
+        f.write('''
+# coding:utf-8
+
+headers = {
+    "channel": "mobile",
+    "client": "op",
+    "platform": "ios",
+}
+
+data = {
+    "status": 1,  # 状态
+}
+
+def _order_list(data=data, access_token=access_token):
+    """
+    订单列表
+    /api/order/list
+    """
+    url = "/api/order/list"
+    headers = {"Authorization": f"bearer {access_token}"}
+    with client.get(url=url, headers=headers, params=data) as r:
+        return r
+''')
+
+    output_dir = tmp_path / "output"
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir), base_urls=["https://example.com"])
+
+    # 生成 parametrized 测试内容
+    content = generator.generate_parametrized_test_content(str(har_file), str(api_file), "test_task")
+
+    assert content is not None, "生成内容不应为 None"
+
+    # 验证自定义 headers 出现在输出中（而非默认 headers）
+    assert '"channel": "mobile"' in content, "应包含 API 文件中的 channel header"
+    assert '"platform": "ios"' in content, "应包含 API 文件中的 platform header"
+    # 不应包含默认 headers（pc、authorization）
+    assert '"channel": "pc"' not in content, "不应包含默认 channel header"
+
+    # 验证参数化测试方法生成正确
+    assert "@pytest.mark.parametrize" in content
+    assert "def test_0_order_list(self, status):" in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("parametrized_list 模式 - HAR无参数时返回None")
+def test_parametrized_list_har_no_params_returns_none(tmp_path):
+    """测试 parametrized_list 模式，HAR 文件存在但无匹配参数时返回 None。
+
+    验证点：非 batch 模式下，HAR 无参数不会回退到 API 文件读取参数。
+    """
+    import json
+
+    # 创建 HAR 文件（URL 与 API 文件不匹配）
+    test_har = {
+        "log": {
+            "entries": [
+                {
+                    "_resourceType": "xhr",
+                    "request": {
+                        "url": "https://example.com/api/other/endpoint",
+                        "method": "GET",
+                        "headers": [],
+                    },
+                    "response": {"status": 200, "content": {"text": "{}"}},
+                    "time": 50,
+                },
+            ]
+        }
+    }
+
+    har_file = tmp_path / "test.har"
+    with open(har_file, "w", encoding="utf-8") as f:
+        json.dump(test_har, f)
+
+    # 创建 API 文件（虽然 API 文件有参数，但 HAR 中没有匹配请求）
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    api_file = api_dir / "_user_list.py"
+    with open(api_file, "w", encoding="utf-8") as f:
+        f.write('''
+# coding:utf-8
+
+data = {
+    "page": "1",
+    "page_size": "20",
+}
+
+def _user_list(data=data, access_token=access_token):
+    """
+    用户列表
+    /api/user/list
+    """
+    url = "/api/user/list"
+    headers = {}
+    with client.get(url=url, headers=headers, params=data) as r:
+        return r
+''')
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), base_urls=["https://example.com"])
+
+    # HAR 存在但 URL 不匹配，不应回退到 API 文件参数
+    result = generator.generate_parametrized_test_content(str(har_file), str(api_file), "test_task")
+
+    assert result is None, "HAR 无匹配参数时不应回退到 API 文件，应返回 None"
+
+
+@allure.feature("测试用例生成器")
+@allure.story("complex_scenario 模式 - 请求顺序保持")
+def test_scenario_preserves_request_order(tmp_path):
+    """测试 complex_scenario 模式保持 HAR 请求顺序。
+
+    验证点：步骤函数按照 HAR 中的请求顺序生成。
+    """
+    import json
+
+    # 创建包含多步骤的 HAR 文件
+    test_har = {
+        "log": {
+            "entries": [
+                {
+                    "_resourceType": "xhr",
+                    "request": {
+                        "url": "https://example.com/api/user/login",
+                        "method": "POST",
+                        "headers": [{"name": "Content-Type", "value": "application/json"}],
+                        "postData": {"mimeType": "application/json", "text": '{"username":"test"}'},
+                    },
+                    "response": {"status": 200, "content": {"text": "{}"}},
+                    "time": 100,
+                },
+                {
+                    "_resourceType": "xhr",
+                    "request": {
+                        "url": "https://example.com/api/product/list",
+                        "method": "GET",
+                        "headers": [],
+                    },
+                    "response": {"status": 200, "content": {"text": "{}"}},
+                    "time": 80,
+                },
+                {
+                    "_resourceType": "xhr",
+                    "request": {
+                        "url": "https://example.com/api/order/create",
+                        "method": "POST",
+                        "headers": [{"name": "Content-Type", "value": "application/json"}],
+                        "postData": {"mimeType": "application/json", "text": '{"product_id":"P001"}'},
+                    },
+                    "response": {"status": 200, "content": {"text": "{}"}},
+                    "time": 120,
+                },
+            ]
+        }
+    }
+
+    har_file = tmp_path / "test.har"
+    with open(har_file, "w", encoding="utf-8") as f:
+        json.dump(test_har, f)
+
+    # 创建对应的 API 文件
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    api_files = []
+    for name, url, method in [
+        ("_user_login.py", "/api/user/login", "POST"),
+        ("_product_list.py", "/api/product/list", "GET"),
+        ("_order_create.py", "/api/order/create", "POST"),
+    ]:
+        api_file = api_dir / name
+        with open(api_file, "w", encoding="utf-8") as f:
+            f.write(f'''
+# coding:utf-8
+
+def {name.replace(".py", "")}(data=data, access_token=access_token):
+    """
+    {name.replace(".py", "").lstrip("_")}
+    {url}
+    """
+    url = "{url}"
+    headers = {{}}
+    with client.{method.lower()}(url=url, headers=headers, json=data) as r:
+        return r
+''')
+        api_files.append(str(api_file))
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), base_urls=["https://example.com"])
+
+    content = generator.generate_scenario_test_content(str(har_file), api_files, "test_task", api_files[0])
+
+    assert content is not None
+
+    # 验证步骤函数顺序 = HAR 请求顺序
+    step_login_idx = content.find("def step_user_login():")
+    step_list_idx = content.find("def step_product_list():")
+    step_create_idx = content.find("def step_order_create():")
+
+    assert step_login_idx != -1, "应生成 user_login 步骤函数"
+    assert step_list_idx != -1, "应生成 product_list 步骤函数"
+    assert step_create_idx != -1, "应生成 order_create 步骤函数"
+
+    # 验证顺序：login → list → create
+    assert step_login_idx < step_list_idx, "login 应在 list 之前"
+    assert step_list_idx < step_create_idx, "list 应在 create 之前"
+
+    # 验证步骤调用顺序
+    call_section = content[content.find("# 执行所有测试步骤"):]
+    call_login = call_section.find("step_user_login()")
+    call_list = call_section.find("step_product_list()")
+    call_create = call_section.find("step_order_create()")
+    assert call_login < call_list < call_create, "步骤调用顺序应与 HAR 请求顺序一致"
+
+
+@allure.feature("测试用例生成器")
+@allure.story("complex_scenario 模式 - 无HAR从API文件生成")
+def test_scenario_without_har_from_api_file(tmp_path):
+    """测试 complex_scenario 模式无 HAR 文件时从 API 文件构建。
+
+    验证点：_get_requests_from_source 在无 HAR 时正确从 API 文件构建请求信息。
+    """
+    # 创建 API 文件（包含 params 和 data）
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    api_file = api_dir / "_user_login.py"
+    with open(api_file, "w", encoding="utf-8") as f:
+        f.write('''
+# coding:utf-8
+
+params = {
+    "from": "mobile",
+}
+
+data = {
+    "username": "test",
+    "password": "123456",
+}
+
+def _user_login(data=data, access_token=access_token):
+    """
+    用户登录
+    /api/user/login
+    """
+    url = "/api/user/login"
+    headers = {}
+    with client.post(url=url, headers=headers, json=data) as r:
+        return r
+''')
+
+    generator = TestCaseGenerator(api_dir=str(api_dir))
+
+    # 无 HAR 文件，从 API 文件生成场景测试内容
+    content = generator.generate_scenario_test_content(
+        har_file_path=None,
+        api_files=[str(api_file)],
+        task_id="test_task",
+        target_api_file=str(api_file),
+    )
+
+    assert content is not None
+    assert "test_user_login" in content
+    assert "step_user_login" in content
+    assert "data = " in content or '"username": "test"' in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("batch 模式 - 列表接口参数化生成")
+def test_batch_list_mode(tmp_path):
+    """测试 batch 模式生成列表查询参数化测试。
+
+    验证点：API 描述含"列表"时，按 parametrized_list 模式生成。
+    """
+    # 创建 API 文件（描述包含"列表"）
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    api_file = api_dir / "_product_list.py"
+    with open(api_file, "w", encoding="utf-8") as f:
+        f.write('''
+# coding:utf-8
+
+data = {
+    "page": "1",  # 页码
+    "page_size": "20",  # 每页数量
+    "status": 1,  # 状态 0：下架 1：上架
+}
+
+def _product_list(data=data, access_token=access_token):
+    """
+    商品列表
+    /api/product/list
+    """
+    url = "/api/product/list"
+    headers = {}
+    with client.get(url=url, headers=headers, params=data) as r:
+        return r
+''')
+
+    output_dir = tmp_path / "output"
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir))
+
+    result = generator.generate_batch_testcases([str(api_dir)], "test_batch")
+
+    assert result["total"] == 1
+    assert result["generated"] == 1
+    assert result["skipped"] == 0
+    assert result["failed"] == 0
+    assert len(result["generated_files"]) == 1
+
+    # 验证生成的内容是 parametrized_list 模式
+    generated_file = result["generated_files"][0]
+    with open(generated_file, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    assert "import pytest" in content, "列表模式应导入 pytest"
+    assert "@pytest.mark.parametrize" in content, "列表模式应包含 parametrize 装饰器"
+    assert "status" in content or "page" in content, "应包含 API 文件中的参数"
+
+
+@allure.feature("测试用例生成器")
+@allure.story("batch 模式 - 场景接口流程生成")
+def test_batch_scenario_mode(tmp_path):
+    """测试 batch 模式生成场景流程测试。
+
+    验证点：API 描述不含"列表"时，按 complex_scenario 模式生成。
+    """
+    # 创建 API 文件（描述不含"列表"）
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    api_file = api_dir / "_submit_order.py"
+    with open(api_file, "w", encoding="utf-8") as f:
+        f.write('''
+# coding:utf-8
+
+data = {
+    "product_id": "P001",
+    "quantity": 1,
+}
+
+def _submit_order(data=data, access_token=access_token):
+    """
+    提交订单
+    /api/order/submit
+    """
+    url = "/api/order/submit"
+    headers = {}
+    with client.post(url=url, headers=headers, json=data) as r:
+        return r
+''')
+
+    output_dir = tmp_path / "output"
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir))
+
+    result = generator.generate_batch_testcases([str(api_dir)], "test_batch")
+
+    assert result["total"] == 1
+    assert result["generated"] == 1
+    assert result["failed"] == 0
+
+    # 验证生成的内容是 complex_scenario 模式
+    generated_file = result["generated_files"][0]
+    with open(generated_file, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    assert "import pytest" not in content, "场景模式不应导入 pytest"
+    assert "def test_submit_order(self):" in content, "应包含测试方法定义"
+    assert "test_data = {}" in content, "场景模式应包含 test_data 字典"
+
+
+@allure.feature("测试用例生成器")
+@allure.story("batch 模式 - 已存在文件跳过")
+def test_batch_skip_existing(tmp_path):
+    """测试 batch 模式跳过已存在的测试文件。
+
+    验证点：get_output_dir(task_id) 会创建 task_id 子目录，预创建文件需放在子目录中。
+    """
+    # 创建 API 文件
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    api_file = api_dir / "_product_list.py"
+    with open(api_file, "w", encoding="utf-8") as f:
+        f.write('''
+# coding:utf-8
+
+data = {
+    "status": 1,
+}
+
+def _product_list(data=data, access_token=access_token):
+    """
+    商品列表
+    /api/product/list
+    """
+    url = "/api/product/list"
+    headers = {}
+    with client.get(url=url, headers=headers, params=data) as r:
+        return r
+''')
+
+    output_dir = tmp_path / "output"
+    output_dir.mkdir(parents=True)
+
+    # 预创建测试文件，放在 task_id 子目录中（get_output_dir 逻辑）
+    task_subdir = output_dir / "test_batch"
+    task_subdir.mkdir(parents=True)
+    existing_file = task_subdir / "test_product_list.py"
+    with open(existing_file, "w", encoding="utf-8") as f:
+        f.write("# existing content")
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir))
+
+    result = generator.generate_batch_testcases([str(api_dir)], "test_batch")
+
+    assert result["skipped"] == 1, "已存在的文件应被跳过"
+    assert result["generated"] == 0, "不应生成新文件"
+
+
+@allure.feature("测试用例生成器")
+@allure.story("batch 模式 - 不存在的路径被忽略")
+def test_batch_skip_non_existent_path(tmp_path):
+    """测试 batch 模式忽略不存在的路径。
+
+    验证点：不存在的文件路径不会计入 total/failed。
+    """
+    output_dir = tmp_path / "output"
+
+    generator = TestCaseGenerator(api_dir=str(tmp_path), output_dir=str(output_dir))
+
+    non_existent = tmp_path / "non_existent.py"
+    result = generator.generate_batch_testcases([str(non_existent)], "test_batch")
+
+    assert result["total"] == 0, "不存在的路径不计入 total"
+    assert result["failed"] == 0
+
+
+@allure.feature("测试用例生成器")
+@allure.story("batch 模式 - 目录展开")
+def test_batch_expand_directory(tmp_path):
+    """测试 batch 模式展开目录输入。"""
+    # 创建多个 API 文件
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    for name in ["_api_one.py", "_api_two.py"]:
+        with open(api_dir / name, "w", encoding="utf-8") as f:
+            f.write(f'''
+# coding:utf-8
+
+def {name.replace(".py", "")}(data=data, access_token=access_token):
+    """
+    {name.replace(".py", "").lstrip("_")}
+    /api/{name.replace(".py", "").lstrip("_")}
+    """
+    url = "/api/{name.replace(".py", "").lstrip("_")}"
+    headers = {{}}
+    with client.post(url=url, headers=headers, json=data) as r:
+        return r
+''')
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(tmp_path))
+
+    result = generator.generate_batch_testcases([str(api_dir)], "test_batch")
+
+    assert result["total"] == 2
+    assert result["generated"] == 2
+
+
+@allure.feature("测试用例生成器")
+@allure.story("_build_param_items_from_api - batch模式包含空值")
+def test_build_param_items_from_api_batch_includes_empty(tmp_path):
+    """测试 _build_param_items_from_api 在 batch 模式下包含空值参数。
+
+    验证点：is_batch_mode=True 时空字符串和 None 也生成参数化项。
+    """
+    generator = TestCaseGenerator()
+
+    api_params = {
+        "keyword": "",
+        "category": "A",
+        "tag": None,
+        "pageNum": "1",
+    }
+
+    param_remarks = {}
+
+    result = generator._build_param_items_from_api(api_params, param_remarks, is_batch_mode=True)
+
+    # 应过滤掉 pageNum（分页参数），包含 keyword=""、category="A"、tag=None
+    param_names = [next(k for k in item if k != "other_params") for item in result]
+
+    assert "category" in param_names, "有效参数应包含"
+    assert "keyword" in param_names, "batch 模式下空字符串应包含"
+    assert "tag" in param_names, "batch 模式下 None 应包含"
+    assert "pageNum" not in param_names, "分页参数应被过滤"
+
+
+@allure.feature("测试用例生成器")
+@allure.story("_build_param_items_from_api - 非batch模式过滤空值")
+def test_build_param_items_from_api_non_batch_filters_empty(tmp_path):
+    """测试 _build_param_items_from_api 在非 batch 模式下过滤空值。
+
+    验证点：is_batch_mode=False 时空字符串和 None 被过滤。
+    """
+    generator = TestCaseGenerator()
+
+    api_params = {
+        "keyword": "",
+        "category": "A",
+        "tag": None,
+    }
+
+    param_remarks = {}
+
+    result = generator._build_param_items_from_api(api_params, param_remarks, is_batch_mode=False)
+
+    param_names = [next(k for k in item if k != "other_params") for item in result]
+
+    assert "category" in param_names, "有效参数应包含"
+    assert "keyword" not in param_names, "非 batch 模式下空字符串应过滤"
+    assert "tag" not in param_names, "非 batch 模式下 None 应过滤"
+
+
+@allure.feature("测试用例生成器")
+@allure.story("_build_param_items_from_api - 状态参数处理")
+def test_build_param_items_from_api_with_state_params(tmp_path):
+    """测试 _build_param_items_from_api 处理状态参数。
+
+    验证点：状态参数从备注解析并展开为多个值。
+    """
+    generator = TestCaseGenerator()
+
+    api_params = {
+        "status": 1,
+    }
+
+    param_remarks = {
+        "status": "状态 0：待审核 1：审核通过 2：审核驳回",
+    }
+
+    result = generator._build_param_items_from_api(api_params, param_remarks, is_batch_mode=True)
+
+    # 只有 status 参数，应展开为 [0, 1, 2]
+    assert len(result) == 1
+    status_item = result[0]
+    assert "status" in status_item
+    assert status_item["status"] == [0, 1, 2], "状态参数应从备注解析为值列表"
+
+
+@allure.feature("测试用例生成器")
+@allure.story("_build_param_items_from_api - 空参数列表")
+def test_build_param_items_from_api_empty_params(tmp_path):
+    """测试 _build_param_items_from_api 处理空参数列表。"""
+    generator = TestCaseGenerator()
+
+    result = generator._build_param_items_from_api({}, {}, is_batch_mode=True)
+    assert result == []
+
+    result = generator._build_param_items_from_api({}, {}, is_batch_mode=False)
+    assert result == []
+
+
+@allure.feature("测试用例生成器")
+@allure.story("_build_param_items_from_api - 全部分页参数")
+def test_build_param_items_from_api_only_pagination(tmp_path):
+    """测试 _build_param_items_from_api 过滤全部分页参数。"""
+    generator = TestCaseGenerator()
+
+    api_params = {
+        "pageNum": "1",
+        "pageSize": "20",
+    }
+
+    result = generator._build_param_items_from_api(api_params, {}, is_batch_mode=True)
+    assert result == [], "全部分页参数应返回空列表"
+
+
+@allure.feature("测试用例生成器")
+@allure.story("_build_param_items_from_api - 混合分页和非分页参数")
+def test_build_param_items_from_api_mixed_pagination(tmp_path):
+    """测试 _build_param_items_from_api 混合分页和非分页参数。"""
+    generator = TestCaseGenerator()
+
+    api_params = {
+        "pageNum": "1",
+        "pageSize": "20",
+        "status": "1",
+    }
+
+    result = generator._build_param_items_from_api(api_params, {}, is_batch_mode=True)
+    assert len(result) == 1, "只有非分页参数应保留"
+    param_name = next(k for k in result[0] if k != "other_params")
+    assert param_name == "status", "非分页参数 status 应保留"

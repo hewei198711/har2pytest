@@ -119,9 +119,9 @@ def main():
     # 解析参数
     args = parser.parse_args()
 
-    # 如果没有指定命令，默认使用 generate
+    # 如果没有指定命令，默认使用 api 命令
     if args.command is None:
-        args.command = "generate"
+        args.command = "api"
         args.har_file = "api_request.har"
         args.output = APIConfig.DEFAULT_API_DIR()
         args.overwrite = False
