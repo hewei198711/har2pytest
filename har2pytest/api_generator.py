@@ -113,8 +113,8 @@ class APIGenerator:
             "function_name": url_info["function_name"],
         }
 
-    def generate_api_file(self, request_info: dict, force_overwrite: bool = False, swagger_info: dict = None):
-        """生成API文件"""
+    async def generate_api_file(self, request_info: dict, force_overwrite: bool = False, swagger_info: dict = None):
+        """生成API文件（异步）"""
         method = request_info["method"].upper()
         url = request_info["url"]
 
@@ -124,7 +124,7 @@ class APIGenerator:
             # 获取整个Swagger文档（用于URL模板匹配和获取API信息）
             swagger_doc = None
             if service_package in APIConfig.SWAGGER_DOC_URLS():
-                swagger_doc = self.swagger_handler.get_swagger_doc(APIConfig.SWAGGER_DOC_URLS()[service_package])
+                swagger_doc = await self.swagger_handler.get_swagger_doc(APIConfig.SWAGGER_DOC_URLS()[service_package])
 
             # 设置swagger_data到url_matcher
             self.url_matcher.swagger_data = swagger_doc
@@ -166,7 +166,7 @@ class APIGenerator:
 
         # 生成文件内容（使用从Swagger获取的数据）
         content = self.generate_file_content(request_info, function_name, swagger_info, parsed_info)
-        write_test_file(filepath, content)
+        await write_test_file(filepath, content)
 
         return filepath
 

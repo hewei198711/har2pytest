@@ -1,3 +1,4 @@
+import asyncio
 import glob
 import os
 from typing import Any
@@ -9,9 +10,9 @@ from .swagger_handler import SwaggerHandler
 from .url_matcher import URLMatcher
 from .utils import (
     deduplicate_values,
+    format_directory,
     format_parameter_value,
     format_params_for_python,
-    format_python_file,
     get_output_dir,
     merge_request_params,
     parse_api_file,
@@ -123,7 +124,7 @@ class TestCaseGenerator:
         """
         service_package = APIConfig.determine_service_package(url)
         swagger_url = APIConfig.SWAGGER_DOC_URLS().get(service_package)
-        return self.swagger_handler.get_swagger_doc(swagger_url) if swagger_url else None
+        return asyncio.run(self.swagger_handler.get_swagger_doc(swagger_url)) if swagger_url else None
 
     def _prepare_url_matcher(self, url: str) -> None:
         """为指定 URL 准备 URLMatcher。
@@ -411,10 +412,13 @@ class TestCaseGenerator:
                 if not test_content:
                     continue
 
-                write_test_file(test_filepath, test_content)
+                asyncio.run(write_test_file(test_filepath, test_content))
                 generated_files.append(test_filepath)
             except Exception as e:
                 logger.error(f"生成测试用例文件失败 {api_file}: {str(e)}")
+
+        if generated_files:
+            asyncio.run(format_directory(output_dir))
 
         return generated_files
 
@@ -454,13 +458,14 @@ class TestCaseGenerator:
         api_info = self._get_api_file_info(target_api_file)
         test_filename = f"test{api_info['function_name']}.py"
         test_filepath = os.path.join(output_dir, test_filename)
-        write_test_file(test_filepath, test_content)
+        asyncio.run(write_test_file(test_filepath, test_content))
+        asyncio.run(format_directory(output_dir))
         return test_filepath
 
-    def generate_batch_testcases(
+    async def generate_batch_testcases(
         self, api_files_list: list[str], task_id: str = None
     ) -> dict:
-        """批量生成测试用例（直接从API文件读取参数）。
+        """批量生成测试用例（异步 + 并行处理）。
 
         Args:
             api_files_list: API 文件路径列表
@@ -503,63 +508,58 @@ class TestCaseGenerator:
             "generated_files": [],
         }
 
-        for api_file in expanded_api_files:
-            try:
-                # 检查 API 文件是否存在
-                if not os.path.exists(api_file):
-                    logger.warning(f"API 文件不存在，跳过: {api_file}")
-                    result["failed"] += 1
-                    continue
+        output_dir = get_output_dir(self.output_dir, task_id)
 
-                # 获取 API 信息
+        # 定义异步任务：处理单个 API 文件
+        async def process_single(api_file: str) -> tuple[str, str | None]:
+            """返回 (status, test_filepath) 三元组。"""
+            try:
+                if not os.path.exists(api_file):
+                    return "failed", None
+
                 api_info = self._get_api_file_info(api_file)
                 if not api_info or not api_info.get("function_name"):
-                    logger.warning(f"无法解析 API 文件，跳过: {api_file}")
-                    result["failed"] += 1
-                    continue
+                    return "failed", None
 
-                # 检查测试用例文件是否已存在
                 clean_function_name = api_info["function_name"].lstrip("_")
                 test_filename = f"test_{clean_function_name}.py"
-                output_dir = get_output_dir(self.output_dir, task_id)
                 test_filepath = os.path.join(output_dir, test_filename)
 
                 if os.path.exists(test_filepath):
-                    logger.info(f"测试用例文件已存在，跳过: {test_filename}")
-                    result["skipped"] += 1
-                    continue
+                    return "skipped", None
 
-                # 根据 API 描述判断使用哪种模式
                 api_description = api_info.get("description", "")
-
                 if "列表" in api_description:
-                    # 使用 list_query 模式（直接从API文件读取参数）
-                    logger.info(f"使用 list_query 模式生成: {clean_function_name}")
                     test_content = self.generate_parametrized_test_content(None, api_file, task_id)
-                    if test_content:
-                        write_test_file(test_filepath, test_content)
-                        result["generated"] += 1
-                        result["generated_files"].append(test_filepath)
-                        logger.info(f"成功生成: {test_filename}")
-                    else:
-                        logger.warning(f"生成失败: {test_filename}")
-                        result["failed"] += 1
                 else:
-                    # 使用 complex_scenario 模式（直接从API文件读取参数）
-                    logger.info(f"使用 complex_scenario 模式生成: {clean_function_name}")
                     test_content = self.generate_scenario_test_content(None, [api_file], task_id, api_file)
-                    if test_content:
-                        write_test_file(test_filepath, test_content)
-                        result["generated"] += 1
-                        result["generated_files"].append(test_filepath)
-                        logger.info(f"成功生成: {test_filename}")
-                    else:
-                        logger.warning(f"生成失败: {test_filename}")
-                        result["failed"] += 1
 
+                if test_content:
+                    await write_test_file(test_filepath, test_content)
+                    return "generated", test_filepath
+                else:
+                    return "failed", None
             except Exception as e:
                 logger.error(f"处理 API 文件时出错 {api_file}: {e}")
+                return "failed", None
+
+        # 并行处理所有 API 文件
+        tasks = [process_single(api_file) for api_file in expanded_api_files]
+        all_results = await asyncio.gather(*tasks)
+
+        # 汇总结果
+        for status, test_filepath in all_results:
+            if status == "generated":
+                result["generated"] += 1
+                result["generated_files"].append(test_filepath)
+                logger.info(f"成功生成: {os.path.basename(test_filepath)}")
+            elif status == "skipped":
+                result["skipped"] += 1
+            elif status == "failed":
                 result["failed"] += 1
+
+        if result["generated"] > 0:
+            await format_directory(output_dir)
 
         return result
 

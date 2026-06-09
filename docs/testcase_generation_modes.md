@@ -342,40 +342,46 @@ class TestClass:
 ```mermaid
 flowchart TD
     A[generate_batch_testcases<br/>api_files_list, task_id?] --> B[展开文件列表<br/>支持目录/文件混合输入]
-    B --> C[遍历每个 api_file]
+    B --> C[asyncio.gather<br/>并行处理所有 api_file]
     C --> D{测试文件已存在?}
     D -->|是| E[跳过 skipped++]
     D -->|否| F{api_description<br/>包含"列表"?}
     F -->|是| G[generate_parametrized_test_content<br/>har_file_path=None]
     F -->|否| H[generate_scenario_test_content<br/>har_file_path=None]
-    G --> I[write_test_file]
+    G --> I[await write_test_file]
     H --> I
-    I --> C
+    I --> J[汇总结果]
 ```
 
 ### 详细步骤
 
-#### Step 1: `generate_batch_testcases()`
+#### Step 1: `generate_batch_testcases()`（异步 + 并行）
 
 ```
 输入: api_files_list (文件路径列表或目录), task_id?
  └─ 展开路径: 目录 → 扫描所有 .py 文件; 文件 → 直接添加
- └─ 遍历每个 api_file:
-      ├─ 检查文件是否存在 → 失败计数
-      ├─ _get_api_file_info() → 检查 function_name → 失败计数
-      ├─ 检查测试文件是否已存在 → 跳过计数
-      ├─ 判断模式:
-      │    ├─ "列表" in description → parametrized_list
-      │    │    └─ generate_parametrized_test_content(None, api_file, task_id)
-      │    └─ 其他 → complex_scenario
-      │         └─ generate_scenario_test_content(None, [api_file], task_id, api_file)
-      └─ 写入文件 → 成功计数
- └─ 返回 {total, skipped, generated, failed, generated_files}
+ └─ output_dir = get_output_dir(self.output_dir, task_id)
+ └─ 异步并行处理（asyncio.gather）:
+      ├─ 每个 api_file 独立任务 process_single():
+      │    ├─ 检查文件是否存在 → "failed"
+      │    ├─ _get_api_file_info() → 检查 function_name → "failed"
+      │    ├─ 检查测试文件是否已存在 → "skipped"
+      │    ├─ 判断模式:
+      │    │    ├─ "列表" in description → parametrized_list
+      │    │    │    └─ generate_parametrized_test_content(None, api_file, task_id)
+      │    │    └─ 其他 → complex_scenario
+      │    │         └─ generate_scenario_test_content(None, [api_file], task_id, api_file)
+      │    └─ await write_test_file() → 异步写入 → "generated"
+      └─ 汇总所有结果 → {total, skipped, generated, failed, generated_files}
+ └─ await format_directory(output_dir) → 批量 ruff 格式化
+ └─ 返回结果字典
 ```
+
+> **异步并行说明**：所有 API 文件通过 `asyncio.gather` 并发处理，文件写入（`write_test_file`）并行执行。API 文件数量越多，并行优势越明显。生成完毕后对整个输出目录进行一次性 ruff 格式化，避免逐个文件的格式化开销。
 
 #### 与模式一/二的关键区别
 
-在 batch 模式下有 HAR 文件时为 `None`，因此：
+在 batch 模式下 HAR 文件固定为 `None`，因此：
 
 | 组件 | parametrized_list(batch) | complex_scenario(batch) |
 |------|------------------------|------------------------|
@@ -385,6 +391,7 @@ flowchart TD
 | **severity** | NORMAL | CRITICAL |
 | **测试方法** | `@pytest.mark.parametrize` 参数化方法 | `@allure.step` 嵌套步骤函数 |
 | **headers** | 默认 headers | 从 API 文件提取自定义 headers |
+| **写入方式** | `await write_test_file()` 异步并行 | `await write_test_file()` 异步并行 |
 
 ### 生成的测试用例示例（列表模式 batch）
 

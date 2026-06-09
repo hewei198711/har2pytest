@@ -2,6 +2,7 @@
 测试 testcase_generator.py 模块
 """
 
+import asyncio
 import os
 
 import allure
@@ -1004,7 +1005,8 @@ def _user_detail(data=data, access_token=access_token):
     APIConfig.SWAGGER_DOC_URLS = lambda: {"mall_center_user": "https://example.com/swagger"}
     APIConfig.DEFAULT_API_DIR = lambda: "apis"
     original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
-    generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
+    async def _mock_get(url): return swagger_data
+    generator.swagger_handler.get_swagger_doc = _mock_get
 
     try:
         api_files = generator.match_api_files_for_har(str(har_file))
@@ -1083,7 +1085,8 @@ def _order_items_detail(data=data, access_token=access_token):
     APIConfig.SWAGGER_DOC_URLS = lambda: {"mall_center_user": "https://example.com/swagger"}
     APIConfig.DEFAULT_API_DIR = lambda: "apis"
     original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
-    generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
+    async def _mock_get(url): return swagger_data
+    generator.swagger_handler.get_swagger_doc = _mock_get
 
     try:
         content = generator.generate_scenario_test_content(
@@ -1154,7 +1157,8 @@ def test_generate_test_case_with_path_and_query_params(tmp_path):
     APIConfig.SWAGGER_DOC_URLS = lambda: {"apis": "https://example.com/swagger"}
     APIConfig.DEFAULT_API_DIR = lambda: "apis"
     original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
-    generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
+    async def _mock_get(url): return swagger_data
+    generator.swagger_handler.get_swagger_doc = _mock_get
 
     try:
         requests = generator.har_parser.extract_requests_from_har(str(har_file))
@@ -1229,7 +1233,8 @@ def _user_info(data=data, access_token=access_token):
     APIConfig.SWAGGER_DOC_URLS = lambda: {"apis": "https://example.com/swagger"}
     APIConfig.DEFAULT_API_DIR = lambda: "apis"
     original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
-    generator.swagger_handler.get_swagger_doc = lambda url: None
+    async def _mock_get_none(url): return None
+    generator.swagger_handler.get_swagger_doc = _mock_get_none
 
     try:
         api_files = generator.match_api_files_for_har(str(har_file))
@@ -1471,7 +1476,8 @@ def _customer_orders(data=data, access_token=access_token):
     APIConfig.SWAGGER_DOC_URLS = lambda: {"apis": "https://example.com/swagger"}
     APIConfig.DEFAULT_API_DIR = lambda: "apis"
     original_get_swagger_doc = generator.swagger_handler.get_swagger_doc
-    generator.swagger_handler.get_swagger_doc = lambda url: swagger_data
+    async def _mock_get(url): return swagger_data
+    generator.swagger_handler.get_swagger_doc = _mock_get
 
     try:
         # 先验证API文件匹配
@@ -1943,7 +1949,7 @@ def _product_list(data=data, access_token=access_token):
 
     generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir))
 
-    result = generator.generate_batch_testcases([str(api_dir)], "test_batch")
+    result = asyncio.run(generator.generate_batch_testcases([str(api_dir)], "test_batch"))
 
     assert result["total"] == 1
     assert result["generated"] == 1
@@ -1997,7 +2003,7 @@ def _submit_order(data=data, access_token=access_token):
 
     generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir))
 
-    result = generator.generate_batch_testcases([str(api_dir)], "test_batch")
+    result = asyncio.run(generator.generate_batch_testcases([str(api_dir)], "test_batch"))
 
     assert result["total"] == 1
     assert result["generated"] == 1
@@ -2056,7 +2062,7 @@ def _product_list(data=data, access_token=access_token):
 
     generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir))
 
-    result = generator.generate_batch_testcases([str(api_dir)], "test_batch")
+    result = asyncio.run(generator.generate_batch_testcases([str(api_dir)], "test_batch"))
 
     assert result["skipped"] == 1, "已存在的文件应被跳过"
     assert result["generated"] == 0, "不应生成新文件"
@@ -2074,7 +2080,7 @@ def test_batch_skip_non_existent_path(tmp_path):
     generator = TestCaseGenerator(api_dir=str(tmp_path), output_dir=str(output_dir))
 
     non_existent = tmp_path / "non_existent.py"
-    result = generator.generate_batch_testcases([str(non_existent)], "test_batch")
+    result = asyncio.run(generator.generate_batch_testcases([str(non_existent)], "test_batch"))
 
     assert result["total"] == 0, "不存在的路径不计入 total"
     assert result["failed"] == 0
@@ -2106,7 +2112,7 @@ def {name.replace(".py", "")}(data=data, access_token=access_token):
 
     generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(tmp_path))
 
-    result = generator.generate_batch_testcases([str(api_dir)], "test_batch")
+    result = asyncio.run(generator.generate_batch_testcases([str(api_dir)], "test_batch"))
 
     assert result["total"] == 2
     assert result["generated"] == 2

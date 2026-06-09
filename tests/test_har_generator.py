@@ -2,9 +2,10 @@
 测试 har_generator.py 模块
 """
 
+import asyncio
 import json
 import os
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import allure
 
@@ -39,9 +40,9 @@ def test_generate_api_files_from_har():
     try:
         # 创建mock的api_generator
         mock_api_generator = MagicMock()
-        mock_api_generator.generate_api_file.return_value = "api/_user_login.py"
+        mock_api_generator.generate_api_file = AsyncMock(return_value="api/_user_login.py")
 
-        generated_files = generate_api_files_from_har("test_har_generator.har", api_generator=mock_api_generator)
+        generated_files = asyncio.run(generate_api_files_from_har("test_har_generator.har", api_generator=mock_api_generator))
 
         assert len(generated_files) == 1
         assert generated_files[0] == "api/_user_login.py"
@@ -61,7 +62,7 @@ def test_generate_api_files_from_empty_har():
         json.dump(test_har, f)
 
     try:
-        generated_files = generate_api_files_from_har("test_empty_har.har")
+        generated_files = asyncio.run(generate_api_files_from_har("test_empty_har.har"))
 
         assert len(generated_files) == 0
     finally:
@@ -92,9 +93,9 @@ def test_generate_api_files_failure():
     try:
         # 创建会抛出异常的mock
         mock_api_generator = MagicMock()
-        mock_api_generator.generate_api_file.side_effect = Exception("生成失败")
+        mock_api_generator.generate_api_file = AsyncMock(side_effect=Exception("生成失败"))
 
-        generated_files = generate_api_files_from_har("test_failure.har", api_generator=mock_api_generator)
+        generated_files = asyncio.run(generate_api_files_from_har("test_failure.har", api_generator=mock_api_generator))
 
         # 即使单个生成失败，也应该返回空列表（不抛出异常）
         assert len(generated_files) == 0
@@ -107,6 +108,6 @@ def test_generate_api_files_failure():
 @allure.story("不存在的HAR文件")
 def test_generate_api_files_nonexistent_har():
     """测试不存在的HAR文件"""
-    generated_files = generate_api_files_from_har("nonexistent.har")
+    generated_files = asyncio.run(generate_api_files_from_har("nonexistent.har"))
 
     assert len(generated_files) == 0

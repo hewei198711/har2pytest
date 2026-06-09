@@ -140,6 +140,9 @@ har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/l
 
 # 自定义输出目录
 har2pytest testcase api_request.har --pattern list_query --url /api/user/list --mark test_4295 --output my_tests
+
+# 批量生成测试用例（不需要 HAR 文件）
+har2pytest testcase --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py
 ```
 
 #### 4. 查看HAR文件摘要
@@ -204,16 +207,16 @@ har2pytest testcase api.har --pattern complex_scenario --url /api/user/login --m
 
 ```bash
 # 基本用法（单个API文件）
-har2pytest testcase api.har --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py
+har2pytest testcase --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py
 
 # 多个API文件（逗号分隔）
-har2pytest testcase api.har --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py,apis/mall_mgmt_application/_mgmt_prmt_state_luckyActivity.py
+har2pytest testcase --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py,apis/mall_mgmt_application/_mgmt_prmt_state_luckyActivity.py
 
 # 指定测试标记
-har2pytest testcase api.har --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py --mark test_4291
+har2pytest testcase --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py --mark test_4291
 
 # 自定义目录
-har2pytest testcase api.har --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py --api-dir apis --output testcases
+har2pytest testcase --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py --api-dir apis --output testcases
 ```
 
 **参数说明**：
@@ -225,15 +228,23 @@ har2pytest testcase api.har --pattern batch --api-files apis/mall_mgmt_applicati
 
 **batch 模式特性**：
 
-1. **自动选择生成模式**：
+1. **无需 HAR 文件**：
+   - batch 模式直接从 API 文件读取参数，不依赖于 HAR 文件
+   - 命令中不传 `har_file` 位置参数即可
+
+2. **自动选择生成模式**：
    - 如果API描述中包含"列表"关键字，使用 `list_query` 模式生成参数化测试用例
    - 其他情况使用 `complex_scenario` 模式生成场景测试用例
 
-2. **智能跳过机制**：
+3. **智能跳过机制**：
    - 如果测试用例文件已存在，自动跳过该API文件
    - 避免重复生成，节省时间
 
-3. **状态参数解析**：
+4. **异步并行写入**：
+   - 所有 API 文件通过 `asyncio.gather` 并发处理，文件写入并行执行
+   - 整个目录生成完毕后，一次性 ruff 格式化，避免逐个文件的格式化开销
+
+5. **状态参数解析**：
    - 自动识别参数备注中的状态字段（包含"状态"关键字的备注）
    - 从备注中提取所有状态值用于参数化测试
    - 支持格式：`状态 -1：已驳回 0：待审核（默认）1：审核通过`

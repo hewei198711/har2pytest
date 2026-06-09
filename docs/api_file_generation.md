@@ -23,20 +23,21 @@
 flowchart TD
     A[har2pytest api api_request.har] --> B[APIGenerator.generate_api_files_from_har<br/>har_file_path]
     B --> C[HARParser.extract_requests_from_har<br/>过滤非API请求、无效参数]
-    C --> D[循环每个API请求]
+    C --> D[asyncio.as_completed<br/>并行处理每个API请求]
     D --> E{文件已存在?}
     E -->|是 & 非强制覆盖| F[跳过该接口]
     E -->|否 或 强制覆盖| G[APIGenerator.generate_api_file<br/>request_info]
     G --> H[APIConfig.determine_service_package<br/>按URL前缀识别服务包]
     H --> I[_parse_request_info<br/>解析URL、参数、headers]
     I --> J[generate_file_content<br/>生成文件内容]
-    J --> K[write_test_file 写入文件]
+    J --> K[await write_test_file 异步写入]
     K --> L[generate_index_file<br/>生成 __init__.py 索引]
+    L --> M[await format_directory<br/>批量 ruff 格式化]
 ```
 
 ### 详细步骤
 
-#### Step 1: `generate_api_files_from_har()`
+#### Step 1: `generate_api_files_from_har()`（异步 + 并行）
 
 ```
 输入: har_file_path
@@ -48,8 +49,16 @@ flowchart TD
  │     - 布尔值自动转换（"true"/"false" 字符串 → Python 布尔值）
  │     - 可选去重（filter_duplicate_url=True 时合并重复 URL）
  │
- └─ 对每个请求调用 generate_api_file()
+ └─ 异步并行处理（asyncio.as_completed）:
+ │     每个 API 请求并发执行 generate_api_file()
+ │     文件写入通过 await write_test_file() 异步执行
+ │     适合大量接口，充分利用 I/O 等待时间
+ │
+ └─ 所有请求处理完毕后 → await format_directory(output_dir) 一次性 ruff 格式化
+ │     避免逐个文件格式化，节省开销
 ```
+
+> **异步并行说明**：所有 API 文件通过 `asyncio.as_completed` 并发生成，文件写入异步执行，不阻塞事件循环。生成完毕后对整个输出目录进行一次性 ruff 格式化，接口越多，优化效果越明显。
 
 #### Step 2: `check_api_exists()`
 
@@ -235,19 +244,19 @@ def _mobile_returnOrder_id(params=params, headers=headers):
 flowchart TD
     A[har2pytest swagger https://.../api-docs] --> B[SwaggerHandler.generate_apis_from_swagger<br/>swagger_url]
     B --> C[API 配置查找 Swagger 文档地址]
-    C --> D[get_swagger_doc<br/>获取并缓存 Swagger JSON 数据]
-    D --> E[遍历 paths 中所有 API]
+    C --> D[await get_swagger_doc<br/>httpx.AsyncClient 异步获取]
+    D --> E[解析 paths 中所有 API]
     E --> F{specific_path 指定?}
     F -->|是| G[精确匹配指定路径]
     F -->|否| H[处理所有路径]
     G --> I[/ 或 H --> I]
     I --> J[遍历每个 HTTP 方法<br/>GET/POST/PUT/DELETE]
     J --> K[_extract_params_from_swagger<br/>提取 query、body、path 参数]
-    K --> L[APIGenerator.generate_api_file<br/>request_info, swagger_info]
+    K --> L[asyncio.as_completed<br/>并行生成 API 文件]
     L --> M{文件已存在?}
     M -->|是 & 非强制覆盖| N[跳过]
-    M -->|否 或 强制覆盖| O[生成 API 文件]
-    O --> P[write_test_file 写入文件]
+    M -->|否 或 强制覆盖| O[await write_test_file 异步写入]
+    O --> P[await format_directory<br/>批量 ruff 格式化]
 ```
 
 ### 详细步骤
@@ -256,7 +265,8 @@ flowchart TD
 
 ```
 输入: swagger_url, force_overwrite=False, specific_path=None
- └─ get_swagger_doc() → 获取 Swagger 文档数据（含缓存）
+ └─ await get_swagger_doc() → 异步获取 Swagger 文档数据（含缓存）
+ │     httpx.AsyncClient 发送 HTTP 请求，不阻塞事件循环
  │
  └─ 解析 basePath + paths:
  │     basePath: /api
@@ -267,9 +277,16 @@ flowchart TD
  └─ 如果指定了 specific_path，只处理匹配的路径
  │     （自动处理 basePath 前缀）
  │
- └─ 对每个 path + method 组合:
-       └─ _extract_params_from_swagger() → 提取参数
+ └─ 异步并行处理（asyncio.as_completed）:
+ │     每个 path + method 组合并发执行:
+ │       _extract_params_from_swagger() → 提取参数
+ │       generate_api_file() → 生成文件内容
+ │       await write_test_file() → 异步写入
+ │
+ └─ 所有文件生成完毕后 → await format_directory(output_dir) 一次性 ruff 格式化
 ```
+
+> **异步优化说明**：Swagger 文档获取使用 `httpx.AsyncClient` 异步 HTTP 请求；多个 API 文件通过 `asyncio.as_completed` 并发生成，文件写入异步执行。接口越多，并行优势越明显。生成完毕后对整个输出目录进行一次性 ruff 格式化，避免逐个文件的格式化开销。
 
 #### Step 2: `_extract_params_from_swagger()`
 

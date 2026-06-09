@@ -3,10 +3,10 @@
 提供参数格式化、文件处理等通用工具函数。
 """
 
+import asyncio
 import json
 import os
 import re
-import subprocess
 import sys
 from collections.abc import Callable
 from typing import Any
@@ -51,8 +51,8 @@ def deduplicate_values(values: list[Any]) -> list[Any]:
     return unique_values
 
 
-def format_python_file(filepath: str) -> None:
-    """使用 ruff 格式化 Python 文件。
+async def format_python_file(filepath: str) -> None:
+    """异步使用 ruff 格式化 Python 文件。
 
     先运行 ruff check --fix 修复代码问题，再运行 ruff format 格式化代码。
 
@@ -60,10 +60,18 @@ def format_python_file(filepath: str) -> None:
         filepath: 要格式化的文件路径。
     """
     try:
-        # 使用 python -m ruff 来调用，这样更可靠
-        # 指定 encoding='utf-8' 避免 Windows 系统上的编码问题
-        subprocess.run([sys.executable, "-m", "ruff", "check", "--fix", filepath], capture_output=True, text=True, encoding='utf-8')
-        subprocess.run([sys.executable, "-m", "ruff", "format", filepath], capture_output=True, text=True, encoding='utf-8')
+        proc1 = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "ruff", "check", "--fix", filepath,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        await proc1.communicate()
+
+        proc2 = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "ruff", "format", filepath,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        await proc2.communicate()
+
         logger.info(f"使用ruff格式化文件: {filepath}")
     except Exception as e:
         logger.warning(f"格式化文件失败 {filepath}: {str(e)}")
@@ -86,10 +94,11 @@ def get_output_dir(base_output_dir: str, task_id: str = None) -> str:
     return output_dir
 
 
-def write_test_file(filepath: str, content: str):
-    """写入 Python 文件并格式化。
+async def write_test_file(filepath: str, content: str):
+    """异步写入 Python 文件（不格式化）。
 
-    将内容写入文件后，使用 ruff 进行格式化。
+    仅将内容写入文件，不进行 ruff 格式化。
+    批量格式化应在所有文件生成后调用 format_directory()。
 
     Args:
         filepath: 文件路径。
@@ -97,7 +106,41 @@ def write_test_file(filepath: str, content: str):
     """
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(content)
-    format_python_file(filepath)
+
+
+async def format_directory(dir_path: str) -> None:
+    """异步批量格式化指定目录下的所有 Python 文件。
+
+    对整个目录运行 ruff check --fix 和 ruff format，
+    比逐个文件格式化效率更高。
+
+    Args:
+        dir_path: 要格式化的目录路径（必须存在）。
+    """
+    if not os.path.isdir(dir_path):
+        logger.warning(f"格式化目录不存在: {dir_path}")
+        return
+
+    logger.info(f"批量格式化目录: {dir_path}")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "ruff", "check", "--fix", dir_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+    except Exception:
+        pass  # check --fix 可能没有要修复的问题
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "ruff", "format", dir_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+    except Exception as e:
+        logger.warning(f"ruff 格式化失败: {e}")
 
 
 # API文件解析缓存

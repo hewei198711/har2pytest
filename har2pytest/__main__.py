@@ -3,6 +3,7 @@ har2pytest 命令行入口
 """
 
 import argparse
+import asyncio
 
 from .api_generator import APIGenerator
 from .config import APIConfig
@@ -78,7 +79,7 @@ def main():
   har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
 """,
     )
-    tc_parser.add_argument("har_file", help="HAR文件路径")
+    tc_parser.add_argument("har_file", nargs="?", default=None, help="HAR文件路径（batch模式不需要）")
     tc_parser.add_argument(
         "--pattern",
         default="list_query",
@@ -128,13 +129,13 @@ def main():
 
     # 执行对应的命令
     if args.command == "api":
-        handle_api(args)
+        asyncio.run(handle_api(args))
     elif args.command == "summary":
         handle_summary(args)
     elif args.command == "testcase":
-        handle_testcase(args)
+        asyncio.run(handle_testcase(args))
     elif args.command == "swagger":
-        handle_swagger(args)
+        asyncio.run(handle_swagger(args))
     elif args.command == "help":
         parser.print_help()
     else:
@@ -142,7 +143,7 @@ def main():
         parser.print_help()
 
 
-def handle_api(args):
+async def handle_api(args):
     """处理 api 命令"""
     har_file = args.har_file
     output_dir = args.output
@@ -154,7 +155,7 @@ def handle_api(args):
     logger.info("-" * 50)
 
     api_generator = APIGenerator(output_dir)
-    generated_files = generate_api_files_from_har(
+    generated_files = await generate_api_files_from_har(
         har_file, force_overwrite=force_overwrite, api_generator=api_generator
     )
 
@@ -173,7 +174,7 @@ def handle_summary(args):
     parser.print_api_summary(har_file)
 
 
-def handle_swagger(args):
+async def handle_swagger(args):
     """处理 swagger 命令"""
     swagger_url = args.swagger_url
     output_dir = args.output
@@ -189,7 +190,7 @@ def handle_swagger(args):
 
     api_generator = APIGenerator(output_dir)
     swagger_handler = SwaggerHandler(api_generator=api_generator)
-    generated_files = swagger_handler.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)
+    generated_files = await swagger_handler.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)
 
     logger.info("-" * 50)
     logger.info(f"共生成 {len(generated_files)} 个API接口文件")
@@ -198,7 +199,7 @@ def handle_swagger(args):
         api_generator.generate_index_file(generated_files)
 
 
-def handle_testcase(args):
+async def handle_testcase(args):
     """处理 testcase 命令"""
     har_file = args.har_file
     pattern = args.pattern
@@ -213,6 +214,10 @@ def handle_testcase(args):
 
     if pattern == "list_query":
         # 验证必填参数
+        if not har_file:
+            logger.error("错误: list_query 模式必须指定 HAR 文件")
+            logger.error("使用示例: har2pytest testcase api.har --pattern list_query --url /api/user/list")
+            return
         if not target_url:
             logger.error("错误: list_query 模式必须指定 --url 参数")
             logger.error("使用示例: har2pytest testcase api.har --pattern list_query --url /api/user/list")
@@ -236,6 +241,10 @@ def handle_testcase(args):
 
     elif pattern == "complex_scenario":
         # 验证必填参数
+        if not har_file:
+            logger.error("错误: complex_scenario 模式必须指定 HAR 文件")
+            logger.error("使用示例: har2pytest testcase api.har --pattern complex_scenario --url /api/user/login")
+            return
         if not target_url:
             logger.error("错误: complex_scenario 模式必须指定 --url 参数")
             logger.error("使用示例: har2pytest testcase api.har --pattern complex_scenario --url /api/user/login")
@@ -260,7 +269,7 @@ def handle_testcase(args):
         api_files_arg = args.api_files
         if not api_files_arg:
             logger.error("错误: batch 模式必须指定 --api-files 参数")
-            logger.error("使用示例: har2pytest testcase api.har --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py")
+            logger.error("使用示例: har2pytest testcase --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py")
             return
 
         # 解析 API 文件列表（支持逗号分隔）
@@ -272,7 +281,7 @@ def handle_testcase(args):
         logger.info("-" * 50)
 
         generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
-        result = generator.generate_batch_testcases(api_files_list, task_id)
+        result = await generator.generate_batch_testcases(api_files_list, task_id)
 
         logger.info("-" * 50)
         logger.info(f"总API文件数: {result['total']}")

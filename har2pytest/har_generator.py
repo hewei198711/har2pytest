@@ -3,13 +3,15 @@
 提供从 HAR 文件生成 API 接口文件的功能。
 """
 
+import asyncio
 import traceback
 
 from .har_parser import HARParser
 from .logger import logger
+from .utils import format_directory
 
 
-def generate_api_files_from_har(
+async def generate_api_files_from_har(
     har_file_path: str,
     force_overwrite: bool = False,
     api_generator=None,
@@ -25,7 +27,7 @@ def generate_api_files_from_har(
         list[str]: 生成的文件路径列表。
 
     Example:
-        >>> files = generate_api_files_from_har("普通订单.har")
+        >>> files = await generate_api_files_from_har("普通订单.har")
         >>> # 返回生成的文件路径列表，如 ["api/_mobile_product_search.py", ...]
     """
     har_parser = HARParser()
@@ -41,11 +43,15 @@ def generate_api_files_from_har(
     for request_info in requests:
         try:
             if api_generator:
-                filepath = api_generator.generate_api_file(request_info, force_overwrite=force_overwrite)
+                filepath = await api_generator.generate_api_file(request_info, force_overwrite=force_overwrite)
                 if filepath:
                     generated_files.append(filepath)
         except Exception as e:
             logger.error(f"生成API文件失败: {str(e)}")
             logger.error(traceback.format_exc())
+
+    # 批量格式化生成的 API 文件
+    if generated_files and api_generator:
+        await format_directory(api_generator.output_dir)
 
     return generated_files
