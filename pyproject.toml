@@ -1,13 +1,13 @@
 [project]
 name = "har2pytest"
-version = "0.1.0"
-description = "从HAR文件自动生成API接口文件和pytest+allure测试用例"
+version = "1.0.0"
+description = "从HAR文件，Swagger接口文档自动生成API接口文件和pytest+allure测试用例"
 authors = [
-    { name = "hewei", email = "hewei1987@example.com" }
+    { name = "hewei", email = "hewei1987@163.com" }
 ]
 license = "MIT"
 readme = "README.md"
-keywords = ["har", "pytest", "api", "test", "generator"]
+keywords = ["har", "swagger", "pytest", "allure",", "api", "testcase"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",

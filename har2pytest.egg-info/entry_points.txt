@@ -1,2 +1,0 @@
-[console_scripts]
-har2pytest = har2pytest.__main__:main
