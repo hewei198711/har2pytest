@@ -53,6 +53,31 @@ class SwaggerHandler:
             response.raise_for_status()
             return response.json()
 
+    @staticmethod
+    def _clean_swagger_url(url: str) -> str:
+        """清洗 Swagger URL，移除 doc.html、#fragment 等 UI 页面后缀。
+
+        用户可能从浏览器复制了 Swagger UI 页面地址（如 doc.html#），
+        需要清理为实际的 API 文档基础 URL。
+
+        Args:
+            url: 用户输入的原始 URL。
+
+        Returns:
+            str: 清洗后的基础 URL。
+        """
+        # 1. 移除 URL fragment（# 及其后面的部分）
+        url = url.split("#")[0]
+        # 2. 移除 doc.html 后缀
+        if url.endswith("doc.html"):
+            url = url[: -len("doc.html")]
+        # 3. 移除 index.html 后缀
+        if url.endswith("index.html"):
+            url = url[: -len("index.html")]
+        # 4. 移除末尾的 /
+        url = url.rstrip("/")
+        return url
+
     async def get_swagger_doc(self, service_base_url: str) -> dict[str, Any] | None:
         """异步获取 Swagger API 文档数据。
 
@@ -65,6 +90,9 @@ class SwaggerHandler:
         Returns:
             dict[str, Any] | None: Swagger 文档数据，如果获取失败则返回 None。
         """
+        # 清洗 URL：移除 doc.html、#fragment 等 UI 页面后缀
+        service_base_url = self._clean_swagger_url(service_base_url)
+
         if service_base_url in self.swagger_cache:
             return self.swagger_cache[service_base_url]
 

@@ -19,9 +19,9 @@ flowchart TD
     E --> F{成功?}
     F -->|是| G[获取真实文档路径]
     F -->|否| H[遍历常见路径]
-    H --> I[/v3/api-docs]
-    I --> J[/v2/api-docs]
-    J --> K[/api-docs]
+    H --> I["/v3/api-docs"]
+    I --> J["/v2/api-docs"]
+    J --> K["/api-docs"]
     G --> L{paths 字段存在?}
     I --> L
     J --> L
@@ -42,19 +42,19 @@ flowchart TD
 #### 策略 1：通过 `swagger-resources` 发现（推荐）
 
 ```
-请求: GET https://uc-test.perfect99.com/sw/mall-mgmt-application/v2/api-docs/swagger-resources
+请求: GET https://taobao.com/sw/order-application/v2/api-docs/swagger-resources
 
 响应:
 [
     {
-        "name": "mall-mgmt-application",
-        "location": "/sw/mall-mgmt-application/v2/api-docs",
-        "url": "/sw/mall-mgmt-application/v2/api-docs"
+        "name": "order-application",
+        "location": "/sw/order-application/v2/api-docs",
+        "url": "/sw/order-application/v2/api-docs"
     }
 ]
 
 → 提取 location/url 字段
-→ 请求完整文档: GET https://uc-test.perfect99.com/sw/mall-mgmt-application/v2/api-docs
+→ 请求完整文档: GET https://taobao.com/sw/order-application/v2/api-docs
 → 返回 Swagger JSON 数据
 ```
 
@@ -77,7 +77,7 @@ doc_paths = [
 ```python
 # 缓存 key: service_base_url
 self.swagger_cache = {
-    "https://uc-test.perfect99.com/sw/mall-mgmt-application/v2/api-docs": { ... },
+    "https://taobao.com/sw/order-application/v2/api-docs": { ... },
 }
 ```
 
@@ -327,8 +327,8 @@ param_descriptions = {
 | 维度 | HAR 生成 | Swagger 生成 |
 |------|---------|-------------|
 | **参数值** | 实际请求值 | 类型默认值 |
-| **接口描述** | `TODO: 添加接口描述` | 自动填充 `summary` |
-| **参数说明** | `TODO: 添加参数说明` | 自动填充 `description` |
+| **接口描述** | 自动填充 `summary` | 自动填充 `summary` |
+| **参数说明** | 自动填充 `description` | 自动填充 `description` |
 | **接口覆盖** | 仅抓包出现的接口 | 文档定义的所有接口 |
 
 ---
@@ -337,7 +337,7 @@ param_descriptions = {
 
 ```bash
 # 从 Swagger 文档生成所有 API 文件
-har2pytest swagger https://uc-test.perfect99.com/sw/mall-mgmt-application/v2/api-docs
+har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs
 
 # 指定输出目录
 har2pytest swagger https://... --output apis
@@ -349,7 +349,7 @@ har2pytest swagger https://... --path /mgmt/order/list
 har2pytest swagger https://... --overwrite
 
 # 组合使用
-har2pytest swagger https://... --output apis --overwrite --path /mgmt/order/list
+har2pytest swagger https://... --output apis --overwrite --path /mobile/order/list
 ```
 
 ---

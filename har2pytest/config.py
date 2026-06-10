@@ -199,10 +199,6 @@ class APIConfig:
         return cls.get_config("TESTCASE_DIR")
 
     @classmethod
-    def DEFAULT_TESTCASE_DIR(cls) -> str:
-        return "testcases"
-
-    @classmethod
     def SERVICE_MAPPING(cls) -> dict[str, str]:
         return cls.get_config("SERVICE_MAPPING")
 

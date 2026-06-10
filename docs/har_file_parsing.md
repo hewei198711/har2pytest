@@ -228,8 +228,8 @@ URL 模板: /mobile/returnOrder/{params['id']}
 ```python
 PATH_URLS = [
     "/mobile/returnOrder/{id}",
-    "/mgmt/order/{orderId}/detail",
-    "/appStore/product/{productId}/sku/{skuId}",
+    "/invt/order/{orderId}/detail",
+    "/order/product/{productId}/sku/{skuId}",
 ]
 ```
 
@@ -251,9 +251,9 @@ PATH_URLS = [
 HAR文件: api_request.har
 共发现 15 个API请求
 --------------------------------------------------------------------------------
- 1. GET     200   123.45ms /appStore/mobile/order/page
- 2. POST    200   456.78ms /mgmt/dataAdmin/export/handledDetail
- 3. GET     500    12.34ms /mobile/returnOrder/12345
+ 1. GET     200   123.45ms /mobile/order/page
+ 2. POST    200   456.78ms /order/handledDetail
+ 3. GET     500    12.34ms /mobile/return/12345
 ...
 --------------------------------------------------------------------------------
 统计: 成功 13 个, 失败 2 个, 平均响应时间 234.56ms

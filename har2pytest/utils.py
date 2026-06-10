@@ -51,32 +51,6 @@ def deduplicate_values(values: list[Any]) -> list[Any]:
     return unique_values
 
 
-async def format_python_file(filepath: str) -> None:
-    """异步使用 ruff 格式化 Python 文件。
-
-    先运行 ruff check --fix 修复代码问题，再运行 ruff format 格式化代码。
-
-    Args:
-        filepath: 要格式化的文件路径。
-    """
-    try:
-        proc1 = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "ruff", "check", "--fix", filepath,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        await proc1.communicate()
-
-        proc2 = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "ruff", "format", filepath,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        await proc2.communicate()
-
-        logger.info(f"使用ruff格式化文件: {filepath}")
-    except Exception as e:
-        logger.warning(f"格式化文件失败 {filepath}: {str(e)}")
-
-
 def get_output_dir(base_output_dir: str, task_id: str = None) -> str:
     """获取输出目录路径。
 

@@ -123,9 +123,6 @@ def main():
     # 如果没有指定命令，默认使用 api 命令
     if args.command is None:
         args.command = "api"
-        args.har_file = "api_request.har"
-        args.output = APIConfig.DEFAULT_API_DIR()
-        args.overwrite = False
 
     # 执行对应的命令
     if args.command == "api":
@@ -207,10 +204,6 @@ async def handle_testcase(args):
     target_url = args.url
     output_dir = args.output
     api_dir = args.api_dir
-
-    # 如果 task_id 以 test_ 开头，去掉前缀
-    if task_id and task_id.startswith("test_"):
-        task_id = task_id[5:]
 
     if pattern == "list_query":
         # 验证必填参数

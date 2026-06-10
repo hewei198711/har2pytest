@@ -27,7 +27,6 @@ def test_default_config():
         assert APIConfig.BASE_URLS() == ["https://uc-test.perfect99.com/api", "https://uc-uat.perfect99.com/api"]
         assert APIConfig.KILL_URLS() == ["aliyuncs.com"]
         assert APIConfig.DEFAULT_API_DIR() == "apis"
-        assert APIConfig.DEFAULT_TESTCASE_DIR() == "testcases"
         assert APIConfig.INVALID_PARAMS() == {"partnerKey", "sign", "timestamp", "nonce", "rnd"}
         assert APIConfig.HEADERS_TO_INCLUDE() == {
             "authorization": "f\"bearer {os.environ['access_token']}\"",

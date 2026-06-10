@@ -39,16 +39,25 @@ async def generate_api_files_from_har(
 
     logger.info(f"发现 {len(requests)} 个API请求")
 
-    generated_files = []
-    for request_info in requests:
+    if not api_generator:
+        return []
+
+    async def _process_one(request_info: dict) -> str | None:
+        """异步处理单个请求，生成 API 文件。"""
         try:
-            if api_generator:
-                filepath = await api_generator.generate_api_file(request_info, force_overwrite=force_overwrite)
-                if filepath:
-                    generated_files.append(filepath)
+            return await api_generator.generate_api_file(request_info, force_overwrite=force_overwrite)
         except Exception as e:
             logger.error(f"生成API文件失败: {str(e)}")
             logger.error(traceback.format_exc())
+            return None
+
+    # 并行处理所有 API 请求
+    generated_files = []
+    tasks = [_process_one(req) for req in requests]
+    for coro in asyncio.as_completed(tasks):
+        filepath = await coro
+        if filepath:
+            generated_files.append(filepath)
 
     # 批量格式化生成的 API 文件
     if generated_files and api_generator:

@@ -280,15 +280,13 @@ from apis.mall_center import (
 )
 
 @allure.severity(Severity.CRITICAL)
-@allure.feature('mall_center')
-@allure.story('/api/mall/order/submit')
+@allure.feature('order-application')
+@allure.story('/order/submit')
 class TestClass:
 
     def setup_class(self):
         self.headers = {
-            "channel": "pc",
-            "client": "op",
-            "authorization": f"bearer {os.environ['access_token']}",
+            "authorization": f"{os.environ['access_token']}",
         }
 
     @allure.title("商品下单流程")
@@ -341,16 +339,16 @@ class TestClass:
 
 ```mermaid
 flowchart TD
-    A[generate_batch_testcases<br/>api_files_list, task_id?] --> B[展开文件列表<br/>支持目录/文件混合输入]
-    B --> C[asyncio.gather<br/>并行处理所有 api_file]
-    C --> D{测试文件已存在?}
-    D -->|是| E[跳过 skipped++]
-    D -->|否| F{api_description<br/>包含"列表"?}
-    F -->|是| G[generate_parametrized_test_content<br/>har_file_path=None]
-    F -->|否| H[generate_scenario_test_content<br/>har_file_path=None]
-    G --> I[await write_test_file]
+    A["generate_batch_testcases<br/>api_files_list, task_id?"] --> B["展开文件列表<br/>支持目录/文件混合输入"]
+    B --> C["asyncio.gather<br/>并行处理所有 api_file"]
+    C --> D{"测试文件已存在?"}
+    D -->|是| E["跳过 skipped++"]
+    D -->|否| F{"api_description<br/>含 `列表` 关键字?"}
+    F -->|是| G["generate_parametrized_test_content<br/>har_file_path=None"]
+    F -->|否| H["generate_scenario_test_content<br/>har_file_path=None"]
+    G --> I["await write_test_file"]
     H --> I
-    I --> J[汇总结果]
+    I --> J["汇总结果"]
 ```
 
 ### 详细步骤

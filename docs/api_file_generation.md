@@ -6,7 +6,7 @@
 
 | 方式 | 命令 | 输入源 | 适用场景 | 依赖 |
 |------|------|--------|---------|------|
-| **HAR 文件生成** | `har2pytest api` (或 `har2pytest generate`) | `.har` 抓包文件 | 已有抓包数据，需要快速生成项目已有的 API 定义 | HAR 文件 + 网络配置 |
+| **HAR 文件生成** | `har2pytest api` | `.har` 抓包文件 | 已有抓包数据，需要快速生成项目已有的 API 定义 | HAR 文件 + 网络配置 |
 | **Swagger 文档生成** | `har2pytest swagger` | Swagger JSON URL | 后端提供了 Swagger 文档，需要生成完整的 API 定义 | Swagger 文档 URL |
 
 ---
@@ -21,7 +21,7 @@
 
 ```mermaid
 flowchart TD
-    A[har2pytest api api_request.har] --> B[APIGenerator.generate_api_files_from_har<br/>har_file_path]
+    A[har2pytest api api_request.har] --> B[HARGenerator.generate_api_files_from_har<br/>har_file_path]
     B --> C[HARParser.extract_requests_from_har<br/>过滤非API请求、无效参数]
     C --> D[asyncio.as_completed<br/>并行处理每个API请求]
     D --> E{文件已存在?}
@@ -75,13 +75,8 @@ flowchart TD
 
 | URL 前缀 | 服务包目录 |
 |---------|-----------|
-| `/appStore/...` | `mall_store_application` |
-| `/store/...` | `mall_center_store` |
-| `/mobile/...` | `mall_mobile_application` |
-| `/invt/...` | `mall_center_inventory` |
-| `/mgmt/...` | `mall_mgmt_application` |
-| `/xxl/...` | `basic_services` |
-| `/oss/...` | `oss_json` |
+| `/mobile/...` | `mobile_application` |
+| `/invt/...` | `inventory_application` |
 
 ##### Step 4: `_parse_request_info()`
 
@@ -158,10 +153,10 @@ headers = {
 }
 
 
-def _appStore_mobile_order_page(params=params, headers=headers):
+def _mobile_order_list(params=params, headers=headers):
     """
     订单分页查询
-    /appStore/mobile/order/page
+    /mobile/order/list
 
     参数说明:
     - keyword: 关键字搜索
@@ -169,7 +164,7 @@ def _appStore_mobile_order_page(params=params, headers=headers):
     - pageSize: 页大小
     """
 
-    url = "/appStore/mobile/order/page"
+    url = "/mobile/order/list"
     with client.get(url=url, params=params, headers=headers) as r:
         return r
 ```
@@ -193,13 +188,13 @@ headers = {
 }
 
 
-def _mgmt_dataAdmin_export_handledDetail(data=data, headers=headers):
+def _order_export_handledDetail(data=data, headers=headers):
     """
-    经办人明细导出
-    /mgmt/dataAdmin/export/handledDetail
+    明细导出
+    /order/export/handledDetail
     """
 
-    url = "/mgmt/dataAdmin/export/handledDetail"
+    url = "/order/export/handledDetail"
     with client.post(url=url, json=data, headers=headers) as r:
         return r
 ```
@@ -219,13 +214,13 @@ headers = {
 }
 
 
-def _mobile_returnOrder_id(params=params, headers=headers):
+def _mobile_order_id(params=params, headers=headers):
     """
-    退换货单详情
-    /mobile/returnOrder/{id}
+    订单详情
+    /mobile/order/{id}
     """
 
-    url = f"/mobile/returnOrder/{params['id']}"
+    url = f"/mobile/order/{params['id']}"
     with client.get(url=url, params=params, headers=headers) as r:
         return r
 ```
@@ -249,9 +244,10 @@ flowchart TD
     E --> F{specific_path 指定?}
     F -->|是| G[精确匹配指定路径]
     F -->|否| H[处理所有路径]
-    G --> I[/ 或 H --> I]
-    I --> J[遍历每个 HTTP 方法<br/>GET/POST/PUT/DELETE]
-    J --> K[_extract_params_from_swagger<br/>提取 query、body、path 参数]
+    G --> I
+    H --> I
+    I[遍历每个 HTTP 方法<br/>GET/POST/PUT/DELETE]
+    I --> K[_extract_params_from_swagger<br/>提取 query、body、path 参数]
     K --> L[asyncio.as_completed<br/>并行生成 API 文件]
     L --> M{文件已存在?}
     M -->|是 & 非强制覆盖| N[跳过]
@@ -286,7 +282,7 @@ flowchart TD
  └─ 所有文件生成完毕后 → await format_directory(output_dir) 一次性 ruff 格式化
 ```
 
-> **异步优化说明**：Swagger 文档获取使用 `httpx.AsyncClient` 异步 HTTP 请求；多个 API 文件通过 `asyncio.as_completed` 并发生成，文件写入异步执行。接口越多，并行优势越明显。生成完毕后对整个输出目录进行一次性 ruff 格式化，避免逐个文件的格式化开销。
+> **异步优化说明**：Swagger 文档获取使用 `httpx.AsyncClient` 异步 HTTP 请求；多个 API 文件通过 `asyncio.as_completed` 并发生成，文件写入异步执行。接口越多，并行优势越明显。生成完毕后对整个输出目录进行一次性 ruff 格式化。
 
 #### Step 2: `_extract_params_from_swagger()`
 
@@ -315,10 +311,10 @@ flowchart TD
 
 #### Step 3: 生成 API 文件
 
-与 HAR 方式共用 `generate_file_content()` 方法，但生成的 API 文件包含更多元信息：
+Swagger 方式额外传入 `swagger_info` 参数，HAR 方式在 `generate_api_file()` 内部也会自动查询 Swagger 填充元信息，最终效果一致：
 
-- 接口描述（summary）自动填充，而非 `TODO: 添加接口描述`
-- 参数说明（description）自动填充，而非 `TODO: 添加参数说明`
+- 接口描述（summary）自动填充
+- 参数说明（description）自动填充到注释中
 - 函数注释中包含完整的参数说明列表
 
 ### 生成示例
@@ -364,12 +360,11 @@ def _mgmt_user_list(params=params, headers=headers):
 |------|-------------|-----------------|
 | **数据来源** | 浏览器/工具抓包的 `.har` 文件 | 后端提供的 Swagger JSON 文档 |
 | **参数值** | 实际请求中的真实值 | 类型的默认值（0、""、False） |
-| **接口描述** | `TODO: 添加接口描述`（需后续补充） | 自动填充 summary |
-| **参数说明** | `TODO: 添加参数说明`（需后续补充） | 自动填充 description |
+| **接口描述** | 自动填充 summary | 自动填充 summary |
+| **参数说明** | 自动填充 description | 自动填充 description |
 | **请求类型覆盖** | 只包含抓包中实际出现的接口 | 文档中定义的所有接口 |
 | **路径参数** | 通过 URL 模式匹配识别 | 通过 in: path 精确识别 |
 | **文件上传** | 自动检测 multipart/form-data | 通过参数类型检测 |
-| **网络依赖** | 不需要网络 | 需要访问 Swagger 文档 URL |
 | **建议使用场景** | 已有抓包数据快速生成 | 后端文档完备时批量生成 |
 
 ---
@@ -393,19 +388,19 @@ har2pytest api api_request.har --output apis --overwrite
 
 ```bash
 # 基本用法
-har2pytest swagger https://uc-test.perfect99.com/sw/mall-mgmt-application/v2/api-docs
+har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs
 
 # 指定输出目录
-har2pytest swagger https://uc-test.perfect99.com/sw/mall-mgmt-application/v2/api-docs --output apis
+har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --output apis
 
 # 强制覆盖已存在的文件
-har2pytest swagger https://uc-test.perfect99.com/sw/mall-mgmt-application/v2/api-docs --overwrite
+har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --overwrite
 
 # 只生成指定路径的 API 文件
-har2pytest swagger https://uc-test.perfect99.com/sw/mall-mgmt-application/v2/api-docs --path /mgmt/user/list
+har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --path /mgmt/user/list
 
 # 组合使用
-har2pytest swagger https://uc-test.perfect99.com/sw/mall-mgmt-application/v2/api-docs --output apis --overwrite --path /mgmt/user/list
+har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --output apis --overwrite --path /mgmt/user/list
 ```
 
 ---
@@ -416,22 +411,18 @@ har2pytest swagger https://uc-test.perfect99.com/sw/mall-mgmt-application/v2/api
 
 ```bash
 # 1. 从 Swagger 文档生成 API 文件（获得完整的接口列表和参数说明）
-har2pytest swagger https://uc-test.perfect99.com/sw/mall-mgmt-application/v2/api-docs --output apis
+har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --output apis
 
 # 2. 从 HAR 文件补充缺失的接口（覆盖 Swagger 中未定义的接口）
 har2pytest api api_request.har --output apis
 
-# 3. 更新 API 文档信息
-har2pytest update apis
-
-# 4. 生成测试用例
+# 3. 生成测试用例
 har2pytest testcase list_query test_4291 api_request.har
 ```
 
 ### 注意事项
 
-1. **优先使用 Swagger 文档生成**：参数类型准确、自带描述说明、减少手动补充工作
+1. **优先使用 Swagger 文档生成**：参数类型准确、自带描述说明
 2. **HAR 文件补充**：对于 Swagger 文档中未覆盖的接口，通过 HAR 文件生成然后手动补充参数说明
 3. **路径参数处理**：路径参数接口会自动生成 `f-string` 格式的 URL，无需手动替换
 4. **Swagger 文档缓存**：获取到的 Swagger 文档会缓存，避免重复请求
-5. **生成后更新**：使用 `har2pytest update` 命令补充已生成的 API 文件的描述和参数说明
