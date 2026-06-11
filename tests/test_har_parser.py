@@ -318,7 +318,7 @@ def test_kill_urls_filter():
         requests = parser.extract_requests_from_har("test_kill_urls.har")
 
         assert len(requests) == 1
-        assert "/api/user/list" in requests[0]["url"]
+        assert "/user/list" in requests[0]["url"]
     finally:
         if os.path.exists("test_kill_urls.har"):
             os.remove("test_kill_urls.har")

@@ -1,56 +1,23 @@
 {
-  "BASE_URLS": [
-    "https://uc-test.perfect99.com/api",
-    "https://uc-uat.perfect99.com/api"
-  ],
-  "KILL_URLS": [
-    "aliyuncs.com"
-  ],
+  "BASE_URLS": ["https://example.com/api"],
+  "KILL_URLS": ["aliyuncs.com"],
   "SERVICE_MAPPING": {
-    "appstore": "mall_store_application",
-    "store": "mall_center_store",
-    "mobile": "mall_mobile_application",
-    "member": "mall_center_member",
-    "invt": "mall_center_inventory",
-    "mgmt": "mall_mgmt_application",
-    "seckill": "mall_center_seckill",
-    "user": "mall_center_user",
-    "months": "settle_job",
-    "xxl": "basic_services",
-    "storage": "basic_services",
-    "oss": "oss_json"
+    "api": "example_service"
   },
   "SWAGGER_DOC_URLS": {
-    "mall_mgmt_application": "https://uc-test.perfect99.com/sw/mall-mgmt-application",
-    "mall_center_inventory": "https://uc-dev.perfect99.com/sw/mall-center-inventory",
-    "mall_center_store": "https://uc-dev.perfect99.com/sw/mall-center-store",
-    "mall_store_application": "https://uc-dev.perfect99.com/sw/mall-store-application/appStore",
-    "mall_mobile_application": "https://uc-test.perfect99.com/sw/mall-mobile-application",
-    "mall-center-seckill": "https://uc-dev.perfect99.com/sw/mall-center-seckill",
-    "settle_job": "https://uc-dev.perfect99.com/sw/settle-job",
-    "mall_center_user": "https://uc-dev.perfect99.com/sw/mall-center-user",
-    "mall_center_member": "https://uc-test.perfect99.com/sw/mall-center-member"
+    "example_service": "https://example.com/swagger"
   },
-  "INVALID_PARAMS": [
-    "sign",
-    "nonce",
-    "rnd",
-    "partnerKey",
-    "timestamp"
-  ],
+  "INVALID_PARAMS": ["rnd", "timestamp", "_t", "version", "sign"],
   "HEADERS_TO_INCLUDE": {
-    "authorization": "f\"bearer {os.environ['access_token']}\"",
-    "channel": "pc",
-    "content-type": "application/json;charset=UTF-8",
-    "client": "op"
+    "content-type": "application/json",
+    "authorization": "bearer token"
   },
   "REQUIRED_HEADERS": {
-    "authorization": "f\"bearer {os.environ['access_token']}\""
+    "content-type": "application/json",
+    "content-length": "100",
+    "origin": "https://example.com"
   },
-  "PAGINATION_PARAMS": [
-    "pageNum",
-    "pageSize"
-  ],
+  "PAGINATION_PARAMS": ["pageNum", "pageSize"],
   "DEFAULT_API_DIR": "apis",
   "TESTCASE_DIR": "testcases"
 }

@@ -1,17 +1,17 @@
 
-__pycache__/*
-*.pyc
-.python-version
-venv/*
-.idea/*
-.vscode
-=======
 __pycache__
 *.pyc
 .python-version
 .venv
+venv
 .idea
+.vscode
 *.vscode
 allure-results/*
 reports
 *log
+dist/
+build/
+*.egg-info/
+.coverage
+har2pytest_config.json
