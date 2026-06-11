@@ -1,0 +1,43 @@
+{
+  "BASE_URLS": [
+    "https://taobao.com/api"
+  ],
+  "KILL_URLS": [
+    "aliyuncs.com"
+  ],
+  "PATH_URLS": [
+    "/mobile/dashbord/{usrId}",
+    "/mobile/{usrId}/{systemId}",
+    "/order/{serialNo}",
+    "/order/{cardNo}",
+    "/order/by/{cardNo}/{systemId}"
+  ],
+  "SERVICE_MAPPING": {
+    "mobile": "mobile_application",
+    "member": "order_application"
+  },
+  "SWAGGER_DOC_URLS": {
+    "mobile_application": "https://taobao.com/sw/mobile-application",
+    "order_application": "https://taobao.com/sw/order-application"
+  },
+  "INVALID_PARAMS": [
+    "sign",
+    "nonce",
+    "rnd",
+    "partnerKey",
+    "timestamp"
+  ],
+  "HEADERS_TO_INCLUDE": {
+    "authorization": "f\"bearer {os.environ['access_token']}\"",
+    "content-type": "application/json;charset=UTF-8"
+  },
+  "REQUIRED_HEADERS": {
+    "authorization": "f\"bearer {os.environ['access_token']}\""
+  },
+  "PAGINATION_PARAMS": [
+    "pageNum",
+    "pageSize"
+  ],
+  "DEFAULT_API_DIR": "apis",
+  "TESTCASE_DIR": "testcases"
+}
