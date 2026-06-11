@@ -1589,13 +1589,7 @@ def test_normalize_params_with_state_param():
         {"status": "1", "pageNum": "1", "pageSize": "10"},
     ]
 
-    param_remarks = {
-        "status": "状态 -1：已驳回 0：待审核（默认）1：审核通过",
-        "pageNum": "页码",
-        "pageSize": "每页数量",
-    }
-
-    result = generator.normalize_params_for_parametrization(requests_params, param_remarks)
+    result = generator.normalize_params_for_parametrization(requests_params)
 
     # parametrized_list 模式使用 HAR 原始值，不展开状态枚举
     assert len(result) == 1

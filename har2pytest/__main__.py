@@ -30,17 +30,20 @@ def main():
   # 从HAR文件生成API接口文件
   har2pytest api api_request.har --output apis
 
+  # 从Swagger文档生成API接口文件
+  har2pytest swagger https://petstore.swagger.io/v2/api-docs
+
   # 查看HAR文件摘要
   har2pytest summary api_request.har
 
-  # 更新API文档信息
-  har2pytest update apis
-
-  # 生成查询类参数化测试用例
+  # 生成参数化测试用例
   har2pytest testcase api_request.har --pattern list_query --mark test_4291
 
   # 生成复杂场景测试用例
   har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
+
+  # 批量生成测试用例
+  har2pytest testcase --pattern batch --api-files apis/mall_mobile_application --mark test_4295
 """,
     )
 

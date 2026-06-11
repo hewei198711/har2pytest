@@ -55,7 +55,6 @@ har2pytest summary api_request.har
 | [HAR 文件解析](docs/har_file_parsing.md) | HAR 解析规则与参数过滤 |
 | [Swagger 文档解析](docs/swagger_document_parsing.md) | Swagger 文档获取与参数提取 |
 | [测试用例生成模式](docs/testcase_generation_modes.md) | list_query / complex_scenario / batch 三种模式详解 |
-| [代码优化报告](docs/code_optimization.md) | 项目重构与优化记录 |
 
 ## 配置
 

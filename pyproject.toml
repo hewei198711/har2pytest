@@ -7,7 +7,7 @@ authors = [
 ]
 license = "MIT"
 readme = "README.md"
-keywords = ["har", "swagger", "pytest", "allure",", "api", "testcase"]
+keywords = ["har", "swagger", "pytest", "allure", "api", "testcase"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",

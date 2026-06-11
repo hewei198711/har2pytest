@@ -275,7 +275,7 @@ class TestCaseGenerator:
 
         return param_items
 
-    def normalize_params_for_parametrization(self, requests_params: list[dict[str, Any]], param_remarks: dict = None) -> list[dict]:
+    def normalize_params_for_parametrization(self, requests_params: list[dict[str, Any]]) -> list[dict]:
         """标准化参数化数据结构。
 
         将多个请求的参数整理为适合 pytest 参数化的格式，支持单参数和组合参数。
@@ -607,7 +607,7 @@ class TestCaseGenerator:
             all_params, all_requests_params, request_method = self._extract_requests_for_url(requests, api_info["url"])
 
             if all_requests_params:
-                param_items = self.normalize_params_for_parametrization(all_requests_params, api_info["param_remarks"])
+                param_items = self.normalize_params_for_parametrization(all_requests_params)
 
         # 只有batch模式（没有HAR文件）才从API文件读取参数
         if not param_items and not has_har:

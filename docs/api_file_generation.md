@@ -52,13 +52,11 @@ flowchart TD
  └─ 异步并行处理（asyncio.as_completed）:
  │     每个 API 请求并发执行 generate_api_file()
  │     文件写入通过 await write_test_file() 异步执行
- │     适合大量接口，充分利用 I/O 等待时间
  │
  └─ 所有请求处理完毕后 → await format_directory(output_dir) 一次性 ruff 格式化
- │     避免逐个文件格式化，节省开销
 ```
 
-> **异步并行说明**：所有 API 文件通过 `asyncio.as_completed` 并发生成，文件写入异步执行，不阻塞事件循环。生成完毕后对整个输出目录进行一次性 ruff 格式化，接口越多，优化效果越明显。
+> **异步并行说明**：所有 API 文件通过 `asyncio.as_completed` 并发生成，文件写入异步执行。生成完毕后对整个输出目录进行一次性 ruff 格式化。
 
 #### Step 2: `check_api_exists()`
 
@@ -262,7 +260,7 @@ flowchart TD
 ```
 输入: swagger_url, force_overwrite=False, specific_path=None
  └─ await get_swagger_doc() → 异步获取 Swagger 文档数据（含缓存）
- │     httpx.AsyncClient 发送 HTTP 请求，不阻塞事件循环
+ │     httpx.AsyncClient 发送 HTTP 请求
  │
  └─ 解析 basePath + paths:
  │     basePath: /api
@@ -282,7 +280,7 @@ flowchart TD
  └─ 所有文件生成完毕后 → await format_directory(output_dir) 一次性 ruff 格式化
 ```
 
-> **异步优化说明**：Swagger 文档获取使用 `httpx.AsyncClient` 异步 HTTP 请求；多个 API 文件通过 `asyncio.as_completed` 并发生成，文件写入异步执行。接口越多，并行优势越明显。生成完毕后对整个输出目录进行一次性 ruff 格式化。
+> **异步并行说明**：Swagger 文档获取使用 `httpx.AsyncClient` 异步 HTTP 请求；多个 API 文件通过 `asyncio.as_completed` 并发生成，文件写入异步执行。生成完毕后对整个输出目录进行一次性 ruff 格式化。
 
 #### Step 2: `_extract_params_from_swagger()`
 
