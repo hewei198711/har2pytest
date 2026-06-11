@@ -24,15 +24,13 @@ def test_default_config():
         APIConfig._load_config()
 
         # 测试默认配置值
-        assert APIConfig.BASE_URLS() == ["https://uc-test.perfect99.com/api", "https://uc-uat.perfect99.com/api"]
+        assert APIConfig.BASE_URLS() == ["https://taobao.com/api"]
         assert APIConfig.KILL_URLS() == ["aliyuncs.com"]
         assert APIConfig.DEFAULT_API_DIR() == "apis"
         assert APIConfig.INVALID_PARAMS() == {"partnerKey", "sign", "timestamp", "nonce", "rnd"}
         assert APIConfig.HEADERS_TO_INCLUDE() == {
             "authorization": "f\"bearer {os.environ['access_token']}\"",
-            "channel": "pc",
-            "content-type": "application/json;charset=UTF-8",
-            "client": "op",
+            "content-type": "application/json;charset=UTF-8"
         }
         assert APIConfig.REQUIRED_HEADERS() == {"authorization": "f\"bearer {os.environ['access_token']}\""}
     finally:
