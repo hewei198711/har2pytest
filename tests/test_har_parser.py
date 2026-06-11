@@ -21,7 +21,7 @@ def test_extract_requests_from_har():
 
     # 临时设置 BASE_URLS 配置
     original_base_urls = APIConfig._config.get("BASE_URLS", [])
-    APIConfig._config["BASE_URLS"] = ["https://uc-test.perfect99.com/api"]
+    APIConfig._config["BASE_URLS"] = ["https://taobao.com/api"]
 
     # 创建测试HAR文件
     test_har = {
@@ -30,7 +30,7 @@ def test_extract_requests_from_har():
                 {
                     "_resourceType": "xhr",
                     "request": {
-                        "url": "https://uc-test.perfect99.com/api/user/login",
+                        "url": "https://taobao.com/api/user/login",
                         "method": "POST",
                         "headers": [{"name": "Content-Type", "value": "application/json"}],
                         "postData": {
