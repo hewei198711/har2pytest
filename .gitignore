@@ -8,6 +8,7 @@ venv
 .vscode
 *.vscode
 allure-results/*
+coverage_report/
 reports
 *log
 dist/
