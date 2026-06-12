@@ -5,7 +5,7 @@
 ## 安装
 
 ```bash
-pip install -e .
+pip install har2pytest
 ```
 
 验证安装：
