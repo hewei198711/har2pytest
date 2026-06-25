@@ -14,11 +14,14 @@ from .har_parser import HARParser
 from .logger import get_logger, logger
 from .swagger_handler import SwaggerHandler
 from .testcase_generator import TestCaseGenerator
+from .url_matcher import URLMatcher
 from .utils import (
+    format_directory,
     format_headers_for_python,
     format_parameter_value,
     format_params_for_python,
     parse_api_file,
+    write_test_file,
 )
 
 __all__ = [
@@ -27,10 +30,13 @@ __all__ = [
     "APIGenerator",
     "TestCaseGenerator",
     "SwaggerHandler",
+    "URLMatcher",
     "get_logger",
     "logger",
+    "format_directory",
     "parse_api_file",
     "format_parameter_value",
     "format_headers_for_python",
     "format_params_for_python",
+    "write_test_file",
 ]

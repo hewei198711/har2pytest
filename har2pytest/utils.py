@@ -44,10 +44,12 @@ def deduplicate_values(values: list[Any]) -> list[Any]:
         list[Any]: 去重后的列表。
     """
     unique_values = []
+    seen = set()
     for value in values:
-        key = tuple(value) if isinstance(value, list) else value
-        if key not in unique_values:
-            unique_values.append(key)
+        key = json.dumps(value, sort_keys=True, ensure_ascii=False) if isinstance(value, (list, dict)) else value
+        if key not in seen:
+            seen.add(key)
+            unique_values.append(value)
     return unique_values
 
 
@@ -177,15 +179,45 @@ def parse_api_file(filepath: str) -> dict:
 
         # 提取参数值和备注（params、data 和 files）
         for param_type in ["params", "data", "files"]:
-            data_match = re.search(rf"{param_type}\s*=\s*{{.*?}}", content, re.DOTALL)
-            if data_match:
-                # 提取整个字典块（从 { 到 }）
-                dict_str = data_match.group(0)
-                
-                # 先提取参数备注
-                param_matches = re.findall(r'"(\w+)"\s*:\s*([^#]+)\s*#\s*(.+?)\n', dict_str)
-                for param_name, _, remark in param_matches:
-                    result["param_remarks"][param_name] = remark.strip()
+            # 使用括号计数法正确提取嵌套字典（避免正则 {.*?} 在嵌套结构时截断）
+            param_start = content.find(f"{param_type} = {{")
+            if param_start != -1:
+                brace_start = content.find("{", param_start)
+                if brace_start != -1:
+                    brace_count = 1
+                    brace_end = brace_start + 1
+                    while brace_count > 0 and brace_end < len(content):
+                        if content[brace_end] == "{":
+                            brace_count += 1
+                        elif content[brace_end] == "}":
+                            brace_count -= 1
+                        brace_end += 1
+                    dict_str = content[param_start:brace_end]
+                else:
+                    continue
+
+                # 提取参数备注（支持嵌套 dict，使用 dotted key 如 "payDTO.accountName"）
+                lines = dict_str.split("\n")
+                parent_keys = []
+                for line in lines:
+                    stripped = line.strip()
+                    # 检测进入嵌套 dict： "key": {
+                    enter_match = re.match(r'"(\w+)"\s*:\s*\{', stripped)
+                    if enter_match:
+                        parent_keys.append(enter_match.group(1))
+                        continue
+                    # 检测退出嵌套 dict： } 或 },
+                    if re.match(r'^\}\s*,?\s*$', stripped):
+                        if parent_keys:
+                            parent_keys.pop()
+                        continue
+                    # 匹配 key-value-comment 格式
+                    comment_match = re.match(r'"(\w+)"\s*:\s*[^#]*#\s*(.+)$', stripped)
+                    if comment_match:
+                        key_name = comment_match.group(1)
+                        remark = comment_match.group(2).strip()
+                        full_key = ".".join(parent_keys + [key_name]) if parent_keys else key_name
+                        result["param_remarks"][full_key] = remark
                 
                 # 移除行尾注释后解析字典值
                 try:
@@ -261,17 +293,20 @@ def format_params_for_python(
     comments: dict = None,
     inline: bool = False,
     indent: int = 4,
+    key_prefix: str = "",
 ) -> str:
     """统一的参数格式化函数。
 
     将参数字典格式化为 Python 代码字符串，支持添加注释和内联格式。
+    递归处理嵌套字典，使用 dotted key 查找注释。
 
     Args:
         params: 参数字典。
         value_formatter: 值格式化函数，默认使用 repr。
-        comments: 参数注释字典，键为参数名，值为注释内容。
+        comments: 参数注释字典，键为参数名（支持 dotted key 如 "payDTO.accountName"），值为注释内容。
         inline: 是否使用内联格式（单行）。
         indent: 缩进空格数，默认为 4。
+        key_prefix: 嵌套字典的 key 前缀（用于 dotted key 查找）。
 
     Returns:
         str: 格式化后的 Python 代码字符串。
@@ -288,12 +323,23 @@ def format_params_for_python(
     indent_str = " " * indent
     items = []
     for key, value in params.items():
-        formatted_value = value_formatter(value)
-        comment = comments.get(key, "")
+        full_key = f"{key_prefix}.{key}" if key_prefix else key
+        if isinstance(value, dict) and value:
+            # 递归处理嵌套字典，传递 key_prefix 用于 dotted key 查找
+            formatted_value = format_params_for_python(
+                value, value_formatter, comments,
+                inline=False, indent=indent + 4, key_prefix=full_key,
+            )
+        else:
+            formatted_value = value_formatter(value)
+        comment = comments.get(full_key, "")
         if comment:
             # 将注释中的换行符替换为空格，避免语法错误
             safe_comment = comment.replace('\n', ' ').replace('\r', ' ')
             items.append(f'{indent_str}"{key}": {formatted_value},  # {safe_comment}')
+        elif comments:
+            # 有 comments 字典但无此 key 的描述，添加回退注释
+            items.append(f'{indent_str}"{key}": {formatted_value},  # TODO: 添加参数说明')
         else:
             items.append(f'{indent_str}"{key}": {formatted_value},')
 

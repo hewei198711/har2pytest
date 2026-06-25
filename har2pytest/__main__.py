@@ -20,31 +20,31 @@ def main():
     """
     # 初始化配置（通过 get_config 触发，会自动缓存）
     APIConfig.get_config("BASE_URLS")
-
+    
     # 创建主解析器
     parser = argparse.ArgumentParser(
         prog="har2pytest",
         description="har2pytest - HAR文件转pytest测试用例工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""示例用法:
-  # 从HAR文件生成API接口文件
-  har2pytest api api_request.har --output apis
+            # 从HAR文件生成API接口文件
+            har2pytest api api_request.har --output apis
 
-  # 从Swagger文档生成API接口文件
-  har2pytest swagger https://petstore.swagger.io/v2/api-docs
+            # 从Swagger文档生成API接口文件
+            har2pytest swagger https://petstore.swagger.io/v2/api-docs
 
-  # 查看HAR文件摘要
-  har2pytest summary api_request.har
+            # 查看HAR文件摘要
+            har2pytest summary api_request.har
 
-  # 生成参数化测试用例
-  har2pytest testcase api_request.har --pattern list_query --mark test_4291
+            # 生成参数化测试用例
+            har2pytest testcase api_request.har --pattern list_query --mark test_4291
 
-  # 生成复杂场景测试用例
-  har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
+            # 生成复杂场景测试用例
+            har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
 
-  # 批量生成测试用例
-  har2pytest testcase --pattern batch --api-files apis/mall_mobile_application --mark test_4295
-""",
+            # 批量生成测试用例
+            har2pytest testcase --pattern batch --api-files apis/mall_mobile_application --mark test_4295
+        """,
     )
 
     # 创建子命令解析器
@@ -54,7 +54,7 @@ def main():
     api_parser = subparsers.add_parser("api", help="从HAR文件生成API接口文件", description="从HAR文件生成API接口文件")
     api_parser.add_argument("har_file", nargs="?", default="api_request.har", help="HAR文件路径")
     api_parser.add_argument("--output", "-o", default=APIConfig.DEFAULT_API_DIR(), help="输出目录")
-    api_parser.add_argument("--overwrite", "-f", action="store_true", help="强制覆盖现有文件")
+    api_parser.add_argument("--overwrite", action="store_true", help="强制覆盖现有文件")
 
     # summary 子命令
     sum_parser = subparsers.add_parser(
@@ -69,18 +69,18 @@ def main():
         description="从HAR文件生成pytest测试用例",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""示例用法:
-  # 生成查询类参数化测试用例（不传mark）
-  har2pytest testcase api_request.har --pattern list_query
+        # 生成查询类参数化测试用例（不传mark）
+        har2pytest testcase api_request.har --pattern list_query
 
-  # 生成查询类参数化测试用例（传mark）
-  har2pytest testcase api_request.har --pattern list_query --mark test_4291
+        # 生成查询类参数化测试用例（传mark）
+        har2pytest testcase api_request.har --pattern list_query --mark test_4291
 
-  # 生成复杂场景测试用例（不传mark）
-  har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login
+        # 生成复杂场景测试用例（不传mark）
+        har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login
 
-  # 生成复杂场景测试用例（传mark）
-  har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
-""",
+        # 生成复杂场景测试用例（传mark）
+        har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
+        """,
     )
     tc_parser.add_argument("har_file", nargs="?", default=None, help="HAR文件路径（batch模式不需要）")
     tc_parser.add_argument(
@@ -102,22 +102,22 @@ def main():
         description="从Swagger文档生成API接口文件",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""示例用法:
-  # 从Swagger文档生成所有API文件
-  har2pytest swagger https://petstore.swagger.io/v2/api-docs
+        # 从Swagger文档生成所有API文件
+        har2pytest swagger https://petstore.swagger.io/v2/api-docs
 
-  # 从Swagger文档生成API文件，指定输出目录
-  har2pytest swagger https://petstore.swagger.io/v2/api-docs --output apis
+        # 从Swagger文档生成API文件，指定输出目录
+        har2pytest swagger https://petstore.swagger.io/v2/api-docs --output apis
 
-  # 从Swagger文档生成API文件，强制覆盖
-  har2pytest swagger https://petstore.swagger.io/v2/api-docs --overwrite
+        # 从Swagger文档生成API文件，强制覆盖
+        har2pytest swagger https://petstore.swagger.io/v2/api-docs --overwrite
 
-  # 从Swagger文档生成指定路径的API文件
-  har2pytest swagger https://petstore.swagger.io/v2/api-docs --path /pet/{petId}
-""",
+        # 从Swagger文档生成指定路径的API文件
+        har2pytest swagger https://petstore.swagger.io/v2/api-docs --path /pet/{petId}
+        """,
     )
     swagger_parser.add_argument("swagger_url", help="Swagger文档URL")
     swagger_parser.add_argument("--output", "-o", default=APIConfig.DEFAULT_API_DIR(), help="输出目录")
-    swagger_parser.add_argument("--overwrite", "-f", action="store_true", help="强制覆盖现有文件")
+    swagger_parser.add_argument("--overwrite", action="store_true", help="强制覆盖现有文件")
     swagger_parser.add_argument("--path", "-p", help="只生成指定的API路径（如 /pet/{petId}）")
 
     # 解析参数
@@ -144,7 +144,7 @@ def main():
 
 
 async def handle_api(args):
-    """处理 api 命令"""
+    """处理 api 命令"""  
     har_file = args.har_file
     output_dir = args.output
     force_overwrite = args.overwrite
@@ -225,7 +225,7 @@ async def handle_testcase(args):
         logger.info("-" * 50)
 
         generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
-        test_files = generator.generate_parametrized_list_testcases(har_file, task_id, target_url)
+        test_files = await generator.generate_parametrized_list_testcases(har_file, task_id, target_url)
 
         logger.info("-" * 50)
         if test_files:
@@ -252,7 +252,7 @@ async def handle_testcase(args):
         logger.info("-" * 50)
 
         generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
-        test_file = generator.generate_scenario_testcase(har_file, target_url, task_id)
+        test_file = await generator.generate_scenario_testcase(har_file, target_url, task_id)
 
         logger.info("-" * 50)
         if test_file:

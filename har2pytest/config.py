@@ -64,8 +64,8 @@ class APIConfig:
             # 默认配置文件路径
             config_file = os.path.join(os.getcwd(), "har2pytest_config.json")
 
-        logger.info(f"配置文件路径: {config_file}")
-        logger.info(f"配置文件是否存在: {os.path.exists(config_file)}")
+        logger.debug(f"配置文件路径: {config_file}")
+        logger.debug(f"配置文件是否存在: {os.path.exists(config_file)}")
 
         # 尝试从配置文件读取
         if os.path.exists(config_file):
@@ -74,7 +74,7 @@ class APIConfig:
                 with open(config_file, encoding="utf-8") as f:
                     user_config = json.load(f)
                     config.update(user_config)
-                    logger.info(f"成功加载配置文件，DEFAULT_API_DIR: {config.get('DEFAULT_API_DIR')}")
+                    logger.debug(f"成功加载配置文件，DEFAULT_API_DIR: {config.get('DEFAULT_API_DIR')}")
             except Exception as e:
                 # 配置文件读取失败，使用默认配置
                 config_file_exists = False
@@ -120,6 +120,10 @@ class APIConfig:
                 + "\n\n请参考配置文件示例：har2pytest_config.json.example"
             )
 
+        # 当配置文件不存在时，提示用户创建配置文件
+        if not config_file_exists:
+            cls._warn_missing_config()
+
         return config, config_file_exists
 
     @classmethod
@@ -134,19 +138,21 @@ class APIConfig:
 
         cls._config_warned = True
         logger.warning("=" * 60)
-        logger.warning("未找到配置文件 har2pytest_config.json，请创建并配置")
+        logger.warning("配置文件 har2pytest_config.json 不存在，使用默认配置")
         logger.warning("=" * 60)
+        logger.warning("如需自定义配置，请创建 har2pytest_config.json 文件")
         logger.warning("配置示例:")
         logger.warning("""{
     "BASE_URLS": ["https://api.example.com"],
     "SERVICE_MAPPING": {
-        "mobile": "mall_mobile_application",
-        "user": "mall_center_user"
+        "mobile": "mobile_application",
+        "user": "center_application"
     },
     "DEFAULT_API_DIR": "apis",
     "PATH_URLS": ["/user/{id}/info"],
     "SWAGGER_DOC_URLS": {
-        "mall-mobile-application": "https://api.example.com/swagger/mall-mobile-application"
+        "mobile_application": "https://api.example.com/swagger/mobile-application",
+        "center_application": "https://api.example.com/swagger/center-application"
     },
     "INVALID_PARAMS": ["sign", "token"]
 }""")
@@ -166,8 +172,6 @@ class APIConfig:
             cls._config, cls._config_file_exists = cls._load_config()
 
         value = cls._config.get(key)
-        if value is None and not cls._config_file_exists:
-            cls._warn_missing_config()
         return value
 
     @classmethod
@@ -252,5 +256,4 @@ class APIConfig:
         return cls.DEFAULT_API_DIR()
 
 
-# 导出配置实例
-config = APIConfig()
+

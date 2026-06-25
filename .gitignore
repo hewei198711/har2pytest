@@ -15,4 +15,11 @@ dist/
 build/
 *.egg-info/
 .coverage
+
 har2pytest_config.json
+apis/
+api/
+testcases/
+util/
+har_main.py
+*.har

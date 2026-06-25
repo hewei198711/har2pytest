@@ -4,15 +4,15 @@
 """
 
 import asyncio
-import json
+import time
 from typing import TYPE_CHECKING, Any, Optional
 
 import httpx
 
 from .config import APIConfig
 from .logger import logger
-from .utils import format_directory as _format_directory
 from .url_matcher import URLMatcher
+from .utils import format_directory as _format_directory
 
 # 仅在类型检查时导入，运行时不会执行
 if TYPE_CHECKING:
@@ -68,13 +68,13 @@ class SwaggerHandler:
         """
         # 1. 移除 URL fragment（# 及其后面的部分）
         url = url.split("#")[0]
-        # 2. 移除 doc.html 后缀
-        if url.endswith("doc.html"):
-            url = url[: -len("doc.html")]
-        # 3. 移除 index.html 后缀
-        if url.endswith("index.html"):
-            url = url[: -len("index.html")]
-        # 4. 移除末尾的 /
+        # 2. 移除 doc.html、index.html、swagger-ui.html 后缀
+        suffixes = ["doc.html", "index.html", "swagger-ui.html"]
+        for suffix in suffixes:
+            if url.endswith(suffix):
+                url = url[: -len(suffix)]
+                break
+        # 3. 移除末尾的 /
         url = url.rstrip("/")
         return url
 
@@ -178,39 +178,28 @@ class SwaggerHandler:
             return api_info
 
         method_lower = method.lower()
+        if method_lower in path_data:
+            method_data = path_data[method_lower]
 
-        # 提高匹配的容错性，先精准匹配method_lower，再尝试get, post, put, delete
-        for http_method in [method_lower, "get", "post", "put", "delete"]:
-            if http_method in path_data:
-                method_data = path_data[http_method]
+            api_info["summary"] = method_data.get("summary", "")
+            api_info["description"] = method_data.get("description", "") or method_data.get("summary", "")
 
-                api_info["summary"] = method_data.get("summary", "")
-                api_info["description"] = method_data.get("description", "") or method_data.get("summary", "")
+            parameters = method_data.get("parameters", [])
+            for param in parameters:
+                param_name = param.get("name", "")
+                param_desc = param.get("description", "")
+                param_in = param.get("in", "")
 
-                parameters = method_data.get("parameters", [])
-                for param in parameters:
-                    param_name = param.get("name", "")
-                    param_desc = param.get("description", "")
-                    param_in = param.get("in", "")
-
-                    # 对于 query 和 path 参数，添加到参数列表中
-                    # 对于 body 参数，只添加其内部属性，不添加 body 参数本身
-                    if param_name and param_desc and param_in != "body":
+                if param_in != "body":
+                    # query/path 参数：直接添加描述
+                    if param_name and param_desc:
                         api_info["parameters"][param_name] = param_desc
+                elif "schema" in param:
+                    # body 参数：统一使用递归提取嵌套描述（支持 $ref 和 properties）
+                    self._extract_nested_descriptions(
+                        param["schema"], swagger_data, api_info["parameters"]
+                    )
 
-                    if "schema" in param and "$ref" in param["schema"]:
-                        ref = param["schema"]["$ref"]
-                        ref_name = ref.split("/")[-1]
-                        if "definitions" in swagger_data and ref_name in swagger_data["definitions"]:
-                            definition = swagger_data["definitions"][ref_name]
-                            if "properties" in definition:
-                                for prop_name, prop_info in definition["properties"].items():
-                                    prop_desc = prop_info.get("description", "")
-                                    if prop_desc:
-                                        api_info["parameters"][prop_name] = prop_desc
-
-                if api_info["summary"] or api_info["description"] or api_info["parameters"]:
-                    break
 
         return api_info
 
@@ -433,6 +422,10 @@ class SwaggerHandler:
                 logger.error(f"无法获取Swagger文档: {swagger_url}")
                 return generated_files
 
+            # 设置 swagger_data 到 url_matcher，确保后续 URL 匹配能正确提取路径参数
+            if self.api_generator:
+                self.api_generator.url_matcher.swagger_data = swagger_data
+
             # 获取Swagger文档的basePath
             base_path = swagger_data.get("basePath", "")
 
@@ -461,58 +454,77 @@ class SwaggerHandler:
             # 定义异步任务函数：处理单个 API
             async def process_api(path: str, method: str, method_data: dict) -> str | None:
                 """处理单个API路径和方法的文件生成。"""
-                # 构建完整的URL路径，包含basePath
-                full_path = path
-                if base_path and base_path != "/":
-                    full_path = base_path.rstrip("/") + "/" + path.lstrip("/")
+                task_start = time.time()
+                try:
+                    # 构建完整的URL路径，包含basePath
+                    full_path = path
+                    if base_path and base_path != "/":
+                        full_path = base_path.rstrip("/") + "/" + path.lstrip("/")
 
-                # 构建请求信息
-                request_info = {
-                    "method": method.upper(),
-                    "url": full_path,
-                    "query_params": {},
-                    "post_data": {},
-                    "headers": APIConfig.REQUIRED_HEADERS(),
-                }
+                    logger.debug(f"  [任务开始] {method.upper()} {full_path}")
 
-                # 提取参数
-                parameters = method_data.get("parameters", [])
-                (
-                    query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions,
-                ) = self._extract_params_from_swagger(parameters, swagger_data)
+                    # 构建请求信息
+                    request_info = {
+                        "method": method.upper(),
+                        "url": full_path,
+                        "query_params": {},
+                        "post_data": {},
+                        "headers": APIConfig.REQUIRED_HEADERS(),
+                    }
 
-                request_info["query_params"] = query_params
-                request_info["post_data"] = post_data
-                request_info["path_params"] = path_params
+                    # 提取参数
+                    parameters = method_data.get("parameters", [])
+                    (
+                        query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions,
+                    ) = self._extract_params_from_swagger(parameters, swagger_data)
 
-                # 提取API信息（包括描述和参数说明）
-                swagger_info = {
-                    "summary": method_data.get("summary", ""),
-                    "description": method_data.get("description", "") or method_data.get("summary", ""),
-                    "parameters": param_descriptions,
-                }
+                    request_info["query_params"] = query_params
+                    request_info["post_data"] = post_data
+                    request_info["path_params"] = path_params
 
-                # 判断是否需要urlencode
-                if method.upper() == "POST" and has_query_param and not post_data and not has_body_param:
-                    request_info["headers"]["content-length"] = "0"
+                    # 提取API信息（包括描述和参数说明）
+                    swagger_info = {
+                        "summary": method_data.get("summary", ""),
+                        "description": method_data.get("description", "") or method_data.get("summary", ""),
+                        "parameters": param_descriptions,
+                    }
 
-                # 生成API文件
-                if self.api_generator:
-                    filepath = await self.api_generator.generate_api_file(request_info, force_overwrite, swagger_info)
-                    return filepath
-                return None
+                    # 判断是否需要urlencode
+                    if method.upper() == "POST" and has_query_param and not post_data and not has_body_param:
+                        request_info["headers"]["content-length"] = "0"
+
+                    # 生成API文件
+                    if self.api_generator:
+                        filepath = await self.api_generator.generate_api_file(request_info, force_overwrite, swagger_info)
+                        elapsed = time.time() - task_start
+                        if filepath:
+                            logger.debug(f"  [任务完成] {method.upper()} {full_path} → {filepath} (耗时 {elapsed:.2f}s)")
+                        else:
+                            logger.debug(f"  [任务跳过] {method.upper()} {full_path} (耗时 {elapsed:.2f}s)")
+                        return filepath
+                    return None
+                except Exception as e:
+                    elapsed = time.time() - task_start
+                    logger.error(f"  [任务失败] {method.upper()} {path} (耗时 {elapsed:.2f}s): {str(e)}")
+                    return None
 
             # 创建所有异步任务
+            logger.info(f"[并行处理] 创建 {len(paths_to_process)} 个路径的任务...")
             tasks = []
+            task_count = 0
             for path, methods in paths_to_process:
                 for method, method_data in methods.items():
                     try:
                         tasks.append(process_api(path, method, method_data))
+                        task_count += 1
                     except Exception as e:
-                        logger.error(f"❌ 创建任务失败 {path} {method}: {str(e)}")
+                        logger.error(f"  [创建失败] {method.upper()} {path}: {str(e)}")
+            logger.info(f"[并行处理] 共创建 {task_count} 个任务，开始并行执行...")
 
-            # 并行执行任务
+            # 并行执行任务，swagger_data 已统一设置，各任务只读不写，无竞态条件
+            parallel_start = time.time()
             success_count = 0
+            completed_count = 0
             for coro in asyncio.as_completed(tasks):
                 try:
                     filepath = await coro
@@ -521,13 +533,16 @@ class SwaggerHandler:
                         success_count += 1
                         logger.info(f"✓ 生成API文件: {filepath}")
                     else:
-                        logger.info(f"- 跳过已存在的API文件")
+                        logger.info("- 跳过已存在的API文件")
                 except Exception as e:
                     logger.error(f"❌ 生成API文件失败: {str(e)}")
+                completed_count += 1
+                if completed_count % 10 == 0 or completed_count == task_count:
+                    logger.debug(f"  [并行进度] {completed_count}/{task_count} 已完成")
+            parallel_elapsed = time.time() - parallel_start
 
             logger.info("\n============================================")
-            logger.info("从Swagger文档生成完成:")
-            logger.info(f"✓ 成功生成: {success_count} 个API文件")
+            logger.info(f"从Swagger文档生成完成: 成功 {success_count} 个, 总耗时 {parallel_elapsed:.2f}s")
             logger.info("============================================")
 
             # 批量格式化生成的 API 文件

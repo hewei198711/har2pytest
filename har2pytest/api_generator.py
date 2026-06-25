@@ -74,28 +74,63 @@ class APIGenerator:
         post_data = request_info.get("post_data", {})
         raw_headers = request_info.get("headers", {})
 
-        # 处理headers（保持不变）
-        headers_to_include = APIConfig.HEADERS_TO_INCLUDE()
-        if isinstance(headers_to_include, dict):
-            headers_to_include = set(h.lower() for h in headers_to_include.keys())
-
-        headers = {}
-        for key, value in raw_headers.items():
-            if key.lower() in headers_to_include:
-                headers[key] = value
-
+        headers = dict(raw_headers)
         required_headers = APIConfig.REQUIRED_HEADERS()
         for key, default_value in required_headers.items():
             if key not in headers:
                 headers[key] = default_value
 
         is_file_upload = False
-        if method == "POST" and raw_headers.get("content-type", "").startswith("multipart/form-data"):
-            is_file_upload = True
+        is_multipart = False
+        is_json_content = False
+
+        # 根据 HAR 的 Content-Type 判断请求格式
+        content_type = ""
+        for k, v in raw_headers.items():
+            if k.lower() == "content-type":
+                content_type = v
+                break
+
+        if method == "POST":
+            if content_type and "application/json" in content_type:
+                is_json_content = True
+            elif content_type and content_type.startswith("multipart/form-data"):
+                is_multipart = True
+                # 检查是否有文件参数（(binary) 或 @ 前缀）
+                if post_data and isinstance(post_data, dict):
+                    for v in post_data.values():
+                        v_str = str(v)
+                        if v_str == "(binary)" or v_str.startswith("@"):
+                            is_file_upload = True
+                            break
+                is_json_content = False
+            elif content_type and "application/x-www-form-urlencoded" in content_type:
+                is_json_content = False
+            elif not content_type:
+                # 没有 Content-Type 时，如果有 post_data 且不是简单查询参数，用 json
+                is_json_content = bool(post_data)
 
         is_need_urlencode = False
-        if method == "POST" and raw_headers.get("content-length", "") == "0" and not post_data:
+        # 大小写不敏感查找 content-length
+        content_length = ""
+        for k, v in raw_headers.items():
+            if k.lower() == "content-length":
+                content_length = v
+                break
+        if method == "POST" and content_length == "0" and not post_data:
             is_need_urlencode = True
+
+        # 删除 content-length（大小写兼容）
+        for key in list(headers.keys()):
+            if key.lower() == "content-length":
+                del headers[key]
+
+        # multipart 请求时，删除硬编码的 content-type（由 MultipartEncoder 动态设置）
+        if is_multipart:
+            for key in list(headers.keys()):
+                if key.lower() == "content-type":
+                    del headers[key]
+                    break
 
         # 使用统一的URL匹配器（swagger_data已在外部设置）
         url_info = self.url_matcher.get_url_info(url)
@@ -107,14 +142,23 @@ class APIGenerator:
             "post_data": post_data,
             "headers": headers,
             "is_file_upload": is_file_upload,
+            "is_multipart": is_multipart,
             "is_need_urlencode": is_need_urlencode,
+            "is_json_content": is_json_content,
             "path_params": url_info["path_params"],
             "url_pattern": url_info["pattern"],
             "function_name": url_info["function_name"],
         }
 
-    async def generate_api_file(self, request_info: dict, force_overwrite: bool = False, swagger_info: dict = None):
-        """生成API文件（异步）"""
+    async def generate_api_file(self, request_info: dict, force_overwrite: bool = False, swagger_info: dict = None, swagger_doc: dict = None):
+        """生成API文件（异步）
+
+        Args:
+            request_info: 请求信息字典
+            force_overwrite: 是否强制覆盖已存在的文件
+            swagger_info: Swagger API 信息（summary、description、parameters）
+            swagger_doc: 预取的 Swagger 完整文档，传入后跳过内部获取，避免并行竞态条件
+        """
         method = request_info["method"].upper()
         url = request_info["url"]
 
@@ -122,9 +166,9 @@ class APIGenerator:
         # 如果已传入swagger_info，不需要获取Swagger文档
         if swagger_info is None:
             # 获取整个Swagger文档（用于URL模板匹配和获取API信息）
-            swagger_doc = None
-            if service_package in APIConfig.SWAGGER_DOC_URLS():
-                swagger_doc = await self.swagger_handler.get_swagger_doc(APIConfig.SWAGGER_DOC_URLS()[service_package])
+            if swagger_doc is None:
+                if service_package in APIConfig.SWAGGER_DOC_URLS():
+                    swagger_doc = await self.swagger_handler.get_swagger_doc(APIConfig.SWAGGER_DOC_URLS()[service_package])
 
             # 设置swagger_data到url_matcher
             self.url_matcher.swagger_data = swagger_doc
@@ -193,15 +237,9 @@ class APIGenerator:
         if not params_dict:
             return "{}"
 
-        # 构建注释字典
-        comments = {}
-        for key in params_dict.keys():
-            param_desc = swagger_info.get("parameters", {}).get(key, "")
-            if param_desc:
-                comments[key] = param_desc
-            else:
-                comments[key] = "TODO: 添加参数说明"
-
+        # 直接使用 Swagger 的 parameters 字典（包含 dotted key 如 "payDTO.accountName"），
+        # format_params_for_python 会递归查找嵌套键的注释
+        comments = swagger_info.get("parameters", {})
         return format_params_for_python(params_dict, format_parameter_value, comments, inline=False)
 
     def _generate_imports(self, parsed_info: dict[str, Any]) -> list[str]:
@@ -218,10 +256,11 @@ class APIGenerator:
         """
         imports = []
         is_file_upload = parsed_info["is_file_upload"]
+        is_multipart = parsed_info.get("is_multipart", False)
         is_need_urlencode = parsed_info["is_need_urlencode"]
 
         imports.append("import os")
-        if is_file_upload:
+        if is_file_upload or is_multipart:
             imports.append("from requests_toolbelt import MultipartEncoder")
 
         if is_need_urlencode:
@@ -230,6 +269,30 @@ class APIGenerator:
         imports.append("from util.client import client")
         imports.append("")
         return imports
+
+    def _determine_param_info(self, parsed_info: dict[str, Any]) -> tuple[str | None, dict | None]:
+        """根据解析后的请求信息确定参数名和参数数据，用于 _process_parameters 和 _generate_function_definition 共用。"""
+        method = parsed_info["method"]
+        path_params = parsed_info["path_params"]
+        query_params = parsed_info["query_params"]
+        post_data = parsed_info["post_data"]
+        is_file_upload = parsed_info["is_file_upload"]
+        is_multipart = parsed_info.get("is_multipart", False)
+        is_need_urlencode = parsed_info["is_need_urlencode"]
+
+        if method == "GET" and query_params:
+            return "params", query_params
+        elif path_params:
+            return "params", path_params
+        elif method == "POST":
+            if is_need_urlencode and query_params:
+                return "data", query_params
+            elif post_data:
+                if is_file_upload:
+                    return "files", post_data
+                else:
+                    return "data", post_data
+        return None, None
 
     def _process_parameters(self, parsed_info: dict[str, Any], swagger_info: dict[str, Any] = None) -> list[str]:
         """
@@ -248,40 +311,10 @@ class APIGenerator:
             swagger_info = self.DEFAULT_SWAGGER_INFO.copy()
         params_section = []
 
-        method = parsed_info["method"]
-        path_params = parsed_info["path_params"]
-        query_params = parsed_info["query_params"]
-        post_data = parsed_info["post_data"]
-        is_file_upload = parsed_info["is_file_upload"]
-        is_need_urlencode = parsed_info["is_need_urlencode"]
         headers = parsed_info["headers"]
+        is_need_urlencode = parsed_info["is_need_urlencode"]
 
-        param_name = None
-        param_data = None
-
-        # 如果同时有路径参数和查询参数，需要处理两者
-        if method == "GET" and query_params:
-            param_name = "params"
-            param_data = query_params
-        elif path_params:
-            param_name = "params"
-            param_data = path_params
-        elif method == "POST":
-            if is_need_urlencode and query_params:
-                param_name = "data"
-                param_data = query_params
-            elif post_data:
-                if is_file_upload:
-                    param_name = "files"
-                    if isinstance(post_data, dict):
-                        param_data = post_data
-                    else:
-                        raise ValueError("文件上传参数格式错误")
-                elif isinstance(post_data, dict):
-                    param_name = "data"
-                    param_data = post_data
-                else:
-                    raise ValueError("参数格式错误")
+        param_name, param_data = self._determine_param_info(parsed_info)
 
         if param_name and param_data:
             formatted_params = self._generate_params_string(param_data, swagger_info)
@@ -291,9 +324,9 @@ class APIGenerator:
         # 添加 headers 参数定义
         formatted_headers = format_headers_for_python(headers)
         if is_need_urlencode:
-            is_need_urlencode_headers = headers.copy()
-            is_need_urlencode_headers["content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
-            formatted_urlencode_headers = format_headers_for_python(is_need_urlencode_headers)
+            urlencode_headers = headers.copy()
+            urlencode_headers["content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
+            formatted_urlencode_headers = format_headers_for_python(urlencode_headers)
             params_section.append(f"headers = {formatted_urlencode_headers}")
         else:
             params_section.append(f"headers = {formatted_headers}")
@@ -304,7 +337,7 @@ class APIGenerator:
         """
         处理文件上传
 
-        生成文件上传的代码实现
+        生成文件上传的代码实现，动态识别文件参数名
 
         Args:
             post_data: POST数据
@@ -312,21 +345,29 @@ class APIGenerator:
         Returns:
             List[str]: 文件上传代码列表
         """
+        if not isinstance(post_data, dict):
+            raise ValueError("文件上传参数格式错误")
+
+        # 动态识别文件参数名（值为 (binary) 或以 @ 开头的 key）
+        file_key = None
+        for key, value in post_data.items():
+            if isinstance(value, str) and (value == "(binary)" or value.startswith("@")):
+                file_key = key
+                break
+
+        if file_key is None:
+            raise ValueError("文件上传参数格式错误：未找到文件参数")
+
         function_def = []
-        function_def.append('    with open(files["file"], "rb") as f:')
-        function_def.append('        filename = os.path.basename(files["file"])')
+        function_def.append(f'    with open(files["{file_key}"], "rb") as f:')
+        function_def.append(f'        filename = os.path.basename(files["{file_key}"])')
         function_def.append("        m = MultipartEncoder(")
         function_def.append("            fields={")
-        if isinstance(post_data, dict):
-            for key, value in post_data.items():
-                if key == "file":
-                    function_def.append('                "file": (filename, f, "text/plain")')
-                else:
-                    function_def.append(f'                "{key}": files["{key}"],')
-            if "file" not in post_data:
-                raise ValueError("文件上传参数格式错误")
-        else:
-            raise ValueError("文件上传参数格式错误")
+        for key, value in post_data.items():
+            if key == file_key:
+                function_def.append(f'                "{file_key}": (filename, f, "text/plain")')
+            else:
+                function_def.append(f'                "{key}": files["{key}"],')
         function_def.append("            }")
         function_def.append("        )")
         function_def.append('    headers["content-type"] = m.content_type')
@@ -334,13 +375,33 @@ class APIGenerator:
         function_def.append("        return r")
         return function_def
 
+    def _handle_multipart_form(self) -> list[str]:
+        """
+        处理 multipart/form-data 请求（无文件上传）
+
+        生成 MultipartEncoder 编码的代码实现
+
+        Returns:
+            List[str]: multipart 表单代码列表
+        """
+        function_def = []
+        function_def.append("    # 构建 multipart/form-data 请求")
+        function_def.append("    m = MultipartEncoder(fields=data)")
+        function_def.append("")
+        function_def.append("    # 设置正确的 Content-Type（包含 boundary）")
+        function_def.append('    headers["content-type"] = m.content_type')
+        function_def.append("    with client.post(url=url, data=m, headers=headers) as r:")
+        function_def.append("        return r")
+        return function_def
+
     def _handle_http_method(
         self,
         method: str,
-        param_name: str,
+        has_data: bool,
         path_params: dict[str, Any],
         query_params: dict[str, Any],
         is_need_urlencode: bool,
+        is_json_content: bool = False,
     ) -> list[str]:
         """
         处理HTTP方法
@@ -349,10 +410,11 @@ class APIGenerator:
 
         Args:
             method: HTTP方法
-            param_name: 参数名称
+            has_data: 是否有请求体数据
             path_params: 路径参数
             query_params: 查询参数
             is_need_urlencode: 是否需要urlencode
+            is_json_content: 是否为JSON请求
 
         Returns:
             List[str]: HTTP方法代码列表
@@ -366,16 +428,18 @@ class APIGenerator:
                 function_def.append("    with client.get(url=url, headers=headers) as r:")
         elif method == "POST":
             if path_params:
-                function_def.append("    with client.get(url=url, headers=headers) as r:")
-            elif param_name:
+                function_def.append("    with client.post(url=url, headers=headers) as r:")
+            elif has_data:
                 if is_need_urlencode:
                     function_def.append(
                         "    data = urlencode(data) # application/x-www-form-urlencoded传参需要特殊处理"
                     )
                     function_def.append("")
                     function_def.append("    with client.post(url=url, data=data, headers=headers) as r:")
-                else:
+                elif is_json_content:
                     function_def.append("    with client.post(url=url, json=data, headers=headers) as r:")
+                else:
+                    function_def.append("    with client.post(url=url, data=data, headers=headers) as r:")
             else:
                 function_def.append("    with client.post(url=url, headers=headers) as r:")
         else:
@@ -407,21 +471,13 @@ class APIGenerator:
         query_params = parsed_info["query_params"]
         post_data = parsed_info["post_data"]
         is_file_upload = parsed_info["is_file_upload"]
+        is_multipart = parsed_info.get("is_multipart", False)
         is_need_urlencode = parsed_info["is_need_urlencode"]
+        is_json_content = parsed_info.get("is_json_content", False)
         path_params = parsed_info["path_params"]
         url_pattern = parsed_info["url_pattern"]
 
-        if path_params:
-            param_name = "params"
-        elif method == "GET":
-            param_name = "params" if query_params else None
-        elif method == "POST":
-            if is_file_upload:
-                param_name = "files" if post_data else None
-            else:
-                param_name = "data" if (post_data or query_params) else None
-        else:
-            param_name = None
+        param_name, _ = self._determine_param_info(parsed_info)
 
         func_params = []
         if param_name:
@@ -461,9 +517,12 @@ class APIGenerator:
         if is_file_upload:
             file_upload_code = self._handle_file_upload(post_data)
             function_def.extend(file_upload_code)
+        elif is_multipart:
+            multipart_code = self._handle_multipart_form()
+            function_def.extend(multipart_code)
         else:
             http_method_code = self._handle_http_method(
-                method, param_name, path_params, query_params, is_need_urlencode
+                method, param_name is not None, path_params, query_params, is_need_urlencode, is_json_content
             )
             function_def.extend(http_method_code)
 

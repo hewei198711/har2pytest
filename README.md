@@ -69,12 +69,14 @@ har2pytest/
 │   ├── __main__.py          # CLI 入口
 │   ├── config.py            # 配置管理 (APIConfig)
 │   ├── har_parser.py        # HAR 文件解析 (HARParser)
-│   ├── har_generator.py     # HAR → API 文件生成 (HARGenerator)
+│   ├── har_generator.py     # HAR → API 文件生成
 │   ├── api_generator.py     # API 文件生成 (APIGenerator)
 │   ├── swagger_handler.py   # Swagger 文档处理 (SwaggerHandler)
 │   ├── testcase_generator.py # 测试用例生成 (TestCaseGenerator)
 │   └── utils.py             # 工具函数
 ├── docs/                    # 详细文档
 ├── tests/                   # 单元测试
-└── har2pytest_config.json.example  # 配置示例
+│   └── har2pytest_config_test.json  # 测试配置示例
+├── pyproject.toml           # 项目配置
+└── mkdocs.yml               # 文档站点配置
 ```

@@ -13,9 +13,8 @@ from har2pytest.utils import (
 
 @allure.feature("工具函数")
 @allure.story("URL提取")
+@allure.title("测试从文件中提取URL")
 def test_parse_api_file_url():
-    """测试从文件中提取URL"""
-    # 测试从文件中提取URL（使用真实的API文件格式）
     test_content = '''def _user_login(data=data, headers=headers):
     """
     用户登录
@@ -40,11 +39,9 @@ def test_parse_api_file_url():
 
 @allure.feature("工具函数")
 @allure.story("URL提取")
+@allure.title("测试从API文件中提取URL")
 def test_extract_url_from_api_file():
-    """测试从API文件中提取URL（真实的API文件格式）"""
-
     _API_FILE_CACHE.clear()
-    # 测试真实的API文件格式
     test_content = '''from util.client import client
 
 def _user_order_getStoreAgentOrderList(data=data, headers=headers):
@@ -77,34 +74,27 @@ def _user_order_getStoreAgentOrderList(data=data, headers=headers):
 
 @allure.feature("工具函数")
 @allure.story("参数值格式化")
+@allure.title("测试参数值格式化为Python字符串")
 def test_format_parameter_value():
-    """测试参数值格式化为Python字符串"""
-    # 测试字符串值
     assert format_parameter_value("test") == '"test"'
 
-    # 测试数字值
     assert format_parameter_value(123) == "123"
     assert format_parameter_value(123.456) == "123.456"
 
-    # 测试布尔值
     assert format_parameter_value(True) == "True"
     assert format_parameter_value(False) == "False"
 
-    # 测试 None 值
     assert format_parameter_value(None) == "None"
 
-    # 测试列表值
     assert format_parameter_value([1, 2, 3]) == "[1, 2, 3]"
 
-    # 测试字典值
     assert format_parameter_value({"a": 1, "b": 2}) == '{"a": 1, "b": 2}'
 
 
 @allure.feature("工具函数")
 @allure.story("Headers提取")
+@allure.title("测试从API文件中提取headers配置")
 def test_parse_api_file_headers():
-    """测试从API文件中提取headers配置"""
-    # 测试真实的API文件格式
     test_content = '''from util.client import client
 
 headers = {

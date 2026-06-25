@@ -18,7 +18,7 @@ class HARParser:
     用于从 HAR 文件中提取 API 请求信息，支持过滤无效参数、重复 URL 等功能。
     """
 
-    def __init__(self, base_urls: str = None, kill_urls: str = None):
+    def __init__(self, base_urls: list[str] = None, kill_urls: list[str] = None):
         """初始化 HAR 解析器。
 
         Args:
@@ -95,8 +95,10 @@ class HARParser:
             for header in request.get("headers", []):
                 headers[header["name"]] = header["value"]
 
-            # 过滤 headers
+            # 保存 origin 用于 URL 规范化（但不出现在最终文件中）
+            raw_origin = headers.get("origin", headers.get("Origin", ""))
 
+            # 过滤 headers
             headers = self._filter_headers(headers)
 
             query_params = {}
@@ -132,7 +134,8 @@ class HARParser:
                     except json.JSONDecodeError:
                         post_data = post_data_text
                 else:
-                    raise ValueError(f"不支持的Content-Type: {content_type}, URL: {full_url}")
+                    logger.warning(f"不支持的Content-Type: {content_type}, URL: {full_url}，跳过该请求")
+                    continue
 
             # 响应内容
             response_content = None
@@ -149,7 +152,7 @@ class HARParser:
                 clean_url = URLMatcher.normalize_url(full_url, self.base_urls)
             # 如果没有配置 base_urls，尝试使用 origin header
             else:
-                origin = headers.get("origin", headers.get("Origin", ""))
+                origin = raw_origin
                 if origin and full_url.startswith(origin):
                     clean_url = URLMatcher.normalize_url(full_url[len(origin):])
                     logger.debug(f"使用 origin header 作为 base URL: {origin}")
@@ -228,7 +231,7 @@ class HARParser:
             headers_to_include = set(headers_to_include.keys())
 
         # 基础关键 headers，用于后续处理
-        base_required_headers = {"content-type", "content-length", "origin"}
+        base_required_headers = {"content-type", "content-length"}
         # 从配置中获取 REQUIRED_HEADERS
         config_required_headers = APIConfig.REQUIRED_HEADERS()
         if isinstance(config_required_headers, dict):

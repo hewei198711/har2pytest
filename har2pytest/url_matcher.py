@@ -8,6 +8,7 @@ from typing import Any
 
 from .config import APIConfig
 from .logger import logger
+from .utils import parse_api_file
 
 
 class URLMatcher:
@@ -35,9 +36,9 @@ class URLMatcher:
             url: 要检查的 URL。
 
         Returns:
-            bool: 如果 URL 中包含数字路径段则返回 True，否则返回 False。
+            bool: 如果 URL 中包含纯数字段或含3个以上数字的段则返回 True，否则返回 False。
         """
-        return bool(re.search(r"\/(\d+)\/", url))
+        return bool(re.search(r"\/(\d+|[^\/]*\d{3,}[^\/]*)(\/|$)", url))
 
     @staticmethod
     def match_url_pattern(url: str, pattern: str) -> tuple[bool, dict[str, str]]:
@@ -178,7 +179,7 @@ class URLMatcher:
                 - function_name: 生成的函数名
                 - has_path_params: 是否包含路径参数
         """
-        cache_key = f"info:{url}"
+        cache_key = hash(url)
         if cache_key in self._match_cache:
             return self._match_cache[cache_key].copy()
 
@@ -238,8 +239,6 @@ class URLMatcher:
         transformed_url = request_url_map.get(request_url, request_url) if request_url_map else request_url
 
         for api_file in api_files:
-            from .utils import parse_api_file
-
             result = parse_api_file(api_file)
             file_url = result.get("url")
             if not file_url:

@@ -21,9 +21,10 @@
 
 ```mermaid
 flowchart TD
-    A[har2pytest api api_request.har] --> B[HARGenerator.generate_api_files_from_har<br/>har_file_path]
+    A[har2pytest api api_request.har] --> B[generate_api_files_from_har<br/>har_file_path]
     B --> C[HARParser.extract_requests_from_har<br/>过滤非API请求、无效参数]
-    C --> D[asyncio.as_completed<br/>并行处理每个API请求]
+    C --> D0[预取所有需要的 Swagger 文档<br/>按 service_package 分组缓存]
+    D0 --> D[顺序处理每个API请求]
     D --> E{文件已存在?}
     E -->|是 & 非强制覆盖| F[跳过该接口]
     E -->|否 或 强制覆盖| G[APIGenerator.generate_api_file<br/>request_info]
@@ -37,7 +38,7 @@ flowchart TD
 
 ### 详细步骤
 
-#### Step 1: `generate_api_files_from_har()`（异步 + 并行）
+#### Step 1: `generate_api_files_from_har()`（异步，顺序处理）
 
 ```
 输入: har_file_path
@@ -49,14 +50,19 @@ flowchart TD
  │     - 布尔值自动转换（"true"/"false" 字符串 → Python 布尔值）
  │     - 可选去重（filter_duplicate_url=True 时合并重复 URL）
  │
+ └─ 预取 Swagger 文档:
+ │     按 service_package 分组，预先获取所有需要的 Swagger 文档
+ │     避免后续每个请求各自并发获取导致竞态条件
+ │
  └─ 异步并行处理（asyncio.as_completed）:
  │     每个 API 请求并发执行 generate_api_file()
+ │     Swagger 文档通过 swagger_doc 参数传入，避免共享状态竞态条件
  │     文件写入通过 await write_test_file() 异步执行
  │
  └─ 所有请求处理完毕后 → await format_directory(output_dir) 一次性 ruff 格式化
 ```
 
-> **异步并行说明**：所有 API 文件通过 `asyncio.as_completed` 并发生成，文件写入异步执行。生成完毕后对整个输出目录进行一次性 ruff 格式化。
+> **并行处理说明**：所有 API 请求通过 `asyncio.as_completed` 并行处理，Swagger 文档在处理前预取缓存，通过 `swagger_doc` 参数传入各任务，避免 `url_matcher.swagger_data` 共享状态导致的竞态条件。生成完毕后对整个输出目录进行一次性 ruff 格式化。
 
 #### Step 2: `check_api_exists()`
 
@@ -246,7 +252,7 @@ flowchart TD
     H --> I
     I[遍历每个 HTTP 方法<br/>GET/POST/PUT/DELETE]
     I --> K[_extract_params_from_swagger<br/>提取 query、body、path 参数]
-    K --> L[asyncio.as_completed<br/>并行生成 API 文件]
+    K --> L[顺序生成 API 文件]
     L --> M{文件已存在?}
     M -->|是 & 非强制覆盖| N[跳过]
     M -->|否 或 强制覆盖| O[await write_test_file 异步写入]
@@ -262,6 +268,9 @@ flowchart TD
  └─ await get_swagger_doc() → 异步获取 Swagger 文档数据（含缓存）
  │     httpx.AsyncClient 发送 HTTP 请求
  │
+ └─ 设置 url_matcher.swagger_data:
+ │     将 Swagger 文档数据设置到 url_matcher，确保路径参数提取正确
+ │
  └─ 解析 basePath + paths:
  │     basePath: /api
  │     paths:
@@ -271,8 +280,8 @@ flowchart TD
  └─ 如果指定了 specific_path，只处理匹配的路径
  │     （自动处理 basePath 前缀）
  │
- └─ 异步并行处理（asyncio.as_completed）:
- │     每个 path + method 组合并发执行:
+ └─ 顺序处理:
+ │     每个 path + method 组合依次执行:
  │       _extract_params_from_swagger() → 提取参数
  │       generate_api_file() → 生成文件内容
  │       await write_test_file() → 异步写入
@@ -280,7 +289,7 @@ flowchart TD
  └─ 所有文件生成完毕后 → await format_directory(output_dir) 一次性 ruff 格式化
 ```
 
-> **异步并行说明**：Swagger 文档获取使用 `httpx.AsyncClient` 异步 HTTP 请求；多个 API 文件通过 `asyncio.as_completed` 并发生成，文件写入异步执行。生成完毕后对整个输出目录进行一次性 ruff 格式化。
+> **顺序处理说明**：Swagger 文档获取使用 `httpx.AsyncClient` 异步 HTTP 请求；多个 API 文件按顺序生成，避免并行时 `url_matcher.swagger_data` 共享状态导致的竞态条件。swagger_data 在处理前统一设置到 url_matcher。文件写入异步执行。生成完毕后对整个输出目录进行一次性 ruff 格式化。
 
 #### Step 2: `_extract_params_from_swagger()`
 

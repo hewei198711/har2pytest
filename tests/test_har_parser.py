@@ -12,18 +12,15 @@ from har2pytest.har_parser import HARParser
 
 @allure.feature("HAR解析器")
 @allure.story("提取请求信息")
+@allure.title("测试从HAR文件提取请求信息")
 def test_extract_requests_from_har():
-    """测试从HAR文件提取请求信息"""
     from har2pytest.config import APIConfig
 
-    # 触发配置初始化
     APIConfig.get_config("BASE_URLS")
 
-    # 临时设置 BASE_URLS 配置
     original_base_urls = APIConfig._config.get("BASE_URLS", [])
     APIConfig._config["BASE_URLS"] = ["https://taobao.com/api"]
 
-    # 创建测试HAR文件
     test_har = {
         "log": {
             "entries": [
@@ -57,7 +54,6 @@ def test_extract_requests_from_har():
         assert requests[0]["url"] == "/user/login"
         assert requests[0]["response_status"] == 200
     finally:
-        # 恢复原始配置
         APIConfig._config["BASE_URLS"] = original_base_urls
 
         if os.path.exists("test.har"):
@@ -66,14 +62,12 @@ def test_extract_requests_from_har():
 
 @allure.feature("HAR解析器")
 @allure.story("过滤无效参数")
+@allure.title("测试过滤无效参数")
 def test_filter_invalid_params():
-    """测试过滤无效参数"""
     from har2pytest.config import APIConfig
 
-    # 触发配置初始化
     APIConfig.get_config("INVALID_PARAMS")
 
-    # 临时设置 INVALID_PARAMS 配置
     original_invalid_params = APIConfig._config.get("INVALID_PARAMS", set())
     APIConfig._config["INVALID_PARAMS"] = {"sign", "timestamp"}
 
@@ -83,9 +77,9 @@ def test_filter_invalid_params():
         test_data = {
             "username": "test",
             "password": "123456",
-            "sign": "test_sign",  # 无效参数
-            "timestamp": "1234567890",  # 无效参数
-            "file": "test.txt",  # 现在应该保留file参数
+            "sign": "test_sign",
+            "timestamp": "1234567890",
+            "file": "test.txt",
         }
 
         result = parser._filter_invalid_params(test_data)
@@ -93,16 +87,15 @@ def test_filter_invalid_params():
         assert "password" in result
         assert "sign" not in result
         assert "timestamp" not in result
-        assert "file" in result  # 确保file参数被保留
+        assert "file" in result
     finally:
-        # 恢复原始配置
         APIConfig._config["INVALID_PARAMS"] = original_invalid_params
 
 
 @allure.feature("HAR解析器")
 @allure.story("文件不存在处理")
+@allure.title("测试文件不存在的情况")
 def test_file_not_found():
-    """测试文件不存在的情况"""
     parser = HARParser()
     requests = parser.extract_requests_from_har("nonexistent.har")
     assert len(requests) == 0
@@ -110,8 +103,8 @@ def test_file_not_found():
 
 @allure.feature("HAR解析器")
 @allure.story("无效JSON处理")
+@allure.title("测试无效JSON的情况")
 def test_invalid_json():
-    """测试无效JSON的情况"""
     with open("invalid.har", "w", encoding="utf-8") as f:
         f.write("invalid json")
 
@@ -126,14 +119,12 @@ def test_invalid_json():
 
 @allure.feature("HAR解析器")
 @allure.story("过滤Headers")
+@allure.title("测试过滤Headers功能")
 def test_filter_headers():
-    """测试过滤Headers功能"""
     from har2pytest.config import APIConfig
 
-    # 触发配置初始化
     APIConfig.get_config("HEADERS_TO_INCLUDE")
 
-    # 临时设置 HEADERS_TO_INCLUDE 配置
     original_headers = APIConfig._config.get("HEADERS_TO_INCLUDE", [])
     APIConfig._config["HEADERS_TO_INCLUDE"] = ["content-type", "authorization"]
 
@@ -152,25 +143,22 @@ def test_filter_headers():
         result = parser._filter_headers(test_headers)
         assert "Content-Type" in result
         assert "Authorization" in result
-        assert "Origin" in result  # required_headers 中的
-        assert "content-length" in result  # required_headers 中的
-        assert "X-Requested-With" not in result  # 不在配置中
-        assert "User-Agent" not in result  # 不在配置中
+        assert "content-length" in result
+        assert "Origin" not in result
+        assert "X-Requested-With" not in result
+        assert "User-Agent" not in result
     finally:
-        # 恢复原始配置
         APIConfig._config["HEADERS_TO_INCLUDE"] = original_headers
 
 
 @allure.feature("HAR解析器")
 @allure.story("过滤Headers-无配置")
+@allure.title("测试没有配置HEADERS_TO_INCLUDE时返回所有headers")
 def test_filter_headers_no_config():
-    """测试没有配置HEADERS_TO_INCLUDE时返回所有headers"""
     from har2pytest.config import APIConfig
 
-    # 触发配置初始化
     APIConfig.get_config("HEADERS_TO_INCLUDE")
 
-    # 临时设置为空列表
     original_headers = APIConfig._config.get("HEADERS_TO_INCLUDE", [])
     APIConfig._config["HEADERS_TO_INCLUDE"] = []
 
@@ -187,8 +175,8 @@ def test_filter_headers_no_config():
 
 @allure.feature("HAR解析器")
 @allure.story("过滤Headers-非字典输入")
+@allure.title("测试非字典输入时的处理")
 def test_filter_headers_invalid_input():
-    """测试非字典输入时的处理"""
     parser = HARParser()
 
     result = parser._filter_headers(None)
@@ -200,8 +188,8 @@ def test_filter_headers_invalid_input():
 
 @allure.feature("HAR解析器")
 @allure.story("打印API摘要")
+@allure.title("测试打印API摘要功能")
 def test_print_api_summary():
-    """测试打印API摘要功能"""
     test_har = {
         "log": {
             "entries": [
@@ -221,7 +209,7 @@ def test_print_api_summary():
 
     try:
         parser = HARParser()
-        parser.print_api_summary("test_summary.har")  # 只需验证不报错
+        parser.print_api_summary("test_summary.har")
     finally:
         if os.path.exists("test_summary.har"):
             os.remove("test_summary.har")
@@ -229,8 +217,8 @@ def test_print_api_summary():
 
 @allure.feature("HAR解析器")
 @allure.story("打印API摘要-空请求")
+@allure.title("测试空请求时的摘要打印")
 def test_print_api_summary_empty():
-    """测试空请求时的摘要打印"""
     test_har = {"log": {"entries": []}}
 
     with open("test_empty.har", "w", encoding="utf-8") as f:
@@ -238,7 +226,7 @@ def test_print_api_summary_empty():
 
     try:
         parser = HARParser()
-        parser.print_api_summary("test_empty.har")  # 只需验证不报错
+        parser.print_api_summary("test_empty.har")
     finally:
         if os.path.exists("test_empty.har"):
             os.remove("test_empty.har")
@@ -246,8 +234,8 @@ def test_print_api_summary_empty():
 
 @allure.feature("HAR解析器")
 @allure.story("Multipart/form-data处理")
+@allure.title("测试multipart/form-data类型的POST数据解析")
 def test_multipart_form_data():
-    """测试multipart/form-data类型的POST数据解析"""
     test_har = {
         "log": {
             "entries": [
@@ -287,9 +275,8 @@ def test_multipart_form_data():
 
 @allure.feature("HAR解析器")
 @allure.story("Kill URLs过滤")
+@allure.title("测试kill_urls过滤功能")
 def test_kill_urls_filter():
-    """测试kill_urls过滤功能"""
-    # 使用包含被过滤URL的HAR文件
     test_har = {
         "log": {
             "entries": [
@@ -313,7 +300,6 @@ def test_kill_urls_filter():
         json.dump(test_har, f)
 
     try:
-        # 创建带有kill_urls参数的HARParser
         parser = HARParser(kill_urls=["health"])
         requests = parser.extract_requests_from_har("test_kill_urls.har")
 
@@ -326,8 +312,8 @@ def test_kill_urls_filter():
 
 @allure.feature("HAR解析器")
 @allure.story("重复URL过滤")
+@allure.title("测试重复URL过滤功能")
 def test_duplicate_url_filter():
-    """测试重复URL过滤功能"""
     test_har = {
         "log": {
             "entries": [
@@ -352,11 +338,9 @@ def test_duplicate_url_filter():
 
     try:
         parser = HARParser()
-        # 默认过滤重复URL
         requests = parser.extract_requests_from_har("test_duplicate.har")
         assert len(requests) == 1
 
-        # 不过滤重复URL
         requests = parser.extract_requests_from_har("test_duplicate.har", filter_duplicate_url=False)
         assert len(requests) == 2
     finally:
@@ -366,8 +350,8 @@ def test_duplicate_url_filter():
 
 @allure.feature("HAR解析器")
 @allure.story("Origin Header作为base URL")
+@allure.title("测试当没有配置base_urls时使用origin header")
 def test_origin_as_base_url():
-    """测试当没有配置base_urls时使用origin header"""
     test_har = {
         "log": {
             "entries": [
@@ -390,7 +374,7 @@ def test_origin_as_base_url():
         json.dump(test_har, f)
 
     try:
-        parser = HARParser(base_urls=[])  # 空列表，触发origin header逻辑
+        parser = HARParser(base_urls=[])
         requests = parser.extract_requests_from_har("test_origin.har")
 
         assert len(requests) == 1
@@ -402,8 +386,8 @@ def test_origin_as_base_url():
 
 @allure.feature("HAR解析器")
 @allure.story("响应内容解析")
+@allure.title("测试响应内容解析")
 def test_response_content_parsing():
-    """测试响应内容解析"""
     test_har = {
         "log": {
             "entries": [

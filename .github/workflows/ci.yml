@@ -32,7 +32,7 @@ jobs:
           cat > har2pytest_config.json << 'EOF'
           {
             "BASE_URLS": ["https://api.example.com"],
-            "KILL_URLS": ["example.com"],
+            "KILL_URLS": ["aliyuncs.com"],
             "SERVICE_MAPPING": {"api": "example_service"},
             "SWAGGER_DOC_URLS": {"example_service": "https://example.com/swagger"},
             "DEFAULT_API_DIR": "apis",
