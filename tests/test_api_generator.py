@@ -136,12 +136,10 @@ def test_parse_request_info_file_upload():
     assert result3["is_json_content"] is False
 
 
-
-
 @allure.feature("API生成器")
 @allure.story("解析请求信息")
 @allure.title("测试解析urlencoded请求信息")
-def test_parse_request_info_urlencoded():
+def test_parse_request_info_urlencoded_empty_body():
     generator = APIGenerator(output_dir="test_output")
     request_info = {
         "method": "POST",
@@ -577,7 +575,7 @@ def test_generate_file_content_get():
         "headers": {"Authorization": "Bearer token"}
     }
     content = generator.generate_file_content(request_info, "_api_test")
-    assert "import os" in content
+    assert "import os" in content  # headers 模板使用 os.environ，始终需要 import os
     assert "def _api_test" in content
     assert "client.get" in content
 
@@ -595,7 +593,7 @@ def test_generate_file_content_post():
         "headers": {"content-type": "application/json"}
     }
     content = generator.generate_file_content(request_info, "_api_create")
-    assert "import os" in content
+    assert "import os" in content  # headers 模板使用 os.environ，始终需要 import os
     assert "def _api_create" in content
     assert "client.post" in content
 

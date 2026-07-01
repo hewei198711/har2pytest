@@ -28,16 +28,24 @@
     "timestamp"
   ],
   "HEADERS_TO_INCLUDE": {
-    "authorization": "f\"bearer {os.environ['access_token']}\"",
+    "authorization": "f\"bearer {os.environ['token']}\"",
     "content-type": "application/json;charset=UTF-8"
   },
   "REQUIRED_HEADERS": {
-    "authorization": "f\"bearer {os.environ['access_token']}\""
+    "authorization": "f\"bearer {os.environ['token']}\""
   },
   "PAGINATION_PARAMS": [
     "pageNum",
     "pageSize"
   ],
   "DEFAULT_API_DIR": "apis",
-  "TESTCASE_DIR": "testcases"
+  "TESTCASE_DIR": "testcases",
+  "LIST_QUERY_KEYWORDS": [
+    "列表",
+    "查询"
+  ],
+  "STATE_VALUE_PATTERNS": [
+    "(-?\\d+)\\s*[:：]",
+    {"regex": "(\\w+)\\s*->", "type": "str"}
+  ]
 }

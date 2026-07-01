@@ -8,7 +8,7 @@
 |------|---------|---------|---------|
 | **parametrized_list** | `generate_parametrized_list_testcases()` | HAR 文件 | 列表查询接口的 pytest 参数化测试 |
 | **complex_scenario** | `generate_scenario_testcase()` | HAR 文件 | 多步骤业务流程的链路测试 |
-| **batch** | `generate_batch_testcases()` | API 文件 | 批量从 API 定义文件直接生成测试用例 |
+| **batch** | `generate_batch_testcases()` | API 文件 / HAR 文件 | 批量从 API 定义文件或 HAR 文件直接生成测试用例 |
 
 ---
 
@@ -22,22 +22,25 @@
 
 ```mermaid
 flowchart TD
-    A[generate_parametrized_list_testcases<br/>har_file_path, task_id, target_url?] --> B[match_api_files_for_har<br/>har_file_path]
+    A[generate_parametrized_list_testcases<br/>har_file_path, task_id, target_url?, overwrite?] --> B[match_api_files_for_har<br/>har_file_path]
     B --> C[循环每个匹配的 api_file]
-    C --> D[generate_parametrized_test_content<br/>har_file_path, api_file, task_id]
-    D --> E{has_har?}
-    E -->|Yes| F[har_parser.extract_requests_from_har]
-    F --> G[_extract_requests_for_url<br/>按 URL 筛选请求]
-    G --> H[normalize_params_for_parametrization<br/>合并、去重、分组]
-    H --> I{param_items 为空?}
-    E -->|No| J[无 HAR → 直接到 I]
-    I -->|是 & 非HAR模式| K[_build_param_items_from_api<br/>从 API 文件构建参数]
-    I -->|是 & HAR模式无参数| L[返回 None 跳过]
-    I -->|否| M[_generate_test_case_imports]
-    M --> N[_generate_test_case_description]
-    N --> O[_generate_test_class_setup]
-    O --> P[_generate_parametrized_test_methods]
-    P --> Q[write_test_file 写入文件]
+    C --> D{overwrite? 或文件不存在?}
+    D -->|否 且文件已存在| E[跳过该文件]
+    D -->|是 或文件不存在| F[generate_parametrized_test_content<br/>har_file_path, api_file, task_id]
+    F --> G{has_har?}
+    G -->|Yes| H[har_parser.extract_requests_from_har]
+    H --> I[_extract_requests_for_url<br/>按 URL 筛选请求]
+    I --> J[normalize_params_for_parametrization<br/>合并、去重、分组]
+    J --> K{param_items 为空?}
+    G -->|No| L[无 HAR → 直接到 K]
+    K -->|是 & 非HAR模式| M[_build_param_items_from_api<br/>从 API 文件构建参数]
+    K -->|是 & HAR模式无参数| N[返回 None 跳过]
+    K -->|否| O[_generate_test_case_imports]
+    M --> O
+    O --> P[_generate_test_case_description]
+    P --> Q[_generate_test_class_setup]
+    Q --> R[_generate_parametrized_test_methods]
+    R --> S[write_test_file 写入文件]
 ```
 
 ### 详细步骤
@@ -45,11 +48,12 @@ flowchart TD
 #### Step 1: `generate_parametrized_list_testcases()`
 
 ```
-输入: har_file_path, task_id, target_url?
+输入: har_file_path, task_id, target_url?, overwrite=False
  └─ 校验 HAR 文件存在
  └─ match_api_files_for_har() → 获取匹配的 API 文件列表
  └─ 遍历每个 api_file:
       ├─ 若有 target_url，跳过不匹配的 API
+      ├─ 若 overwrite=False 且文件已存在 → 跳过
       ├─ 调用 generate_parametrized_test_content() 生成内容
       └─ write_test_file() 写入文件
 ```
@@ -155,7 +159,7 @@ class TestClass:
         self.headers = {
             "channel": "pc",
             "client": "op",
-            "authorization": f"bearer {os.environ['access_token']}",
+            "authorization": f"bearer {os.environ['token']}",
         }
 
     @pytest.mark.parametrize("status", [1, 2, 3])
@@ -195,18 +199,22 @@ class TestClass:
 
 ```mermaid
 flowchart TD
-    A[generate_scenario_testcase<br/>har_file_path, target_url, task_id] --> B[match_api_files_for_har<br/>har_file_path]
-    B --> C[URLMatcher.find_matching_api_file<br/>target_url → 定位目标API]
-    C --> D[generate_scenario_test_content<br/>har_file_path, api_files, task_id, target_api_file]
-    D --> E[_get_requests_from_source<br/>优先HAR/回退API文件]
-    E --> F[_generate_test_case_imports<br/>多函数, import_pytest=False]
-    F --> G[_extract_api_info<br/>feature_name, story_name]
-    G --> H[_generate_test_case_description<br/>severity=CRITICAL]
-    H --> I[_generate_test_class_setup<br/>target_api_file → 自定义headers]
-    I --> J[_generate_scenario_test_method_definition]
-    J --> K[_generate_scenario_step_functions<br/>遍历requests]
-    K --> L[生成步骤调用]
-    L --> M[write_test_file 写入文件]
+    A[generate_scenario_testcase<br/>har_file_path, target_url, task_id, overwrite?] --> B[校验 HAR 文件存在]
+    B --> C{overwrite? 或文件不存在?}
+    C -->|否 且文件已存在| D[返回 None 跳过]
+    C -->|是 或文件不存在| E[har_parser.extract_requests_from_har<br/>一次解析HAR]
+    E --> F[match_api_files_for_har<br/>传入预解析请求列表]
+    F --> G[URLMatcher.find_matching_api_file<br/>target_url → 定位目标API]
+    G --> H[generate_scenario_test_content<br/>har_file_path, api_files, task_id, target_api_file]
+    H --> I[_get_requests_from_source<br/>优先HAR/回退API文件]
+    I --> J[_generate_test_case_imports<br/>多函数, import_pytest=False]
+    J --> K[_extract_api_info<br/>feature_name, story_name]
+    K --> L[_generate_test_case_description<br/>severity=CRITICAL]
+    L --> M[_generate_test_class_setup<br/>target_api_file → 自定义headers]
+    M --> N[_generate_scenario_test_method_definition]
+    N --> O[_generate_scenario_step_functions<br/>遍历requests]
+    O --> P[生成步骤调用]
+    P --> Q[write_test_file 写入文件]
 ```
 
 ### 详细步骤
@@ -214,10 +222,12 @@ flowchart TD
 #### Step 1: `generate_scenario_testcase()`
 
 ```
-输入: har_file_path, target_url, task_id
+输入: har_file_path, target_url, task_id, overwrite=False
  └─ 校验 HAR 文件存在
- └─ match_api_files_for_har() → 获取所有匹配的 API 文件
+ └─ har_parser.extract_requests_from_har() → 一次解析 HAR
+ └─ match_api_files_for_har(har_file_path, all_requests) → 传入预解析请求列表
  └─ URLMatcher.find_matching_api_file(target_url, api_files) → 目标 API 文件
+ └─ 若 overwrite=False 且文件已存在 → 返回 None 跳过
  └─ generate_scenario_test_content() → 生成内容
  └─ 输出文件名: test{function_name}.py
  └─ write_test_file() 写入文件
@@ -286,7 +296,7 @@ class TestClass:
 
     def setup_class(self):
         self.headers = {
-            "authorization": f"{os.environ['access_token']}",
+            "authorization": f"{os.environ['token']}",
         }
 
     @allure.title("商品下单流程")
@@ -331,24 +341,36 @@ class TestClass:
 
 ### 用途
 
-无需 HAR 文件，直接从 API 文件批量生成测试用例。根据 API 描述的字段自动判断生成模式：
+无需 HAR 文件，直接从 API 文件批量生成测试用例。也支持传入 HAR 文件，自动从 HAR 中提取接口并匹配对应的 API 文件。根据 API 描述的字段自动判断生成模式：
 - `"列表"` 在描述中 → parametrized_list 模式（带 `@pytest.mark.parametrize`）
 - 否则 → complex_scenario 模式（带 `@allure.step`）
+
+### 输入类型
+
+batch 模式支持两种输入类型：
+
+| 输入类型 | 示例 | 说明 |
+|---------|------|------|
+| **API 文件/目录** | `apis/mobile_application` | 直接扫描目录下的 `.py` 文件 |
+| **HAR 文件** | `api_request.har` | 解析 HAR 提取请求，自动匹配对应的 API 文件 |
+| **混合输入** | `apis/mobile,api_request.har` | 逗号分隔，同时支持目录和 HAR 文件 |
 
 ### 调用链
 
 ```mermaid
 flowchart TD
-    A["generate_batch_testcases<br/>api_files_list, task_id?"] --> B["展开文件列表<br/>支持目录/文件混合输入"]
+    A["generate_batch_testcases<br/>api_files_list, task_id?, overwrite?"] --> B["展开文件列表<br/>支持目录/文件/HAR混合输入"]
     B --> C["asyncio.gather<br/>并行处理所有 api_file"]
-    C --> D{"测试文件已存在?"}
-    D -->|是| E["跳过 skipped++"]
-    D -->|否| F{"api_description<br/>含 `列表` 关键字?"}
-    F -->|是| G["generate_parametrized_test_content<br/>har_file_path=None"]
-    F -->|否| H["generate_scenario_test_content<br/>har_file_path=None"]
-    G --> I["await write_test_file"]
-    H --> I
-    I --> J["汇总结果"]
+    C --> D{overwrite?}
+    D -->|否| E{测试文件已存在?}
+    E -->|是| F["跳过 skipped++"]
+    D -->|是| G{"api_description<br/>含 `列表` 关键字?"}
+    E -->|否| G
+    G -->|是| H["generate_parametrized_test_content<br/>har_file_path=None"]
+    G -->|否| I["generate_scenario_test_content<br/>har_file_path=None"]
+    H --> J["await write_test_file"]
+    I --> J
+    J --> K["汇总结果"]
 ```
 
 ### 详细步骤
@@ -356,14 +378,17 @@ flowchart TD
 #### Step 1: `generate_batch_testcases()`（异步 + 并行）
 
 ```
-输入: api_files_list (文件路径列表或目录), task_id?
- └─ 展开路径: 目录 → 扫描所有 .py 文件; 文件 → 直接添加
+输入: api_files_list (文件路径列表或目录), task_id?, overwrite=False
+ └─ 展开路径:
+ │     ├─ 目录 → 扫描所有 .py 文件
+ │     ├─ .har 文件 → 解析 HAR 提取请求，匹配对应的 API 文件
+ │     └─ 普通文件 → 直接添加
  └─ output_dir = get_output_dir(self.output_dir, task_id)
  └─ 异步并行处理（asyncio.gather）:
       ├─ 每个 api_file 独立任务 process_single():
       │    ├─ 检查文件是否存在 → "failed"
       │    ├─ _get_api_file_info() → 检查 function_name → "failed"
-      │    ├─ 检查测试文件是否已存在 → "skipped"
+      │    ├─ 若 overwrite=False 且测试文件已存在 → "skipped"
       │    ├─ 判断模式:
       │    │    ├─ "列表" in description → parametrized_list
       │    │    │    └─ generate_parametrized_test_content(None, api_file, task_id)
@@ -429,15 +454,16 @@ class TestClass:
 
 | 维度 | parametrized_list | complex_scenario | batch |
 |------|------------------|-----------------|-------|
-| **输入** | HAR + API 文件 | HAR + API 文件 | API 文件列表/目录 |
+| **输入** | HAR + API 文件 | HAR + API 文件 | API 文件列表/目录 或 HAR 文件 |
 | **参数来源** | HAR 请求 | HAR 请求（按业务流程顺序） | API 文件定义 |
-| **是否需要 HAR** | 是 | 是 | 否 |
+| **是否需要 HAR** | 是 | 是 | 否（支持 HAR 输入） |
 | **输出** | 单文件 | 单文件 | 多文件（每 API 一个） |
+| **overwrite 参数** | 跳过已存在文件 | 返回 None 跳过 | 跳过已存在文件 |
 | **测试框架** | pytest + allure | pytest + allure | pytest + allure |
 | **参数化** | `@pytest.mark.parametrize` | 无参数化 | 列表接口有 |
 | **severity** | NORMAL | CRITICAL | NORMAL / CRITICAL |
 | **导入 pytest** | 是 | 否 | 列表接口是 |
-| **headers** | API 文件自定义 | API 文件自定义 | API 文件自定义 |
+| **headers** | 默认 headers | API 文件自定义 | API 文件自定义 |
 | **用途** | 单个查询接口多参数覆盖 | 完整业务流程链路验证 | 批量生成回归测试 |
 
 ---

@@ -41,4 +41,5 @@ jobs:
           EOF
 
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: |
+          python -m pytest tests/ -v --cov=har2pytest --cov-report=term

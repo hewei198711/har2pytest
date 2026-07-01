@@ -5,6 +5,7 @@ on:
     tags:
       - "v*"
 
+# NOTE: Ensure CI (tests) pass before publishing
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest

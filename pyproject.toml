@@ -1,6 +1,6 @@
 [project]
 name = "har2pytest"
-version = "1.1.0"
+version = "1.2.0"
 description = "从HAR文件，Swagger接口文档自动生成API接口文件和pytest+allure测试用例"
 authors = [
     { name = "hewei", email = "hewei1987@163.com" }
@@ -16,7 +16,7 @@ classifiers = [
     "Topic :: Software Development :: Testing",
     "Topic :: Software Development :: Code Generators"
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
     "allure-pytest==2.15.3",
     "allure-python-commons==2.15.3",

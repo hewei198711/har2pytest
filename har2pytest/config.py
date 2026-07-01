@@ -25,7 +25,8 @@ class APIConfig:
         # 请求参数过滤配置
         "INVALID_PARAMS": [],
         # 请求头配置
-        "REQUIRED_HEADERS": {"authorization": "f\"bearer {os.environ['access_token']}\""},
+        # NOTE: 默认配置值包含 f-string 代码，运行时通过 eval 求值。请确保配置文件来源可信。
+        "REQUIRED_HEADERS": {"authorization": "f\"bearer {os.environ['token']}\""},
         "HEADERS_TO_INCLUDE": {},
         # 列表查询用例，这些参数不进行参数化处理
         "PAGINATION_PARAMS": [],
@@ -38,6 +39,10 @@ class APIConfig:
         "PATH_URLS": [],
         # Swagger文档URL配置 - 必需配置，必须在配置文件中指定
         "SWAGGER_DOC_URLS": {},
+        # 列表查询接口识别关键字
+        "LIST_QUERY_KEYWORDS": ["列表"],
+        # 状态值提取的额外正则模式（补充内置4种模式）
+        "STATE_VALUE_PATTERNS": [],
     }
 
     # 初始化配置
@@ -93,7 +98,7 @@ class APIConfig:
                 "配置文件格式错误：HEADERS_TO_INCLUDE 仅支持字典格式，请使用字典格式。\n"
                 "示例：\n"
                 '    "HEADERS_TO_INCLUDE": {\n'
-                '        "authorization": "bearer {os.environ[\'access_token\']}",\n'
+                '        "authorization": "bearer {os.environ[\'token\']}",\n'
                 '        "channel": "pc",\n'
                 '        "client": "op"\n'
                 "    }"
@@ -217,6 +222,14 @@ class APIConfig:
     @classmethod
     def PATH_URLS(cls) -> list:
         return cls.get_config("PATH_URLS")
+
+    @classmethod
+    def LIST_QUERY_KEYWORDS(cls) -> list:
+        return cls.get_config("LIST_QUERY_KEYWORDS")
+
+    @classmethod
+    def STATE_VALUE_PATTERNS(cls) -> list:
+        return cls.get_config("STATE_VALUE_PATTERNS")
 
     @classmethod
     def determine_service_package(cls, url: str) -> str:

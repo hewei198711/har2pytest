@@ -27,10 +27,10 @@ def test_default_config():
         assert APIConfig.DEFAULT_API_DIR() == "apis"
         assert APIConfig.INVALID_PARAMS() == {"partnerKey", "sign", "timestamp", "nonce", "rnd"}
         assert APIConfig.HEADERS_TO_INCLUDE() == {
-            "authorization": "f\"bearer {os.environ['access_token']}\"",
+            "authorization": "f\"bearer {os.environ['token']}\"",
             "content-type": "application/json;charset=UTF-8"
         }
-        assert APIConfig.REQUIRED_HEADERS() == {"authorization": "f\"bearer {os.environ['access_token']}\""}
+        assert APIConfig.REQUIRED_HEADERS() == {"authorization": "f\"bearer {os.environ['token']}\""}
     finally:
         if original_config:
             os.environ["HAR2PYTEST_CONFIG"] = original_config
@@ -72,6 +72,106 @@ def test_config_file_loading():
             os.remove("test_config.json")
         APIConfig._config = None
         APIConfig._load_config()
+
+
+@allure.feature("配置管理")
+@allure.story("列表查询关键字")
+@allure.title("测试列表查询关键字配置")
+def test_list_query_keywords():
+    """测试 LIST_QUERY_KEYWORDS 配置项"""
+    test_config_path = os.path.join(os.path.dirname(__file__), "har2pytest_config_test.json")
+    original_config = os.environ.get("HAR2PYTEST_CONFIG")
+
+    try:
+        os.environ["HAR2PYTEST_CONFIG"] = test_config_path
+        APIConfig._config = None
+        APIConfig._load_config()
+
+        keywords = APIConfig.LIST_QUERY_KEYWORDS()
+        assert isinstance(keywords, list)
+        assert "列表" in keywords
+        assert "查询" in keywords
+        assert len(keywords) == 2
+    finally:
+        if original_config:
+            os.environ["HAR2PYTEST_CONFIG"] = original_config
+        else:
+            if "HAR2PYTEST_CONFIG" in os.environ:
+                del os.environ["HAR2PYTEST_CONFIG"]
+        APIConfig._config = None
+
+
+@allure.feature("配置管理")
+@allure.story("状态值提取模式")
+@allure.title("测试状态值提取模式配置")
+def test_state_value_patterns():
+    """测试 STATE_VALUE_PATTERNS 配置项"""
+    test_config_path = os.path.join(os.path.dirname(__file__), "har2pytest_config_test.json")
+    original_config = os.environ.get("HAR2PYTEST_CONFIG")
+
+    try:
+        os.environ["HAR2PYTEST_CONFIG"] = test_config_path
+        APIConfig._config = None
+        APIConfig._load_config()
+
+        patterns = APIConfig.STATE_VALUE_PATTERNS()
+        assert isinstance(patterns, list)
+        assert len(patterns) == 2
+
+        # 第一个是字符串格式
+        assert isinstance(patterns[0], str)
+        assert patterns[0] == "(-?\\d+)\\s*[:：]"
+
+        # 第二个是字典格式
+        assert isinstance(patterns[1], dict)
+        assert patterns[1]["regex"] == "(\\w+)\\s*->"
+        assert patterns[1]["type"] == "str"
+    finally:
+        if original_config:
+            os.environ["HAR2PYTEST_CONFIG"] = original_config
+        else:
+            if "HAR2PYTEST_CONFIG" in os.environ:
+                del os.environ["HAR2PYTEST_CONFIG"]
+        APIConfig._config = None
+
+
+@allure.feature("配置管理")
+@allure.story("默认配置值")
+@allure.title("测试默认 LIST_QUERY_KEYWORDS 和 STATE_VALUE_PATTERNS")
+def test_default_list_query_and_state_patterns():
+    """测试无配置文件时 LIST_QUERY_KEYWORDS 和 STATE_VALUE_PATTERNS 的默认值"""
+    # 创建最小配置文件，满足必需配置项校验
+    minimal_config = {
+        "BASE_URLS": ["https://test.example.com"],
+        "SERVICE_MAPPING": {"test": "test_service"},
+        "SWAGGER_DOC_URLS": {"test_service": "https://test.example.com/swagger"},
+    }
+    with open("test_minimal_config.json", "w", encoding="utf-8") as f:
+        json.dump(minimal_config, f)
+
+    original_config = os.environ.get("HAR2PYTEST_CONFIG")
+
+    try:
+        os.environ["HAR2PYTEST_CONFIG"] = "test_minimal_config.json"
+        APIConfig._config = None
+        APIConfig._load_config()
+
+        # 默认 LIST_QUERY_KEYWORDS 应为 ["列表"]
+        keywords = APIConfig.LIST_QUERY_KEYWORDS()
+        assert keywords == ["列表"]
+
+        # 默认 STATE_VALUE_PATTERNS 应为空列表
+        patterns = APIConfig.STATE_VALUE_PATTERNS()
+        assert patterns == []
+    finally:
+        if original_config:
+            os.environ["HAR2PYTEST_CONFIG"] = original_config
+        else:
+            if "HAR2PYTEST_CONFIG" in os.environ:
+                del os.environ["HAR2PYTEST_CONFIG"]
+        if os.path.exists("test_minimal_config.json"):
+            os.remove("test_minimal_config.json")
+        APIConfig._config = None
 
 
 @allure.feature("配置管理")

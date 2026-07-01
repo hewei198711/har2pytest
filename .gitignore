@@ -6,7 +6,6 @@ __pycache__
 venv
 .idea
 .vscode
-*.vscode
 allure-results/*
 coverage_report/
 reports
@@ -15,6 +14,10 @@ dist/
 build/
 *.egg-info/
 .coverage
+.pytest_cache/
+.ruff_cache/
+site/
+htmlcov/
 
 har2pytest_config.json
 apis/

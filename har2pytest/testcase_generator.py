@@ -16,6 +16,7 @@ from .utils import (
     get_output_dir,
     merge_request_params,
     parse_api_file,
+    sanitize_param_name,
     write_test_file,
 )
 
@@ -98,7 +99,7 @@ class TestCaseGenerator:
 
         Args:
             api_file: API 文件路径
-            index: 分割后取第几部分，默认1（apis.mall_center_user._xxx -> mall_center_user）
+            index: 分割后取第几部分，默认1（apis.mall_user._xxx -> mall_user）
 
         Returns:
             服务包名称，如果提取失败返回 "default"
@@ -138,16 +139,18 @@ class TestCaseGenerator:
         swagger_doc = await self._get_swagger_doc_for_url(url)
         self.url_matcher.swagger_data = swagger_doc
 
-    async def match_api_files_for_har(self, har_file_path: str) -> list[str]:
+    async def match_api_files_for_har(self, har_file_path: str, requests: list[dict[str, Any]] = None) -> list[str]:
         """根据 HAR 文件查找对应的 API 文件。
 
         Args:
             har_file_path: HAR 文件路径
+            requests: 已解析的 HAR 请求列表（可选，避免重复解析）
 
         Returns:
             匹配到的 API 文件路径列表
         """
-        requests = self.har_parser.extract_requests_from_har(har_file_path)
+        if requests is None:
+            requests = self.har_parser.extract_requests_from_har(har_file_path)
 
         # 预处理URL映射
         request_url_map = {}
@@ -187,41 +190,71 @@ class TestCaseGenerator:
         return True
 
     def _parse_state_values(self, remark: str) -> list:
-        """从参数备注中解析状态值。
+        """从参数备注中解析参数化取值。
+
+        支持内置4种提取模式，并可通过配置 STATE_VALUE_PATTERNS 扩展。
+        所有模式统一遍历，首个匹配成功即返回。
 
         Args:
-            remark: 参数备注字符串，支持两种格式：
-                    格式1: "状态 -1：已驳回 0：待审核（默认）1：审核通过"
-                    格式2: "状态(1待审核2待开始3进行中4已结束5已驳回6草稿)"
+            remark: 参数备注字符串
 
         Returns:
-            状态值列表，如 [-1, 0, 1]
+            参数化取值列表（整数或字符串）
         """
-        state_values = []
         import re
 
-        # 尝试格式1: 匹配数字后跟冒号（中文或英文）
-        matches = re.findall(r'(-?\d+)\s*[:：]', remark)
-        if matches:
-            for match in matches:
-                try:
-                    state_values.append(int(match))
-                except ValueError:
-                    pass
-            return state_values
+        # 内置匹配模式：(类型, 正则)
+        builtin_patterns = [
+            ("int", r'(-?\d+)\s*[:：、.]'),         # 匹配数字后跟冒号、顿号或点号（如 1.产品编码）
+            ("int", r'(\d+)\s*[-》>]'),           # 匹配数字后跟箭头或破折号（如 1->描述 或 1-描述）
+            ("str", r'(\w+)\s*->'),               # 匹配文本后跟箭头（如 health->上海健康 ev->企业微信）
+            ("bracket_int", r'\((.*?)\)'),         # 匹配括号内的连续数字
+            ("int", r'(\d+)(?=[\u4e00-\u9fff])'),  # 匹配数字后直接跟中文（如 1待审核 2审核通过）
+        ]
 
-        # 尝试格式2: 匹配括号内的连续数字
-        bracket_match = re.search(r'\((.*?)\)', remark)
-        if bracket_match:
-            content = bracket_match.group(1)
-            number_matches = re.findall(r'-?\d+', content)
-            for match in number_matches:
-                try:
-                    state_values.append(int(match))
-                except ValueError:
-                    pass
+        # 合并配置扩展模式
+        all_patterns = list(builtin_patterns)
+        for pattern_config in APIConfig.STATE_VALUE_PATTERNS():
+            if isinstance(pattern_config, str):
+                all_patterns.append(("int", pattern_config))
+            elif isinstance(pattern_config, dict):
+                all_patterns.append((
+                    pattern_config.get("type", "int"),
+                    pattern_config.get("regex", "")
+                ))
 
-        return state_values
+        # 统一遍历，首个匹配成功即返回
+        for pattern_type, pattern in all_patterns:
+            if not pattern:
+                continue
+
+            if pattern_type == "bracket_int":
+                m = re.search(pattern, remark)
+                if m:
+                    numbers = re.findall(r'-?\d+', m.group(1))
+                    if numbers:
+                        return [int(n) for n in numbers]
+                continue
+
+            matches = re.findall(pattern, remark)
+            if not matches:
+                continue
+
+            if pattern_type == "str":
+                text_matches = [m for m in matches if not m.isdigit()]
+                if text_matches:
+                    return text_matches
+            else:
+                values = []
+                for match in matches:
+                    try:
+                        values.append(int(match))
+                    except ValueError:
+                        pass
+                if values:
+                    return values
+
+        return []
 
     def _build_param_items_from_api(self, api_params: dict, param_remarks: dict, is_batch_mode: bool = False) -> list[dict]:
         """从 API 文件参数构建参数化项列表。
@@ -251,8 +284,8 @@ class TestCaseGenerator:
                 if name != param_name:
                     other_params[name] = value
 
-            # 检查是否为状态参数
-            if param_name in param_remarks and "状态" in param_remarks[param_name]:
+            # 检查参数备注中是否有可提取的参数化取值
+            if param_name in param_remarks:
                 state_values = self._parse_state_values(param_remarks[param_name])
                 if state_values:
                     if isinstance(param_value, list):
@@ -343,7 +376,7 @@ class TestCaseGenerator:
         """
         all_params = set()
         all_requests_params = []
-        request_method = "GET"
+        request_method = None
 
         normalized_api_url = URLMatcher.normalize_url(api_url)
 
@@ -371,7 +404,7 @@ class TestCaseGenerator:
 
     # ==================== 测试用例生成入口方法 ====================
 
-    async def generate_parametrized_list_testcases(self, har_file_path: str, task_id: str, target_url: str = None) -> list[str]:
+    async def generate_parametrized_list_testcases(self, har_file_path: str, task_id: str, target_url: str = None, overwrite: bool = False) -> list[str]:
         """生成查询类参数化测试用例。
 
         为每个匹配的 API 生成独立的参数化测试文件。
@@ -380,6 +413,7 @@ class TestCaseGenerator:
             har_file_path: HAR 文件路径
             task_id: 任务 ID，用于命名输出目录
             target_url: 目标接口 URL（可选，指定后只生成该接口的测试用例）
+            overwrite: 是否强制覆盖已存在的测试用例文件
 
         Returns:
             生成的测试用例文件路径列表
@@ -387,7 +421,9 @@ class TestCaseGenerator:
         if not os.path.exists(har_file_path):
             return []
 
-        api_files = await self.match_api_files_for_har(har_file_path)
+        all_requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
+
+        api_files = await self.match_api_files_for_har(har_file_path, all_requests)
         if not api_files:
             logger.info(f"未找到HAR文件 {har_file_path} 对应的API文件")
             return []
@@ -408,11 +444,19 @@ class TestCaseGenerator:
                 test_filename = f"test_{clean_function_name}.py"
                 test_filepath = os.path.join(output_dir, test_filename)
 
-                test_content = self.generate_parametrized_test_content(har_file_path, api_file, task_id)
+                # 默认不覆盖已存在的测试文件
+                if not overwrite and os.path.exists(test_filepath):
+                    logger.info(f"跳过已存在的测试文件: {test_filepath}")
+                    continue
+
+                test_content = self.generate_parametrized_test_content(har_file_path, api_file, task_id, all_requests)
+                # 参数化模式无参数时，fallback 到场景测试
+                if not test_content:
+                    test_content = self.generate_scenario_test_content(har_file_path, [api_file], task_id, api_file, all_requests)
                 if not test_content:
                     continue
 
-                await write_test_file(test_filepath, test_content)
+                write_test_file(test_filepath, test_content)
                 generated_files.append(test_filepath)
             except Exception as e:
                 logger.error(f"生成测试用例文件失败 {api_file}: {str(e)}")
@@ -422,7 +466,7 @@ class TestCaseGenerator:
 
         return generated_files
 
-    async def generate_scenario_testcase(self, har_file_path: str, target_url: str, task_id: str) -> str | None:
+    async def generate_scenario_testcase(self, har_file_path: str, target_url: str, task_id: str, overwrite: bool = False) -> str | None:
         """生成复杂场景流程测试用例。
 
         针对指定的目标 URL 生成场景化的流程测试用例。
@@ -431,6 +475,7 @@ class TestCaseGenerator:
             har_file_path: HAR 文件路径
             target_url: 目标 URL
             task_id: 任务 ID
+            overwrite: 是否强制覆盖已存在的测试用例文件
 
         Returns:
             生成的测试用例文件路径，如果生成失败则返回 None
@@ -439,7 +484,9 @@ class TestCaseGenerator:
             logger.info(f"HAR文件不存在: {har_file_path}")
             return None
 
-        api_files = await self.match_api_files_for_har(har_file_path)
+        all_requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
+
+        api_files = await self.match_api_files_for_har(har_file_path, all_requests)
         if not api_files:
             logger.info(f"未找到HAR文件 {har_file_path} 对应的API文件")
             return None
@@ -449,27 +496,37 @@ class TestCaseGenerator:
             logger.error(f"未找到指定URL对应的API文件: {target_url}")
             return None
 
-        test_content = self.generate_scenario_test_content(har_file_path, api_files, task_id, target_api_file)
+        output_dir = get_output_dir(self.output_dir, task_id)
+        api_info = self._get_api_file_info(target_api_file)
+        clean_name = api_info['function_name'].lstrip('_')
+        test_filename = f"test_{clean_name}.py"
+        test_filepath = os.path.join(output_dir, test_filename)
+
+        # 默认不覆盖已存在的测试文件
+        if not overwrite and os.path.exists(test_filepath):
+            logger.info(f"跳过已存在的测试文件: {test_filepath}")
+            return None
+
+        test_content = self.generate_scenario_test_content(har_file_path, api_files, task_id, target_api_file, all_requests)
 
         if not test_content:
             return None
 
-        output_dir = get_output_dir(self.output_dir, task_id)
-        api_info = self._get_api_file_info(target_api_file)
-        test_filename = f"test{api_info['function_name']}.py"
-        test_filepath = os.path.join(output_dir, test_filename)
-        await write_test_file(test_filepath, test_content)
+        write_test_file(test_filepath, test_content)
         await format_directory(output_dir)
         return test_filepath
 
     async def generate_batch_testcases(
-        self, api_files_list: list[str], task_id: str = None
+        self, api_files_list: list[str], task_id: str = None, overwrite: bool = False,
+        har_file_path: str = None
     ) -> dict:
         """批量生成测试用例（异步 + 并行处理）。
 
         Args:
             api_files_list: API 文件路径列表
             task_id: 任务 ID
+            overwrite: 是否强制覆盖已存在的测试用例文件
+            har_file_path: HAR 文件路径（可选，指定后从 HAR 提取参数；否则从 API 文件提取）
 
         Returns:
             包含生成结果的字典：{
@@ -499,6 +556,7 @@ class TestCaseGenerator:
                     expanded_api_files.append(api_path)
             else:
                 logger.warning(f"路径不存在: {api_path}")
+                continue
 
         result = {
             "total": len(expanded_api_files),
@@ -509,6 +567,11 @@ class TestCaseGenerator:
         }
 
         output_dir = get_output_dir(self.output_dir, task_id)
+
+        # 如果有 HAR 文件，提前解析一次请求列表，所有任务复用
+        cached_requests = None
+        if har_file_path is not None and os.path.exists(har_file_path):
+            cached_requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
 
         # 定义异步任务：处理单个 API 文件
         async def process_single(api_file: str) -> tuple[str, str | None]:
@@ -530,18 +593,24 @@ class TestCaseGenerator:
                 test_filepath = os.path.join(output_dir, test_filename)
 
                 if os.path.exists(test_filepath):
-                    elapsed = time.time() - task_start
-                    logger.debug(f"  [任务跳过] {api_basename} 测试文件已存在 (耗时 {elapsed:.2f}s)")
-                    return "skipped", None
+                    if not overwrite:
+                        elapsed = time.time() - task_start
+                        logger.debug(f"  [任务跳过] {api_basename} 测试文件已存在 (耗时 {elapsed:.2f}s)")
+                        return "skipped", None
 
                 api_description = api_info.get("description", "")
-                if "列表" in api_description:
-                    test_content = self.generate_parametrized_test_content(None, api_file, task_id)
+                list_keywords = APIConfig.LIST_QUERY_KEYWORDS()
+                is_list_query = any(kw in api_description for kw in list_keywords) if list_keywords else False
+                if is_list_query:
+                    test_content = self.generate_parametrized_test_content(har_file_path, api_file, task_id, cached_requests)
+                    # 参数化模式无参数时，fallback 到场景测试（无参数接口无需参数化）
+                    if not test_content:
+                        test_content = self.generate_scenario_test_content(har_file_path, [api_file], task_id, api_file, cached_requests)
                 else:
-                    test_content = self.generate_scenario_test_content(None, [api_file], task_id, api_file)
+                    test_content = self.generate_scenario_test_content(har_file_path, [api_file], task_id, api_file, cached_requests)
 
                 if test_content:
-                    await write_test_file(test_filepath, test_content)
+                    write_test_file(test_filepath, test_content)
                     elapsed = time.time() - task_start
                     logger.debug(f"  [任务完成] {api_basename} → {test_filename} (耗时 {elapsed:.2f}s)")
                     return "generated", test_filepath
@@ -584,7 +653,7 @@ class TestCaseGenerator:
 
     # ==================== 测试用例内容生成 ====================
 
-    def generate_parametrized_test_content(self, har_file_path: str, api_file: str, task_id: str) -> str | None:
+    def generate_parametrized_test_content(self, har_file_path: str, api_file: str, task_id: str, requests: list[dict[str, Any]] = None) -> str | None:
         """生成参数化列表测试用例内容（list_query 模式）。
 
         根据 HAR 文件和 API 文件生成基于参数化的列表查询测试用例。
@@ -594,6 +663,7 @@ class TestCaseGenerator:
             har_file_path: HAR 文件路径（可选，为None时表示batch模式）
             api_file: API 文件路径
             task_id: 任务 ID
+            requests: 已解析的 HAR 请求列表（可选，避免重复解析）
 
         Returns:
             参数化测试用例内容字符串，如果生成失败则返回 None
@@ -617,10 +687,12 @@ class TestCaseGenerator:
         # 构建参数化项
         has_har = har_file_path is not None and os.path.exists(har_file_path)
         param_items = []
+        request_method = "GET"  # 默认请求方法
 
         # 如果有HAR文件，从HAR文件提取参数
         if has_har:
-            requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
+            if requests is None:
+                requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
             all_params, all_requests_params, request_method = self._extract_requests_for_url(requests, api_info["url"])
 
             if all_requests_params:
@@ -644,7 +716,7 @@ class TestCaseGenerator:
 
         content.extend(
             self._generate_parametrized_test_methods(
-                param_items, api_info["description"], function_name, "GET", api_info["param_remarks"]
+                param_items, api_info["description"], function_name, request_method, api_info["param_remarks"]
             )
         )
 
@@ -656,6 +728,7 @@ class TestCaseGenerator:
         api_files: list[str],
         task_id: str = None,
         target_api_file: str = None,
+        requests: list[dict[str, Any]] = None,
     ) -> str:
         """生成复杂场景流程测试用例内容（complex_scenario 模式）。
 
@@ -666,12 +739,14 @@ class TestCaseGenerator:
             api_files: API 文件路径列表
             task_id: 任务 ID
             target_api_file: 目标 API 文件路径（可选）
+            requests: 已解析的 HAR 请求列表（可选，避免重复解析）
 
         Returns:
             场景流程测试用例文件内容字符串
         """
         # 1. 提取请求（优先从 HAR 文件，没有则从 API 文件构建）
-        requests = self._get_requests_from_source(har_file_path, api_files, target_api_file)
+        if requests is None:
+            requests = self._get_requests_from_source(har_file_path, api_files, target_api_file)
 
         # 2. 生成导入语句（多函数模式，不需要 pytest）
         content = self._generate_test_case_imports(api_files=api_files, task_id=task_id, import_pytest=False)
@@ -754,7 +829,10 @@ class TestCaseGenerator:
         if target_api_file:
             # 提取服务名称
             feature_name = self._extract_service_package(target_api_file)
-
+            # 如果提取到的服务包名称以 _ 开头，说明是函数名而非服务包名
+            if feature_name.startswith("_"):
+                feature_name = "TODO 未找到对应信息，请检查！"
+                
             # 提取接口描述和URL
             result = self._get_api_file_info(target_api_file)
             api_url = result["url"]
@@ -976,7 +1054,11 @@ class TestCaseGenerator:
                 content.append("")
         elif service_package and function_name:
             # 单函数模式
-            content.append(f"from {base_pkg}.{service_package} import {function_name}")
+            if service_package.startswith("_"):
+                # 根目录下的 API 文件（service_package 是函数名），直接从 apis 导入
+                content.append(f"from {base_pkg} import {function_name}")
+            else:
+                content.append(f"from {base_pkg}.{service_package} import {function_name}")
             content.append("")
 
         if task_id:
@@ -1064,7 +1146,12 @@ class TestCaseGenerator:
         """
         parametrize_values = self._generate_parametrize_values(param_values, is_combination)
 
-        decorator_line = f'    @pytest.mark.parametrize("{param_name}", ['
+        if is_combination:
+            safe_names = [sanitize_param_name(n.strip()) for n in param_name.split(",")]
+            safe_param_name = ", ".join(safe_names)
+        else:
+            safe_param_name = sanitize_param_name(param_name)
+        decorator_line = f'    @pytest.mark.parametrize("{safe_param_name}", ['
 
         content = [decorator_line]
         for i, value in enumerate(parametrize_values):
@@ -1118,6 +1205,7 @@ class TestCaseGenerator:
         """
         if is_combination:
             param_names = param_name.split(",")
+            safe_param_names = [sanitize_param_name(p) for p in param_names]
             param_descriptions = []
             for p in param_names:
                 desc = param_remarks.get(p, p)
@@ -1127,15 +1215,16 @@ class TestCaseGenerator:
             param_desc_str = "-".join(param_descriptions)
             return [
                 f'    @allure.title("{api_description}: {param_desc_str} 查询")',
-                f"    def test_{param_count}_{clean_function_name}(self, {', '.join(param_names)}):",
+                f"    def test_{param_count}_{clean_function_name}(self, {', '.join(safe_param_names)}):",
             ]
         else:
+            safe_param_name = sanitize_param_name(param_name)
             param_description = param_remarks.get(param_name, param_name)
             if " " in param_description:
                 param_description = param_description.split(" ")[0]
             return [
                 f'    @allure.title("{api_description}: {param_description} 查询")',
-                f"    def test_{param_count}_{clean_function_name}(self, {param_name}):",
+                f"    def test_{param_count}_{clean_function_name}(self, {safe_param_name}):",
             ]
 
     def _generate_test_method_body(
@@ -1174,9 +1263,11 @@ class TestCaseGenerator:
         """
         if is_combination:
             for key in param_name.split(","):
-                content.append(f'            "{key}": {key},')
+                safe_key = sanitize_param_name(key)
+                content.append(f'            "{key}": {safe_key},')
         else:
-            content.append(f'            "{param_name}": {param_name},')
+            safe_name = sanitize_param_name(param_name)
+            content.append(f'            "{param_name}": {safe_name},')
 
         for key, value in other_params.items():
             if isinstance(value, str):

@@ -3,6 +3,7 @@
 """
 
 import json
+import logging
 import os
 
 import allure
@@ -189,7 +190,8 @@ def test_filter_headers_invalid_input():
 @allure.feature("HAR解析器")
 @allure.story("打印API摘要")
 @allure.title("测试打印API摘要功能")
-def test_print_api_summary():
+def test_print_api_summary(caplog):
+    caplog.set_level(logging.INFO)
     test_har = {
         "log": {
             "entries": [
@@ -210,6 +212,8 @@ def test_print_api_summary():
     try:
         parser = HARParser()
         parser.print_api_summary("test_summary.har")
+        log_output = "\n".join([r.message for r in caplog.records])
+        assert "共发现" in log_output or "个API请求" in log_output
     finally:
         if os.path.exists("test_summary.har"):
             os.remove("test_summary.har")
@@ -218,7 +222,8 @@ def test_print_api_summary():
 @allure.feature("HAR解析器")
 @allure.story("打印API摘要-空请求")
 @allure.title("测试空请求时的摘要打印")
-def test_print_api_summary_empty():
+def test_print_api_summary_empty(caplog):
+    caplog.set_level(logging.INFO)
     test_har = {"log": {"entries": []}}
 
     with open("test_empty.har", "w", encoding="utf-8") as f:
@@ -227,6 +232,8 @@ def test_print_api_summary_empty():
     try:
         parser = HARParser()
         parser.print_api_summary("test_empty.har")
+        log_output = "\n".join([r.message for r in caplog.records])
+        assert "共发现" in log_output or "没有找到" in log_output
     finally:
         if os.path.exists("test_empty.har"):
             os.remove("test_empty.har")
@@ -271,6 +278,129 @@ def test_multipart_form_data():
     finally:
         if os.path.exists("test_multipart.har"):
             os.remove("test_multipart.har")
+
+
+@allure.feature("HAR解析器")
+@allure.story("application/x-www-form-urlencoded处理")
+@allure.title("测试application/x-www-form-urlencoded类型的POST数据解析")
+def test_form_urlencoded_data():
+    test_har = {
+        "log": {
+            "entries": [
+                {
+                    "_resourceType": "xhr",
+                    "request": {
+                        "url": "https://example.com/api/login",
+                        "method": "POST",
+                        "headers": [
+                            {"name": "Content-Type", "value": "application/x-www-form-urlencoded"}
+                        ],
+                        "postData": {
+                            "mimeType": "application/x-www-form-urlencoded",
+                            "text": "username=testuser&password=123456&remember=true",
+                        },
+                    },
+                    "response": {"status": 200, "content": {"text": "{}"}},
+                    "time": 100,
+                }
+            ]
+        }
+    }
+
+    with open("test_form_urlencoded.har", "w", encoding="utf-8") as f:
+        json.dump(test_har, f)
+
+    try:
+        parser = HARParser()
+        requests = parser.extract_requests_from_har("test_form_urlencoded.har")
+
+        assert len(requests) == 1
+        assert requests[0]["post_data"] == {"username": "testuser", "password": "123456", "remember": "true"}
+    finally:
+        if os.path.exists("test_form_urlencoded.har"):
+            os.remove("test_form_urlencoded.har")
+
+
+@allure.feature("HAR解析器")
+@allure.story("application/x-www-form-urlencoded处理")
+@allure.title("测试urlencoded带URL编码字符的解析")
+def test_form_urlencoded_with_encoded_chars():
+    test_har = {
+        "log": {
+            "entries": [
+                {
+                    "_resourceType": "xhr",
+                    "request": {
+                        "url": "https://example.com/api/search",
+                        "method": "POST",
+                        "headers": [
+                            {"name": "Content-Type", "value": "application/x-www-form-urlencoded"}
+                        ],
+                        "postData": {
+                            "mimeType": "application/x-www-form-urlencoded",
+                            "text": "keyword=%E6%B5%8B%E8%AF%95&page=1&size=10",
+                        },
+                    },
+                    "response": {"status": 200, "content": {"text": "{}"}},
+                    "time": 50,
+                }
+            ]
+        }
+    }
+
+    with open("test_form_urlencoded2.har", "w", encoding="utf-8") as f:
+        json.dump(test_har, f)
+
+    try:
+        parser = HARParser()
+        requests = parser.extract_requests_from_har("test_form_urlencoded2.har")
+
+        assert len(requests) == 1
+        assert requests[0]["post_data"] == {"keyword": "测试", "page": "1", "size": "10"}
+    finally:
+        if os.path.exists("test_form_urlencoded2.har"):
+            os.remove("test_form_urlencoded2.har")
+
+
+@allure.feature("HAR解析器")
+@allure.story("application/x-www-form-urlencoded处理")
+@allure.title("测试urlencoded空数据的解析")
+def test_form_urlencoded_empty():
+    test_har = {
+        "log": {
+            "entries": [
+                {
+                    "_resourceType": "xhr",
+                    "request": {
+                        "url": "https://example.com/api/submit",
+                        "method": "POST",
+                        "headers": [
+                            {"name": "Content-Type", "value": "application/x-www-form-urlencoded"}
+                        ],
+                        "postData": {
+                            "mimeType": "application/x-www-form-urlencoded",
+                            "text": "",
+                        },
+                    },
+                    "response": {"status": 200, "content": {"text": "{}"}},
+                    "time": 50,
+                }
+            ]
+        }
+    }
+
+    with open("test_form_urlencoded3.har", "w", encoding="utf-8") as f:
+        json.dump(test_har, f)
+
+    try:
+        parser = HARParser()
+        requests = parser.extract_requests_from_har("test_form_urlencoded3.har")
+
+        assert len(requests) == 1
+        assert requests[0]["post_data"] == {}
+    finally:
+        if os.path.exists("test_form_urlencoded3.har"):
+            os.remove("test_form_urlencoded3.har")
 
 
 @allure.feature("HAR解析器")

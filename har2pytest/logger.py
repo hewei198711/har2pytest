@@ -29,3 +29,15 @@ def get_logger():
     获取日志记录器
     """
     return logger
+
+
+def reset_log_file():
+    """重新设置日志文件路径为当前工作目录。"""
+    global _log_file
+    _log_dir = os.getcwd()
+    _log_file = os.path.join(_log_dir, "har2pytest.log")
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            handler.close()
+            logger.removeHandler(handler)
+    logger.addHandler(logging.FileHandler(_log_file, encoding="utf-8"))

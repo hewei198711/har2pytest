@@ -4,6 +4,8 @@ har2pytest 命令行入口
 
 import argparse
 import asyncio
+import importlib.metadata
+import os
 
 from .api_generator import APIGenerator
 from .config import APIConfig
@@ -12,6 +14,7 @@ from .har_parser import HARParser
 from .logger import logger
 from .swagger_handler import SwaggerHandler
 from .testcase_generator import TestCaseGenerator
+from .url_matcher import URLMatcher
 
 
 def main():
@@ -43,8 +46,12 @@ def main():
             har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
 
             # 批量生成测试用例
-            har2pytest testcase --pattern batch --api-files apis/mall_mobile_application --mark test_4295
+            har2pytest testcase --pattern batch --api-files apis/mobile_application --mark test_4295
         """,
+    )
+    parser.add_argument(
+        "--version", action="version",
+        version=f"har2pytest {importlib.metadata.version('har2pytest')}",
     )
 
     # 创建子命令解析器
@@ -60,7 +67,7 @@ def main():
     sum_parser = subparsers.add_parser(
         "summary", help="显示HAR文件的API请求摘要", description="显示HAR文件的API请求摘要"
     )
-    sum_parser.add_argument("har_file", help="HAR文件路径")
+    sum_parser.add_argument("har_file", nargs="?", default="api_request.har", help="HAR文件路径（默认为 api_request.har）")
 
     # testcase 子命令
     tc_parser = subparsers.add_parser(
@@ -82,18 +89,19 @@ def main():
         har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
         """,
     )
-    tc_parser.add_argument("har_file", nargs="?", default=None, help="HAR文件路径（batch模式不需要）")
+    tc_parser.add_argument("har_file", nargs="?", default="api_request.har", help="HAR文件路径（默认 api_request.har，batch模式不需要）")
     tc_parser.add_argument(
         "--pattern",
         default="list_query",
         choices=["list_query", "complex_scenario", "batch"],
-        help="测试用例模式: list_query(查询类参数化)、complex_scenario(复杂场景) 或 batch(批量生成)",
+        help="测试用例模式: list_query(查询类参数化)、complex_scenario(复杂场景) 或 batch(批量生成单接口测试用例)",
     )
     tc_parser.add_argument("--mark", "-m", help="测试标记（如 test_4291）")
     tc_parser.add_argument("--url", "-u", help="目标接口URL（可选，指定后只生成该接口的测试用例）")
     tc_parser.add_argument("--output", "-o", default="testcases", help="输出目录")
     tc_parser.add_argument("--api-dir", default="apis", help="API文件目录")
-    tc_parser.add_argument("--api-files", help="指定API文件集合（batch模式使用，多个文件用逗号分隔）")
+    tc_parser.add_argument("--api-files", help="指定API文件或HAR文件（batch模式使用，多个文件用逗号分隔）")
+    tc_parser.add_argument("--overwrite", action="store_true", help="强制覆盖已存在的测试用例文件")
 
     # swagger 子命令
     swagger_parser = subparsers.add_parser(
@@ -207,6 +215,7 @@ async def handle_testcase(args):
     target_url = args.url
     output_dir = args.output
     api_dir = args.api_dir
+    overwrite = args.overwrite
 
     if pattern == "list_query":
         # 验证必填参数
@@ -222,10 +231,13 @@ async def handle_testcase(args):
         logger.info(f"生成查询类参数化测试用例: {har_file}")
         logger.info(f"任务ID: {task_id}")
         logger.info(f"目标接口: {target_url}")
+        logger.info(f"强制覆盖: {overwrite}")
         logger.info("-" * 50)
 
         generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
-        test_files = await generator.generate_parametrized_list_testcases(har_file, task_id, target_url)
+        test_files = await generator.generate_parametrized_list_testcases(
+            har_file, task_id, target_url, overwrite=overwrite
+        )
 
         logger.info("-" * 50)
         if test_files:
@@ -233,14 +245,10 @@ async def handle_testcase(args):
             for test_file in test_files:
                 logger.info(f"  - {test_file}")
         else:
-            logger.info("生成测试用例文件失败")
+            logger.info("未生成新的测试用例文件")
 
     elif pattern == "complex_scenario":
         # 验证必填参数
-        if not har_file:
-            logger.error("错误: complex_scenario 模式必须指定 HAR 文件")
-            logger.error("使用示例: har2pytest testcase api.har --pattern complex_scenario --url /api/user/login")
-            return
         if not target_url:
             logger.error("错误: complex_scenario 模式必须指定 --url 参数")
             logger.error("使用示例: har2pytest testcase api.har --pattern complex_scenario --url /api/user/login")
@@ -249,35 +257,68 @@ async def handle_testcase(args):
         logger.info(f"生成复杂场景测试用例: {har_file}")
         logger.info(f"任务ID: {task_id}")
         logger.info(f"目标接口: {target_url}")
+        logger.info(f"强制覆盖: {overwrite}")
         logger.info("-" * 50)
 
         generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
-        test_file = await generator.generate_scenario_testcase(har_file, target_url, task_id)
+        test_file = await generator.generate_scenario_testcase(
+            har_file, target_url, task_id, overwrite=overwrite
+        )
 
         logger.info("-" * 50)
         if test_file:
             logger.info(f"成功生成测试用例文件: {test_file.replace('\\', '/')}")
         else:
-            logger.info("生成测试用例文件失败")
+            logger.info("未生成新的测试用例文件")
 
     elif pattern == "batch":
-        # batch 模式：批量生成测试用例（直接从API文件读取参数）
+        # batch 模式：批量生成测试用例（支持 API 文件或 HAR 文件）
         api_files_arg = args.api_files
         if not api_files_arg:
             logger.error("错误: batch 模式必须指定 --api-files 参数")
-            logger.error("使用示例: har2pytest testcase --pattern batch --api-files apis/mall_mgmt_application/_mgmt_prmt_luckyActivity_luckyActivityList.py")
+            logger.error("使用示例: har2pytest testcase --pattern batch --api-files apis/mobile_application")
+            logger.error("也支持 HAR 文件: har2pytest testcase --pattern batch --api-files api_request.har")
             return
 
-        # 解析 API 文件列表（支持逗号分隔）
-        api_files_list = [f.strip() for f in api_files_arg.split(",")]
+        # 解析输入列表（支持逗号分隔）
+        input_list = [f.strip() for f in api_files_arg.split(",")]
 
-        logger.info("批量生成测试用例（从API文件读取参数）")
+        # 如果输入是 .har 文件，解析 HAR 并提取对应的 API 文件
+        api_files_list = []
+        har_file_for_batch = None
+        for item in input_list:
+            if item.endswith(".har") and os.path.isfile(item):
+                logger.info(f"从 HAR 文件提取 API 请求: {item}")
+                har_file_for_batch = item
+                har_parser = HARParser()
+                all_requests = har_parser.extract_requests_from_har(item)
+                if not all_requests:
+                    logger.warning(f"HAR 文件 {item} 中没有找到有效的 API 请求")
+                    continue
+                # 为每个不同的接口请求找到对应的 API 文件
+                generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
+                api_files = await generator.match_api_files_for_har(item, all_requests)
+                api_files_list.extend(api_files)
+                logger.info(f"  从 HAR 文件提取到 {len(api_files)} 个 API 文件")
+            else:
+                api_files_list.append(item)
+
+        if not api_files_list:
+            logger.error("错误: 没有找到有效的 API 文件")
+            return
+
+        logger.info("批量生成测试用例")
         logger.info(f"API文件数量: {len(api_files_list)}")
         logger.info(f"任务ID: {task_id}")
+        logger.info(f"强制覆盖: {overwrite}")
+        if har_file_for_batch:
+            logger.info(f"HAR文件: {har_file_for_batch}")
         logger.info("-" * 50)
 
         generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
-        result = await generator.generate_batch_testcases(api_files_list, task_id)
+        result = await generator.generate_batch_testcases(
+            api_files_list, task_id, overwrite=overwrite, har_file_path=har_file_for_batch
+        )
 
         logger.info("-" * 50)
         logger.info(f"总API文件数: {result['total']}")

@@ -120,7 +120,7 @@ flowchart TD
 │   每个参数带注释: key: value,  # 参数说明
 │
 ├── headers 定义
-│   └── headers = { "authorization": f"bearer {os.environ['access_token']}", ... }
+│   └── headers = { "authorization": f"bearer {os.environ['token']}", ... }
 │
 └── 函数定义
     ├── def function_name(params=params, headers=headers):
@@ -152,7 +152,7 @@ params = {
 }
 
 headers = {
-    "authorization": f"bearer {os.environ['access_token']}",
+    "authorization": f"bearer {os.environ['token']}",
     "content-length": "0",
 }
 
@@ -187,7 +187,7 @@ data = {
 }
 
 headers = {
-    "authorization": f"bearer {os.environ['access_token']}",
+    "authorization": f"bearer {os.environ['token']}",
     "content-type": "application/json",
 }
 
@@ -214,7 +214,7 @@ params = {
 }
 
 headers = {
-    "authorization": f"bearer {os.environ['access_token']}",
+    "authorization": f"bearer {os.environ['token']}",
 }
 
 
@@ -252,7 +252,7 @@ flowchart TD
     H --> I
     I[遍历每个 HTTP 方法<br/>GET/POST/PUT/DELETE]
     I --> K[_extract_params_from_swagger<br/>提取 query、body、path 参数]
-    K --> L[顺序生成 API 文件]
+    K --> L[并行生成 API 文件]
     L --> M{文件已存在?}
     M -->|是 & 非强制覆盖| N[跳过]
     M -->|否 或 强制覆盖| O[await write_test_file 异步写入]
@@ -338,7 +338,7 @@ params = {
 }
 
 headers = {
-    "authorization": f"bearer {os.environ['access_token']}",
+    "authorization": f"bearer {os.environ['token']}",
     "content-length": "0",
 }
 
@@ -424,7 +424,7 @@ har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --output 
 har2pytest api api_request.har --output apis
 
 # 3. 生成测试用例
-har2pytest testcase list_query test_4291 api_request.har
+har2pytest testcase api_request.har --pattern list_query --mark test_4291
 ```
 
 ### 注意事项

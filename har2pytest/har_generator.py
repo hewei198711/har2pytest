@@ -32,6 +32,9 @@ async def generate_api_files_from_har(
         >>> files = await generate_api_files_from_har("普通订单.har")
         >>> # 返回生成的文件路径列表，如 ["api/_mobile_product_search.py", ...]
     """
+    if not api_generator:
+        return []
+
     har_parser = HARParser()
     requests = har_parser.extract_requests_from_har(har_file_path)
 
@@ -40,9 +43,6 @@ async def generate_api_files_from_har(
         return []
 
     logger.info(f"发现 {len(requests)} 个API请求")
-
-    if not api_generator:
-        return []
 
     # 预取所有需要的 Swagger 文档（按 service_package 分组）
     logger.info("=" * 60)

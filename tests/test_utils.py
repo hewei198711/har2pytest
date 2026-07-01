@@ -2,12 +2,15 @@
 测试 utils.py 模块
 """
 
+import os
+
 import allure
 
 from har2pytest.utils import (
     _API_FILE_CACHE,
     format_parameter_value,
     parse_api_file,
+    sanitize_param_name,
 )
 
 
@@ -22,19 +25,17 @@ def test_parse_api_file_url():
     """
     url = "/user/login"
 '''
-    with open("test_url.txt", "w", encoding="utf-8") as f:
+    with open("test_url.py", "w", encoding="utf-8") as f:
         f.write(test_content)
 
     try:
-        result = parse_api_file("test_url.txt")
+        result = parse_api_file("test_url.py")
         assert result is not None
         assert result["description"] == "用户登录"
         assert result["url"] == "/user/login"
     finally:
-        import os
-
-        if os.path.exists("test_url.txt"):
-            os.remove("test_url.txt")
+        if os.path.exists("test_url.py"):
+            os.remove("test_url.py")
 
 
 @allure.feature("工具函数")
@@ -101,7 +102,7 @@ headers = {
     "channel": "pc",
     "client": "op",
     "content-type": "application/json;charset=UTF-8",
-    "authorization": f"bearer {os.environ['access_token']}",
+    "authorization": f"bearer {os.environ['token']}",
 }
 
 def _user_login(data=data, headers=headers):
@@ -125,7 +126,18 @@ def _user_login(data=data, headers=headers):
         assert "content-type" in headers
         assert headers["content-type"] == "application/json;charset=UTF-8"
     finally:
-        import os
-
         if os.path.exists("test_api_headers.py"):
             os.remove("test_api_headers.py")
+
+
+@allure.feature("工具函数")
+@allure.story("参数名清理")
+@allure.title("测试清理参数名避免 Python 关键字冲突")
+def test_sanitize_param_name():
+    """测试清理参数名，对于 Python 关键字追加下划线后缀。"""
+    assert sanitize_param_name("from") == "from_"
+    assert sanitize_param_name("class") == "class_"
+    assert sanitize_param_name("def") == "def_"
+    assert sanitize_param_name("return") == "return_"
+    assert sanitize_param_name("user_id") == "user_id"
+    assert sanitize_param_name("from_user") == "from_user"

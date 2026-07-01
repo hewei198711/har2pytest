@@ -5,7 +5,7 @@
 
 import json
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote
 
 from .config import APIConfig
 from .logger import logger
@@ -133,6 +133,14 @@ class HARParser:
                         post_data = self._filter_invalid_params(post_data)
                     except json.JSONDecodeError:
                         post_data = post_data_text
+                elif content_type.startswith("application/x-www-form-urlencoded"):
+                    parsed = parse_qs(post_data_text)
+                    # parse_qs 返回 {key: [value, ...]}，取每个 key 的最后一个值
+                    post_data = {
+                        k: unquote(v[-1]) if isinstance(v[-1], str) else v[-1]
+                        for k, v in parsed.items()
+                    }
+                    post_data = self._filter_invalid_params(post_data)
                 else:
                     logger.warning(f"不支持的Content-Type: {content_type}, URL: {full_url}，跳过该请求")
                     continue
@@ -156,6 +164,9 @@ class HARParser:
                 if origin and full_url.startswith(origin):
                     clean_url = URLMatcher.normalize_url(full_url[len(origin):])
                     logger.debug(f"使用 origin header 作为 base URL: {origin}")
+                else:
+                    # 无 base_urls 也无 origin，仍需去掉查询参数
+                    clean_url = URLMatcher.normalize_url(full_url)
 
             request_info = {
                 "method": request.get("method", "GET"),

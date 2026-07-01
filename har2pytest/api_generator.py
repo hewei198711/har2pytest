@@ -80,57 +80,45 @@ class APIGenerator:
             if key not in headers:
                 headers[key] = default_value
 
+        # 一次性遍历 raw_headers 提取 content-type 和 content-length
+        content_type = ""
+        content_length = ""
+        for k, v in raw_headers.items():
+            kl = k.lower()
+            if kl == "content-type":
+                content_type = v
+            elif kl == "content-length":
+                content_length = v
+
         is_file_upload = False
         is_multipart = False
         is_json_content = False
-
-        # 根据 HAR 的 Content-Type 判断请求格式
-        content_type = ""
-        for k, v in raw_headers.items():
-            if k.lower() == "content-type":
-                content_type = v
-                break
 
         if method == "POST":
             if content_type and "application/json" in content_type:
                 is_json_content = True
             elif content_type and content_type.startswith("multipart/form-data"):
                 is_multipart = True
-                # 检查是否有文件参数（(binary) 或 @ 前缀）
                 if post_data and isinstance(post_data, dict):
                     for v in post_data.values():
                         v_str = str(v)
                         if v_str == "(binary)" or v_str.startswith("@"):
                             is_file_upload = True
                             break
-                is_json_content = False
             elif content_type and "application/x-www-form-urlencoded" in content_type:
                 is_json_content = False
             elif not content_type:
-                # 没有 Content-Type 时，如果有 post_data 且不是简单查询参数，用 json
                 is_json_content = bool(post_data)
 
-        is_need_urlencode = False
-        # 大小写不敏感查找 content-length
-        content_length = ""
-        for k, v in raw_headers.items():
-            if k.lower() == "content-length":
-                content_length = v
-                break
-        if method == "POST" and content_length == "0" and not post_data:
-            is_need_urlencode = True
+        is_need_urlencode = method == "POST" and content_length == "0" and not post_data
 
-        # 删除 content-length（大小写兼容）
+        # 清理 headers：移除 content-length 和 multipart 时的 content-type
         for key in list(headers.keys()):
-            if key.lower() == "content-length":
+            kl = key.lower()
+            if kl == "content-length":
                 del headers[key]
-
-        # multipart 请求时，删除硬编码的 content-type（由 MultipartEncoder 动态设置）
-        if is_multipart:
-            for key in list(headers.keys()):
-                if key.lower() == "content-type":
-                    del headers[key]
-                    break
+            elif not is_need_urlencode and kl == "content-type":
+                del headers[key]
 
         # 使用统一的URL匹配器（swagger_data已在外部设置）
         url_info = self.url_matcher.get_url_info(url)
@@ -210,7 +198,7 @@ class APIGenerator:
 
         # 生成文件内容（使用从Swagger获取的数据）
         content = self.generate_file_content(request_info, function_name, swagger_info, parsed_info)
-        await write_test_file(filepath, content)
+        write_test_file(filepath, content)
 
         return filepath
 
@@ -370,9 +358,9 @@ class APIGenerator:
                 function_def.append(f'                "{key}": files["{key}"],')
         function_def.append("            }")
         function_def.append("        )")
-        function_def.append('    headers["content-type"] = m.content_type')
-        function_def.append("    with client.post(url=url, headers=headers, data=m) as r:")
-        function_def.append("        return r")
+        function_def.append('        headers["content-type"] = m.content_type')
+        function_def.append("        with client.post(url=url, headers=headers, data=m) as r:")
+        function_def.append("            return r")
         return function_def
 
     def _handle_multipart_form(self) -> list[str]:
@@ -599,13 +587,20 @@ class APIGenerator:
             path_parts = rel_path.split("/")
             if len(path_parts) >= 2:
                 service_package = path_parts[0]
-                if service_package not in service_packages:
-                    service_packages[service_package] = []
-                service_packages[service_package].append(filepath)
+            else:
+                # 根目录下的文件，服务包就是 apis
+                service_package = "apis"
+            if service_package not in service_packages:
+                service_packages[service_package] = []
+            service_packages[service_package].append(filepath)
 
         # 为每个服务包生成索引文件
         for service_package, files in service_packages.items():
-            package_dir = os.path.join(self.output_dir, service_package)
+            if service_package == "apis":
+                # 根目录下的文件，直接使用 output_dir 作为包目录
+                package_dir = self.output_dir
+            else:
+                package_dir = os.path.join(self.output_dir, service_package)
             package_init_path = os.path.join(package_dir, "__init__.py")
 
             # 确保服务包目录存在
@@ -629,8 +624,9 @@ class APIGenerator:
                 # 生成相对导入语句（如 from ._user_mgmt_order_page import _user_mgmt_order_page）
                 import_stmt = f"from .{last_part} import {last_part} # noqa: F401"
 
-                # 检查导入语句是否已存在
-                if import_stmt not in content:
+                # 检查是否已存在该模块的导入（通过模块名匹配，避免多行导入和空格差异导致重复）
+                already_imported = any(f"from .{last_part} import" in line for line in content)
+                if not already_imported:
                     import_statements.append(import_stmt)
 
             # 如果有新的导入语句，添加到文件末尾

@@ -514,11 +514,8 @@ class SwaggerHandler:
             task_count = 0
             for path, methods in paths_to_process:
                 for method, method_data in methods.items():
-                    try:
-                        tasks.append(process_api(path, method, method_data))
-                        task_count += 1
-                    except Exception as e:
-                        logger.error(f"  [创建失败] {method.upper()} {path}: {str(e)}")
+                    tasks.append(process_api(path, method, method_data))
+                    task_count += 1
             logger.info(f"[并行处理] 共创建 {task_count} 个任务，开始并行执行...")
 
             # 并行执行任务，swagger_data 已统一设置，各任务只读不写，无竞态条件

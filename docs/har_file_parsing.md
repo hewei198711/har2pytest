@@ -113,7 +113,7 @@ INVALID_PARAMS = ["rnd", "timestamp", "_", "t", "callback", "jsonp"]
 |-------------|---------|------|
 | `application/json` | `json.loads(postData.text)` | `{"pageNum": 1, "pageSize": 10}` |
 | `multipart/form-data` | 遍历 `postData.params` | `{"file": "...", "name": "..."}` |
-| `application/x-www-form-urlencoded` | **不支持** → 抛出异常 | - |
+| `application/x-www-form-urlencoded` | `parse_qs(postData.text)` | `{"pageNum": "1", "pageSize": "10"}` |
 
 #### Step 7: 提取 URL 相对路径
 
@@ -126,8 +126,8 @@ BASE_URLS = [
 ]
 
 # 提取过程
-# 完整 URL: https://api.example.com/appStore/mobile/order/page?pageNum=1
-# 提取后  : /appStore/mobile/order/page
+# 完整 URL: https://api.example.com/taobao/mobile/order/page?pageNum=1
+# 提取后  : /taobao/mobile/order/page
 ```
 
 当未配置 `base_urls` 时，回退使用 `origin` header 进行提取。
@@ -173,7 +173,7 @@ HAR 文件的 JSON 结构如下所示：
                 "_resourceType": "xhr",          // 资源类型，用于过滤
                 "request": {
                     "method": "GET",
-                    "url": "https://api.example.com/appStore/mobile/order/page?pageNum=1&pageSize=10",
+                    "url": "https://api.example.com/taobao/mobile/order/page?pageNum=1&pageSize=10",
                     "headers": [
                         { "name": "authorization", "value": "bearer xxx" },
                         { "name": "content-type", "value": "application/json" }

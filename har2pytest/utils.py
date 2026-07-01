@@ -4,7 +4,9 @@
 """
 
 import asyncio
+import ast
 import json
+import keyword
 import os
 import re
 import sys
@@ -25,11 +27,17 @@ def format_parameter_value(value: Any) -> str:
     Returns:
         str: 格式化后的字符串，如 '"hello"'、'123'、'None' 等。
     """
-    result = json.dumps(value, ensure_ascii=False)
-    result = result.replace("null", "None")
-    result = result.replace("false", "False")
-    result = result.replace("true", "True")
-    return result
+    if value is None:
+        return "None"
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
+    return repr(value)
 
 
 def deduplicate_values(values: list[Any]) -> list[Any]:
@@ -70,8 +78,8 @@ def get_output_dir(base_output_dir: str, task_id: str = None) -> str:
     return output_dir
 
 
-async def write_test_file(filepath: str, content: str):
-    """异步写入 Python 文件（不格式化）。
+def write_test_file(filepath: str, content: str):
+    """写入 Python 文件（不格式化）。
 
     仅将内容写入文件，不进行 ruff 格式化。
     批量格式化应在所有文件生成后调用 format_directory()。
@@ -121,6 +129,11 @@ async def format_directory(dir_path: str) -> None:
 
 # API文件解析缓存
 _API_FILE_CACHE = {}
+
+
+def clear_api_file_cache():
+    """清除 API 文件解析缓存。"""
+    _API_FILE_CACHE.clear()
 
 
 def parse_api_file(filepath: str) -> dict:
@@ -231,7 +244,7 @@ def parse_api_file(filepath: str) -> dict:
                         cleaned_lines.append(line)
                     dict_str = "\n".join(cleaned_lines)
 
-                    params_dict = eval(dict_str)
+                    params_dict = ast.literal_eval(dict_str)
                     if isinstance(params_dict, dict):
                         result[param_type].update(params_dict)
                     break # API文件只会有第一个参数类型
@@ -368,3 +381,25 @@ def merge_request_params(request_info: dict[str, Any]) -> dict[str, Any]:
         else:
             logger.debug(f"post_data不是字典类型，跳过合并: {type(request_info['post_data'])}")
     return params
+
+
+def sanitize_param_name(name: str) -> str:
+    """清理参数名，避免 Python 关键字冲突。
+
+    如果参数名是 Python 关键字（如 from、class 等），追加下划线后缀。
+
+    Args:
+        name: 原始参数名
+
+    Returns:
+        安全的 Python 标识符
+
+    Examples:
+        >>> sanitize_param_name("from")
+        'from_'
+        >>> sanitize_param_name("user_id")
+        'user_id'
+    """
+    if keyword.iskeyword(name):
+        return name + "_"
+    return name

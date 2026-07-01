@@ -38,7 +38,7 @@ class URLMatcher:
         Returns:
             bool: 如果 URL 中包含纯数字段或含3个以上数字的段则返回 True，否则返回 False。
         """
-        return bool(re.search(r"\/(\d+|[^\/]*\d{3,}[^\/]*)(\/|$)", url))
+        return bool(re.search(r"\/(\d+|[^\/]*\d{2,}[^\/]*)(\/|$)", url))
 
     @staticmethod
     def match_url_pattern(url: str, pattern: str) -> tuple[bool, dict[str, str]]:
