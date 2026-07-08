@@ -19,13 +19,21 @@ har2pytest --help
 ### 1. 从 HAR 文件生成 API 文件
 
 ```bash
+# 同步模式（默认，使用 requests）
 har2pytest api api_request.har
+
+# 异步模式（使用 aiohttp + async/await）
+har2pytest api api_request.har --async
 ```
 
 ### 2. 从 Swagger 文档生成 API 文件
 
 ```bash
+# 同步模式
 har2pytest swagger https://petstore.swagger.io/v2/api-docs
+
+# 异步模式
+har2pytest swagger https://petstore.swagger.io/v2/api-docs --async
 ```
 
 ### 3. 生成测试用例
@@ -48,6 +56,9 @@ har2pytest testcase --pattern batch --api-files api_request.har
 
 # 强制覆盖已存在的测试用例文件
 har2pytest testcase api_request.har --pattern list_query --url /api/user/list --overwrite
+
+# 异步模式（生成 async/await 测试代码，适用于所有模式）
+har2pytest testcase api_request.har --pattern list_query --url /api/user/list --async
 ```
 
 ### 4. 查看 HAR 文件摘要
@@ -76,6 +87,7 @@ har2pytest/
 ├── har2pytest/              # 核心代码
 │   ├── __init__.py
 │   ├── __main__.py          # CLI 入口
+│   ├── client.py            # HTTP 客户端 (Client, AsyncClient)
 │   ├── config.py            # 配置管理 (APIConfig)
 │   ├── har_parser.py        # HAR 文件解析 (HARParser)
 │   ├── har_generator.py     # HAR → API 文件生成

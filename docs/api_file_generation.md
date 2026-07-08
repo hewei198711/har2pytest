@@ -56,13 +56,13 @@ flowchart TD
  │
  └─ 异步并行处理（asyncio.as_completed）:
  │     每个 API 请求并发执行 generate_api_file()
- │     Swagger 文档通过 swagger_doc 参数传入，避免共享状态竞态条件
+ │     Swagger 文档通过 swagger_doc 参数传入
  │     文件写入通过 await write_test_file() 异步执行
  │
  └─ 所有请求处理完毕后 → await format_directory(output_dir) 一次性 ruff 格式化
 ```
 
-> **并行处理说明**：所有 API 请求通过 `asyncio.as_completed` 并行处理，Swagger 文档在处理前预取缓存，通过 `swagger_doc` 参数传入各任务，避免 `url_matcher.swagger_data` 共享状态导致的竞态条件。生成完毕后对整个输出目录进行一次性 ruff 格式化。
+> **并行处理说明**：所有 API 请求通过 `asyncio.as_completed` 并行处理，Swagger 文档在处理前预取缓存，通过 `swagger_doc` 参数传入各任务。生成完毕后对整个输出目录进行一次性 ruff 格式化。
 
 #### Step 2: `check_api_exists()`
 
@@ -109,7 +109,7 @@ flowchart TD
 ```
 ├── imports 部分
 │   ├── import os
-│   ├── from util.client import client
+│   ├── from har2pytest.client import client
 │   └── 文件上传时额外导入:
 │       └── from requests_toolbelt import MultipartEncoder
 │
@@ -134,7 +134,7 @@ flowchart TD
         ├── GET:  client.get(url=url, params=params, headers=headers)
         ├── POST: client.post(url=url, json=data, headers=headers)
         ├── 文件上传: MultipartEncoder + client.post(url=url, data=m, headers=headers)
-        └── URL编码: client.post(url=url, data=urllib.parse.urlencode(data), headers=headers)
+        └── URL编码: client.post(url=url, data=urlencode(data), headers=headers)
 ```
 
 ### 生成示例
@@ -143,7 +143,7 @@ flowchart TD
 ```python
 import os
 
-from util.client import client
+from har2pytest.client import client
 
 params = {
     "keyword": "",              # 关键字搜索
@@ -169,15 +169,14 @@ def _mobile_order_list(params=params, headers=headers):
     """
 
     url = "/mobile/order/list"
-    with client.get(url=url, params=params, headers=headers) as r:
-        return r
+    return client.get(url=url, params=params, headers=headers)
 ```
 
 #### 示例 2：POST 请求（带 data）
 ```python
 import os
 
-from util.client import client
+from har2pytest.client import client
 
 data = {
     "orderNo": "",           # 订单号
@@ -199,15 +198,14 @@ def _order_export_handledDetail(data=data, headers=headers):
     """
 
     url = "/order/export/handledDetail"
-    with client.post(url=url, json=data, headers=headers) as r:
-        return r
+    return client.post(url=url, json=data, headers=headers)
 ```
 
 #### 示例 3：路径参数接口
 ```python
 import os
 
-from util.client import client
+from har2pytest.client import client
 
 params = {
     "id": "123",
@@ -225,8 +223,7 @@ def _mobile_order_id(params=params, headers=headers):
     """
 
     url = f"/mobile/order/{params['id']}"
-    with client.get(url=url, params=params, headers=headers) as r:
-        return r
+    return client.get(url=url, params=params, headers=headers)
 ```
 
 ---
@@ -280,16 +277,16 @@ flowchart TD
  └─ 如果指定了 specific_path，只处理匹配的路径
  │     （自动处理 basePath 前缀）
  │
- └─ 顺序处理:
- │     每个 path + method 组合依次执行:
- │       _extract_params_from_swagger() → 提取参数
- │       generate_api_file() → 生成文件内容
- │       await write_test_file() → 异步写入
- │
- └─ 所有文件生成完毕后 → await format_directory(output_dir) 一次性 ruff 格式化
+└─ 并行处理:
+│     每个 path + method 组合通过 asyncio.as_completed 并行执行:
+│       _extract_params_from_swagger() → 提取参数
+│       generate_api_file() → 生成文件内容
+│       await write_test_file() → 异步写入
+│
+└─ 所有文件生成完毕后 → await format_directory(output_dir) 一次性 ruff 格式化
 ```
 
-> **顺序处理说明**：Swagger 文档获取使用 `httpx.AsyncClient` 异步 HTTP 请求；多个 API 文件按顺序生成，避免并行时 `url_matcher.swagger_data` 共享状态导致的竞态条件。swagger_data 在处理前统一设置到 url_matcher。文件写入异步执行。生成完毕后对整个输出目录进行一次性 ruff 格式化。
+> **并行处理说明**：Swagger 文档使用 `httpx.AsyncClient` 异步获取；多个 API 文件通过 `asyncio.as_completed` 并行生成。swagger_data 在处理前统一设置到 url_matcher，各任务只读不写，无竞态条件。生成完毕后对整个输出目录进行一次性 ruff 格式化。
 
 #### Step 2: `_extract_params_from_swagger()`
 
@@ -329,7 +326,7 @@ Swagger 方式额外传入 `swagger_info` 参数，HAR 方式在 `generate_api_f
 ```python
 import os
 
-from util.client import client
+from har2pytest.client import client
 
 params = {
     "pageNum": 0,            # 页码
@@ -355,8 +352,7 @@ def _mgmt_user_list(params=params, headers=headers):
     """
 
     url = "/mgmt/user/list"
-    with client.get(url=url, params=params, headers=headers) as r:
-        return r
+    return client.get(url=url, params=params, headers=headers)
 ```
 
 ---
@@ -389,6 +385,9 @@ har2pytest api api_request.har --output apis
 
 # 强制覆盖已存在的文件
 har2pytest api api_request.har --output apis --overwrite
+
+# 生成异步模式 API 文件（使用 async_client + aiohttp）
+har2pytest api api_request.har --async
 ```
 
 ### 从 Swagger 文档生成
@@ -408,7 +407,20 @@ har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --path /m
 
 # 组合使用
 har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --output apis --overwrite --path /mgmt/user/list
+
+# 生成异步模式 API 文件
+har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --async
 ```
+
+### 异步模式说明
+
+使用 `--async` 参数生成的 API 文件与同步模式有以下区别：
+
+| 特性 | 同步模式（默认） | 异步模式（--async） |
+|------|----------------|---------------------|
+| 客户端导入 | `from har2pytest.client import client` | `from har2pytest.client import async_client as client` |
+| 文件上传 | `from requests_toolbelt import MultipartEncoder` | `from aiohttp import FormData` |
+| 适用场景 | pytest + requests | pytest-asyncio + aiohttp |
 
 ---
 

@@ -62,7 +62,7 @@ flowchart TD
 
 #### Step 3: 过滤无效 URL
 
-检查 URL 是否包含 `KILL_URLS` 中的关键字：
+检查 URL 是否包含 `KILL_URLS` 中的关键字（默认空列表，需在配置文件中自定义）：
 
 ```python
 KILL_URLS = [
@@ -97,7 +97,7 @@ KILL_URLS = [
 
 #### Step 5: 过滤无效参数
 
-使用 `INVALID_PARAMS` 配置过滤掉以下参数：
+使用 `INVALID_PARAMS` 配置过滤掉以下参数（默认空列表，需在配置文件中自定义）：
 
 ```python
 INVALID_PARAMS = ["rnd", "timestamp", "_", "t", "callback", "jsonp"]
@@ -117,13 +117,14 @@ INVALID_PARAMS = ["rnd", "timestamp", "_", "t", "callback", "jsonp"]
 
 #### Step 7: 提取 URL 相对路径
 
-使用 `base_urls` 配置从完整 URL 中提取相对路径：
+使用 `base_urls` 配置从完整 URL 中提取相对路径（默认空列表，需在配置文件中自定义）：
 
 ```python
 BASE_URLS = [
     "https://api.example.com",
     "https://api.example.cn",
 ]
+```
 
 # 提取过程
 # 完整 URL: https://api.example.com/taobao/mobile/order/page?pageNum=1

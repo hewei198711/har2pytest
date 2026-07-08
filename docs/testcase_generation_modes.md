@@ -38,8 +38,7 @@ flowchart TD
     K -->|否| O[_generate_test_case_imports]
     M --> O
     O --> P[_generate_test_case_description]
-    P --> Q[_generate_test_class_setup]
-    Q --> R[_generate_parametrized_test_methods]
+    P --> R[_generate_parametrized_test_methods]
     R --> S[write_test_file 写入文件]
 ```
 
@@ -48,7 +47,7 @@ flowchart TD
 #### Step 1: `generate_parametrized_list_testcases()`
 
 ```
-输入: har_file_path, task_id, target_url?, overwrite=False
+输入: har_file_pathtask_id, target_url?, overwrite=False
  └─ 校验 HAR 文件存在
  └─ match_api_files_for_har() → 获取匹配的 API 文件列表
  └─ 遍历每个 api_file:
@@ -89,10 +88,9 @@ flowchart TD
  ├─ 无参数 → 返回 None
  │
  └─ [生成代码]
-      ├─ _generate_test_case_imports(单函数, import_pytest=True)
-      ├─ _generate_test_case_description(severity="NORMAL")
-      ├─ _generate_test_class_setup() → 默认 headers
-      └─ _generate_parametrized_test_methods(param_items, ...)
+      ├─ _generate_test_case_imports(单函数, )
+     ├─ _generate_test_case_description(severity="NORMAL")
+     └─ _generate_parametrized_test_methods(param_items, ...)
 ```
 
 #### Step 4: `_extract_requests_for_url()`
@@ -155,13 +153,6 @@ from apis.mall_center import _list_page
 @allure.story('/api/mall/list')
 class TestClass:
 
-    def setup_class(self):
-        self.headers = {
-            "channel": "pc",
-            "client": "op",
-            "authorization": f"bearer {os.environ['token']}",
-        }
-
     @pytest.mark.parametrize("status", [1, 2, 3])
     @allure.title("商品列表: status 查询")
     def test_0_list_page(self, status):
@@ -170,9 +161,10 @@ class TestClass:
             "page": "1",
             "page_size": "20",
         }
-        with _list_page(params=params, headers=self.headers) as r:
+        with _list_page(params=params) as r:
             assert r.status_code == 200
-            assert r.json()['code'] == 200
+            data = r.json()
+            assert data['code'] == 200
 
     @pytest.mark.parametrize("category_id", ["1001", "1002"])
     @allure.title("商品列表: category_id 查询")
@@ -182,9 +174,10 @@ class TestClass:
             "page": "1",
             "page_size": "20",
         }
-        with _list_page(params=params, headers=self.headers) as r:
+        with _list_page(params=params) as r:
             assert r.status_code == 200
-            assert r.json()['code'] == 200
+            data = r.json()
+            assert data['code'] == 200
 ```
 
 ---
@@ -205,13 +198,12 @@ flowchart TD
     C -->|是 或文件不存在| E[har_parser.extract_requests_from_har<br/>一次解析HAR]
     E --> F[match_api_files_for_har<br/>传入预解析请求列表]
     F --> G[URLMatcher.find_matching_api_file<br/>target_url → 定位目标API]
-    G --> H[generate_scenario_test_content<br/>har_file_path, api_files, task_id, target_api_file]
+    G --> H[generate_scenario_test_content<br/>har_file_path, api_filestask_id, target_api_file]
     H --> I[_get_requests_from_source<br/>优先HAR/回退API文件]
-    I --> J[_generate_test_case_imports<br/>多函数, import_pytest=False]
+    I --> J[_generate_test_case_imports<br/>多函数, ]
     J --> K[_extract_api_info<br/>feature_name, story_name]
     K --> L[_generate_test_case_description<br/>severity=CRITICAL]
-    L --> M[_generate_test_class_setup<br/>target_api_file → 自定义headers]
-    M --> N[_generate_scenario_test_method_definition]
+    L --> N[_generate_scenario_test_method_definition]
     N --> O[_generate_scenario_step_functions<br/>遍历requests]
     O --> P[生成步骤调用]
     P --> Q[write_test_file 写入文件]
@@ -222,7 +214,7 @@ flowchart TD
 #### Step 1: `generate_scenario_testcase()`
 
 ```
-输入: har_file_path, target_url, task_id, overwrite=False
+输入: har_file_path, target_urltask_id, overwrite=False
  └─ 校验 HAR 文件存在
  └─ har_parser.extract_requests_from_har() → 一次解析 HAR
  └─ match_api_files_for_har(har_file_path, all_requests) → 传入预解析请求列表
@@ -236,12 +228,12 @@ flowchart TD
 #### Step 2: `generate_scenario_test_content()`
 
 ```
-输入: har_file_path?, api_files, task_id?, target_api_file?
+输入: har_file_path?, api_filestask_id?, target_api_file?
  └─ _get_requests_from_source(har_file_path, api_files, target_api_file)
  │    ├─ HAR 存在: har_parser.extract_requests_from_har() → 请求列表
  │    └─ 无 HAR: 从 API 文件构建模拟请求信息
  │
- ├─ _generate_test_case_imports(api_files, import_pytest=False)
+ ├─ _generate_test_case_imports(api_files, )
  │    └─ 多函数模式: 按服务包分组导入，不导入 pytest
  │
  ├─ _extract_api_info(target_api_file)
@@ -249,10 +241,7 @@ flowchart TD
  │
  ├─ _generate_test_case_description(severity="CRITICAL")
  │
- ├─ _generate_test_class_setup(target_api_file)
- │    └─ 从目标 API 文件提取自定义 headers
- │
- ├─ _generate_scenario_test_method_definition(target_api_file)
+├─ _generate_scenario_test_method_definition(target_api_file)
  │    ├─ @allure.title("接口描述")
  │    └─ def test_funcname(self):
  │       test_data = {}
@@ -294,11 +283,6 @@ from apis.mall_center import (
 @allure.story('/order/submit')
 class TestClass:
 
-    def setup_class(self):
-        self.headers = {
-            "authorization": f"{os.environ['token']}",
-        }
-
     @allure.title("商品下单流程")
     def test_submit_order(self):
 
@@ -308,26 +292,29 @@ class TestClass:
         @allure.step("用户登录")
         def step_login():
             data = {"username": "test", "password": "123456"}
-            with _login(data=data, headers=self.headers) as r:
+            with _login(data=data) as r:
                 assert r.status_code == 200
-                assert r.json()['code'] == 200
-                test_data['token'] = r.json()['data']['token']
+                data = r.json()
+                assert data['code'] == 200
+                test_data['token'] = data['data']['token']
 
         @allure.step("获取商品列表")
         def step_list_page():
             params = {"page": "1", "page_size": "20"}
-            with _list_page(params=params, headers=self.headers) as r:
+            with _list_page(params=params) as r:
                 assert r.status_code == 200
-                assert r.json()['code'] == 200
-                test_data['product_list'] = r.json()
+                data = r.json()
+                assert data['code'] == 200
+                test_data['product_list'] = data
 
         @allure.step("提交订单")
         def step_submit_order():
             data = {"product_id": test_data['product_list']['data'][0]['id']}
-            with _submit_order(data=data, headers=self.headers) as r:
+            with _submit_order(data=data) as r:
                 assert r.status_code == 200
-                assert r.json()['code'] == 200
-                test_data['order_id'] = r.json()['data']['order_id']
+                data = r.json()
+                assert data['code'] == 200
+                test_data['order_id'] = data['data']['order_id']
 
         # 执行所有测试步骤
         step_login()
@@ -391,9 +378,9 @@ flowchart TD
       │    ├─ 若 overwrite=False 且测试文件已存在 → "skipped"
       │    ├─ 判断模式:
       │    │    ├─ "列表" in description → parametrized_list
-      │    │    │    └─ generate_parametrized_test_content(None, api_file, task_id)
-      │    │    └─ 其他 → complex_scenario
-      │    │         └─ generate_scenario_test_content(None, [api_file], task_id, api_file)
+    │    │    │    └─ generate_parametrized_test_content(None, api_file, task_id)
+    │    │    └─ 其他 → complex_scenario
+    │    │         └─ generate_scenario_test_content(None, [api_file], task_id, api_file)
       │    └─ await write_test_file() → 异步写入 → "generated"
       └─ 汇总所有结果 → {total, skipped, generated, failed, generated_files}
  └─ await format_directory(output_dir) → 批量 ruff 格式化
@@ -429,12 +416,6 @@ from apis.mall_center import _list_page
 @allure.story('/api/mall/list')
 class TestClass:
 
-    def setup_class(self):
-        self.headers = {
-            "channel": "pc",
-            "client": "op",
-        }
-
     @pytest.mark.parametrize("status", [0, 1, 2])
     @allure.title("商品列表: status 查询")
     def test_0_list_page(self, status):
@@ -443,9 +424,10 @@ class TestClass:
             "page": "1",
             "page_size": "20",
         }
-        with _list_page(data=data, headers=self.headers) as r:
+        with _list_page(data=data) as r:
             assert r.status_code == 200
-            assert r.json()['code'] == 200
+            data = r.json()
+            assert data['code'] == 200
 ```
 
 ---
@@ -481,5 +463,4 @@ class TestClass:
 | `_parse_state_values()` | 从备注解析状态枚举值 | batch |
 | `_generate_test_case_imports()` | 生成导入语句 | 所有模式 |
 | `_generate_test_case_description()` | 生成 allure 描述 | 所有模式 |
-| `_generate_test_class_setup()` | 生成 setup_class | 所有模式 |
 | `_generate_step_function_body()` | 生成步骤函数体 | scenario |
