@@ -55,7 +55,9 @@ async def generate_api_files_from_har(
         if swagger_url and swagger_url not in swagger_docs_cache:
             doc = await api_generator.swagger_handler.get_swagger_doc(swagger_url)
             swagger_docs_cache[swagger_url] = doc
-            logger.debug(f"  [预取] Swagger 文档已缓存: {swagger_url} (路径数: {len(doc.get('paths', {})) if doc else 0})")
+            logger.debug(
+                f"  [预取] Swagger 文档已缓存: {swagger_url} (路径数: {len(doc.get('paths', {})) if doc else 0})"
+            )
     logger.info(f"[并行处理] Swagger 文档预取完成，缓存 {len(swagger_docs_cache)} 个文档")
 
     async def _process_one(request_info: dict) -> str | None:
@@ -69,7 +71,9 @@ async def generate_api_files_from_har(
             swagger_url = APIConfig.SWAGGER_DOC_URLS().get(service_package)
             swagger_doc = swagger_docs_cache.get(swagger_url)
             result = await api_generator.generate_api_file(
-                request_info, force_overwrite=force_overwrite, swagger_doc=swagger_doc,
+                request_info,
+                force_overwrite=force_overwrite,
+                swagger_doc=swagger_doc,
             )
             elapsed = time.time() - task_start
             if result:
@@ -104,7 +108,9 @@ async def generate_api_files_from_har(
         if completed_count % 10 == 0 or completed_count == len(requests):
             logger.debug(f"  [并行进度] {completed_count}/{len(requests)} 已完成")
     parallel_elapsed = time.time() - parallel_start
-    logger.info(f"[并行处理] 完成! 成功: {len(generated_files)}, 失败/跳过: {fail_count}, 总耗时: {parallel_elapsed:.2f}s")
+    logger.info(
+        f"[并行处理] 完成! 成功: {len(generated_files)}, 失败/跳过: {fail_count}, 总耗时: {parallel_elapsed:.2f}s"
+    )
     logger.info("=" * 60)
 
     # 批量格式化生成的 API 文件

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import os
-from typing import Any
+from typing import Any, Optional
 
 from .config import APIConfig
 from .logger import logger
@@ -12,19 +14,19 @@ from .utils import (
     write_test_file,
 )
 
-
 class APIGenerator:
     """API文件生成器类"""
 
     # 定义默认的 Swagger 信息结构常量
     DEFAULT_SWAGGER_INFO = {"description": "", "parameters": {}, "summary": ""}
 
-    def __init__(self, output_dir: str = None):
+    def __init__(self, output_dir: str | None = None, async_mode: bool = False):
         """
         初始化API生成器
 
         Args:
             output_dir: API文件输出目录，默认为APIConfig.DEFAULT_API_DIR
+            async_mode: 是否生成异步模式代码（使用 async_client + aiohttp）
 
         Example:
             generator = APIGenerator(output_dir="api")
@@ -32,6 +34,7 @@ class APIGenerator:
         if output_dir is None:
             output_dir = APIConfig.DEFAULT_API_DIR()
         self.output_dir = output_dir
+        self.async_mode = async_mode
         self.swagger_handler = SwaggerHandler(api_generator=self)
         self.url_matcher = URLMatcher()
 
@@ -138,7 +141,13 @@ class APIGenerator:
             "function_name": url_info["function_name"],
         }
 
-    async def generate_api_file(self, request_info: dict, force_overwrite: bool = False, swagger_info: dict = None, swagger_doc: dict = None):
+    async def generate_api_file(
+        self,
+        request_info: dict[str, Any],
+        force_overwrite: bool = False,
+        swagger_info: dict[str, Any] | None = None,
+        swagger_doc: dict[str, Any] | None = None,
+    ):
         """生成API文件（异步）
 
         Args:
@@ -156,7 +165,9 @@ class APIGenerator:
             # 获取整个Swagger文档（用于URL模板匹配和获取API信息）
             if swagger_doc is None:
                 if service_package in APIConfig.SWAGGER_DOC_URLS():
-                    swagger_doc = await self.swagger_handler.get_swagger_doc(APIConfig.SWAGGER_DOC_URLS()[service_package])
+                    swagger_doc = await self.swagger_handler.get_swagger_doc(
+                        APIConfig.SWAGGER_DOC_URLS()[service_package]
+                    )
 
             # 设置swagger_data到url_matcher
             self.url_matcher.swagger_data = swagger_doc
@@ -202,7 +213,9 @@ class APIGenerator:
 
         return filepath
 
-    def _generate_params_string(self, params_dict: dict[str, Any], swagger_info: dict[str, Any] = None) -> str:
+    def _generate_params_string(
+        self, params_dict: dict[str, Any], swagger_info: dict[str, Any] | None = None
+    ) -> str:
         """
         生成API文件中的参数字符串
 
@@ -220,13 +233,13 @@ class APIGenerator:
             result = generator.generate_params_string(params)
             # 返回生成的参数字符串
         """
-        if swagger_info is None:
-            swagger_info = self.DEFAULT_SWAGGER_INFO.copy()
         if not params_dict:
             return "{}"
 
         # 直接使用 Swagger 的 parameters 字典（包含 dotted key 如 "payDTO.accountName"），
         # format_params_for_python 会递归查找嵌套键的注释
+        if swagger_info is None:
+            swagger_info = self.DEFAULT_SWAGGER_INFO
         comments = swagger_info.get("parameters", {})
         return format_params_for_python(params_dict, format_parameter_value, comments, inline=False)
 
@@ -249,23 +262,30 @@ class APIGenerator:
 
         imports.append("import os")
         if is_file_upload or is_multipart:
-            imports.append("from requests_toolbelt import MultipartEncoder")
+            if self.async_mode:
+                imports.append("from aiohttp import FormData")
+            else:
+                imports.append("from requests_toolbelt import MultipartEncoder")
 
         if is_need_urlencode:
             imports.append("from urllib.parse import urlencode")
 
-        imports.append("from util.client import client")
+        if self.async_mode:
+            imports.append("from har2pytest.client import async_client as client")
+        else:
+            imports.append("from har2pytest.client import client")
         imports.append("")
         return imports
 
-    def _determine_param_info(self, parsed_info: dict[str, Any]) -> tuple[str | None, dict | None]:
+    def _determine_param_info(
+        self, parsed_info: dict[str, Any]
+    ) -> tuple[str | None, dict[str, Any] | None]:
         """根据解析后的请求信息确定参数名和参数数据，用于 _process_parameters 和 _generate_function_definition 共用。"""
         method = parsed_info["method"]
         path_params = parsed_info["path_params"]
         query_params = parsed_info["query_params"]
         post_data = parsed_info["post_data"]
         is_file_upload = parsed_info["is_file_upload"]
-        is_multipart = parsed_info.get("is_multipart", False)
         is_need_urlencode = parsed_info["is_need_urlencode"]
 
         if method == "GET" and query_params:
@@ -282,7 +302,9 @@ class APIGenerator:
                     return "data", post_data
         return None, None
 
-    def _process_parameters(self, parsed_info: dict[str, Any], swagger_info: dict[str, Any] = None) -> list[str]:
+    def _process_parameters(
+        self, parsed_info: dict[str, Any], swagger_info: dict[str, Any] | None = None
+    ) -> list[str]:
         """
         处理参数
 
@@ -296,7 +318,7 @@ class APIGenerator:
             List[str]: 参数定义代码列表
         """
         if swagger_info is None:
-            swagger_info = self.DEFAULT_SWAGGER_INFO.copy()
+            swagger_info = self.DEFAULT_SWAGGER_INFO
         params_section = []
 
         headers = parsed_info["headers"]
@@ -313,7 +335,7 @@ class APIGenerator:
         formatted_headers = format_headers_for_python(headers)
         if is_need_urlencode:
             urlencode_headers = headers.copy()
-            urlencode_headers["content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
+            urlencode_headers["content-type"] = "application/x-www-form-urlencoded; charset=UTF-8"
             formatted_urlencode_headers = format_headers_for_python(urlencode_headers)
             params_section.append(f"headers = {formatted_urlencode_headers}")
         else:
@@ -322,10 +344,7 @@ class APIGenerator:
         return params_section
 
     def _handle_file_upload(self, post_data: Any) -> list[str]:
-        """
-        处理文件上传
-
-        生成文件上传的代码实现，动态识别文件参数名
+        """处理文件上传，生成代码实现。
 
         Args:
             post_data: POST数据
@@ -346,46 +365,64 @@ class APIGenerator:
         if file_key is None:
             raise ValueError("文件上传参数格式错误：未找到文件参数")
 
-        function_def = []
-        function_def.append(f'    with open(files["{file_key}"], "rb") as f:')
-        function_def.append(f'        filename = os.path.basename(files["{file_key}"])')
-        function_def.append("        m = MultipartEncoder(")
-        function_def.append("            fields={")
-        for key, value in post_data.items():
-            if key == file_key:
-                function_def.append(f'                "{file_key}": (filename, f, "text/plain")')
-            else:
-                function_def.append(f'                "{key}": files["{key}"],')
-        function_def.append("            }")
-        function_def.append("        )")
-        function_def.append('        headers["content-type"] = m.content_type')
-        function_def.append("        with client.post(url=url, headers=headers, data=m) as r:")
-        function_def.append("            return r")
-        return function_def
+        if self.async_mode:
+            # 异步模式：使用 aiohttp FormData
+            function_def = []
+            function_def.append('    data = FormData()')
+            for key in post_data:
+                if key == file_key:
+                    function_def.append(f'    data.add_field("{file_key}", open(files["{file_key}"], "rb"),')
+                    function_def.append(f'        filename=os.path.basename(files["{file_key}"]),')
+                    function_def.append('        content_type="text/plain")')
+                else:
+                    function_def.append(f'    data.add_field("{key}", files["{key}"])')
+            function_def.append("    return client.post(url=url, headers=headers, data=data)")
+            return function_def
+        else:
+            # 同步模式：使用 MultipartEncoder
+            function_def = []
+            function_def.append(f'    filename = os.path.basename(files["{file_key}"])')
+            function_def.append("    m = MultipartEncoder(")
+            function_def.append("        fields={")
+            for key, value in post_data.items():
+                if key == file_key:
+                    function_def.append(
+                        f'            "{file_key}": (filename, open(files["{file_key}"], "rb"), "text/plain")'
+                    )
+                else:
+                    function_def.append(f'            "{key}": files["{key}"],')
+            function_def.append("        }")
+            function_def.append("    )")
+            function_def.append('    headers["content-type"] = m.content_type')
+            function_def.append("    return client.post(url=url, headers=headers, data=m)")
+            return function_def
 
     def _handle_multipart_form(self) -> list[str]:
-        """
-        处理 multipart/form-data 请求（无文件上传）
-
-        生成 MultipartEncoder 编码的代码实现
+        """处理 multipart/form-data 请求（无文件上传）。
 
         Returns:
             List[str]: multipart 表单代码列表
         """
         function_def = []
-        function_def.append("    # 构建 multipart/form-data 请求")
-        function_def.append("    m = MultipartEncoder(fields=data)")
-        function_def.append("")
-        function_def.append("    # 设置正确的 Content-Type（包含 boundary）")
-        function_def.append('    headers["content-type"] = m.content_type')
-        function_def.append("    with client.post(url=url, data=m, headers=headers) as r:")
-        function_def.append("        return r")
+        if self.async_mode:
+            function_def.append("    # 构建 multipart/form-data 请求")
+            function_def.append("    fd = FormData()")
+            function_def.append("    for k, v in data.items():")
+            function_def.append("        fd.add_field(k, str(v))")
+            function_def.append("    return client.post(url=url, data=fd, headers=headers)")
+        else:
+            function_def.append("    # 构建 multipart/form-data 请求")
+            function_def.append("    m = MultipartEncoder(fields=data)")
+            function_def.append("")
+            function_def.append("    # 设置正确的 Content-Type（包含 boundary）")
+            function_def.append('    headers["content-type"] = m.content_type')
+            function_def.append("    return client.post(url=url, data=m, headers=headers)")
         return function_def
 
     def _handle_http_method(
         self,
         method: str,
-        has_data: bool,
+        params_var: Optional[str] | None,
         path_params: dict[str, Any],
         query_params: dict[str, Any],
         is_need_urlencode: bool,
@@ -411,29 +448,28 @@ class APIGenerator:
 
         if method == "GET":
             if query_params:
-                function_def.append("    with client.get(url=url, params=params, headers=headers) as r:")
+                function_def.append("    return client.get(url=url, params=params, headers=headers)")
             else:
-                function_def.append("    with client.get(url=url, headers=headers) as r:")
+                function_def.append("    return client.get(url=url, headers=headers)")
         elif method == "POST":
             if path_params:
-                function_def.append("    with client.post(url=url, headers=headers) as r:")
-            elif has_data:
+                function_def.append("    return client.post(url=url, headers=headers)")
+            elif params_var:
                 if is_need_urlencode:
                     function_def.append(
                         "    data = urlencode(data) # application/x-www-form-urlencoded传参需要特殊处理"
                     )
                     function_def.append("")
-                    function_def.append("    with client.post(url=url, data=data, headers=headers) as r:")
+                    function_def.append("    return client.post(url=url, data=data, headers=headers)")
                 elif is_json_content:
-                    function_def.append("    with client.post(url=url, json=data, headers=headers) as r:")
+                    function_def.append("    return client.post(url=url, json=data, headers=headers)")
                 else:
-                    function_def.append("    with client.post(url=url, data=data, headers=headers) as r:")
+                    function_def.append("    return client.post(url=url, data=data, headers=headers)")
             else:
-                function_def.append("    with client.post(url=url, headers=headers) as r:")
+                function_def.append("    return client.post(url=url, headers=headers)")
         else:
             raise ValueError(f"不支持的HTTP方法: {method}。目前只支持GET和POST请求。")
 
-        function_def.append("        return r")
         return function_def
 
     def _generate_function_definition(
@@ -510,7 +546,7 @@ class APIGenerator:
             function_def.extend(multipart_code)
         else:
             http_method_code = self._handle_http_method(
-                method, param_name is not None, path_params, query_params, is_need_urlencode, is_json_content
+                method, param_name, path_params, query_params, is_need_urlencode, is_json_content
             )
             function_def.extend(http_method_code)
 
@@ -521,8 +557,8 @@ class APIGenerator:
         self,
         request_info: dict[str, Any],
         function_name: str,
-        swagger_info: dict[str, Any] = None,
-        parsed_info: dict[str, Any] = None,
+        swagger_info: dict[str, Any] | None = None,
+        parsed_info: dict[str, Any] | None = None,
     ) -> str:
         """
         生成API文件内容
@@ -550,7 +586,7 @@ class APIGenerator:
             # 返回生成的文件内容
         """
         if swagger_info is None:
-            swagger_info = self.DEFAULT_SWAGGER_INFO.copy()
+            swagger_info = self.DEFAULT_SWAGGER_INFO
         if parsed_info is None:
             parsed_info = self._parse_request_info(request_info)
         imports = self._generate_imports(parsed_info)
@@ -560,7 +596,7 @@ class APIGenerator:
         content_parts = imports + params_section + function_def
         return "\n".join(content_parts)
 
-    def generate_index_file(self, generated_files: list[str]):
+    def generate_index_file(self, generated_files: list[str]) -> None:
         """
         生成API索引文件
 
@@ -579,7 +615,7 @@ class APIGenerator:
             # 生成api/__init__.py索引文件
         """
         # 按照服务包分组
-        service_packages = {}
+        service_packages: dict[str, list[str]] = {}
         for filepath in generated_files:
             # 获取文件相对于 output_dir 的路径
             rel_path = filepath.replace(self.output_dir, "").replace("\\", "/").lstrip("/")
@@ -615,7 +651,7 @@ class APIGenerator:
                 content = [""]
 
             # 收集需要添加的导入语句
-            import_statements = []
+            import_statements: list[str] = []
             for filepath in files:
                 module_path = filepath.replace(self.output_dir, "").replace("\\", "/").lstrip("/")
                 module_name = module_path.replace(".py", "").replace("/", ".")
@@ -641,7 +677,7 @@ class APIGenerator:
 
                 # 写回文件
                 with open(package_init_path, "w", encoding="utf-8") as f:
-                    f.write("\n".join(content))
+                    _ = f.write("\n".join(content))
 
                 logger.info(f"更新服务包索引文件: {package_init_path}")
             else:
@@ -652,5 +688,5 @@ class APIGenerator:
         if not os.path.exists(main_init_path):
             # 创建空白的 __init__.py 文件
             with open(main_init_path, "w", encoding="utf-8") as f:
-                f.write("")
+                _ = f.write("")
             logger.info(f"创建主目录索引文件: {main_init_path}")

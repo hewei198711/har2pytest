@@ -42,4 +42,4 @@ jobs:
 
       - name: Run tests
         run: |
-          python -m pytest tests/ -v --cov=har2pytest --cov-report=term
+          python -m pytest tests/

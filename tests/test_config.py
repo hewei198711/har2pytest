@@ -28,7 +28,7 @@ def test_default_config():
         assert APIConfig.INVALID_PARAMS() == {"partnerKey", "sign", "timestamp", "nonce", "rnd"}
         assert APIConfig.HEADERS_TO_INCLUDE() == {
             "authorization": "f\"bearer {os.environ['token']}\"",
-            "content-type": "application/json;charset=UTF-8"
+            "content-type": "application/json;charset=UTF-8",
         }
         assert APIConfig.REQUIRED_HEADERS() == {"authorization": "f\"bearer {os.environ['token']}\""}
     finally:
@@ -178,10 +178,25 @@ def test_default_list_query_and_state_patterns():
 @allure.story("服务包判断")
 @allure.title("测试根据URL判断服务包")
 def test_determine_service_package():
-    assert APIConfig.determine_service_package("https://example.com/api/user/login") == "apis"
+    test_config_path = os.path.join(os.path.dirname(__file__), "har2pytest_config_test.json")
+    original_config = os.environ.get("HAR2PYTEST_CONFIG")
 
-    assert APIConfig.determine_service_package("https://example.com/api/v1/user/login") == "apis"
+    try:
+        os.environ["HAR2PYTEST_CONFIG"] = test_config_path
+        APIConfig._config = None
+        APIConfig._load_config()
 
-    assert APIConfig.determine_service_package("") == "apis"
+        assert APIConfig.determine_service_package("https://example.com/api/user/login") == "apis"
 
-    assert APIConfig.determine_service_package(None) == "apis"
+        assert APIConfig.determine_service_package("https://example.com/api/v1/user/login") == "apis"
+
+        assert APIConfig.determine_service_package("") == "apis"
+
+        assert APIConfig.determine_service_package(None) == "apis"
+    finally:
+        if original_config:
+            os.environ["HAR2PYTEST_CONFIG"] = original_config
+        else:
+            if "HAR2PYTEST_CONFIG" in os.environ:
+                del os.environ["HAR2PYTEST_CONFIG"]
+        APIConfig._config = None

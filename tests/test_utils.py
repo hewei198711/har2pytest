@@ -18,7 +18,7 @@ from har2pytest.utils import (
 @allure.story("URL提取")
 @allure.title("测试从文件中提取URL")
 def test_parse_api_file_url():
-    test_content = '''def _user_login(data=data, headers=headers):
+    test_content = '''def user_login(data=data, headers=headers):
     """
     用户登录
     /user/login
@@ -43,9 +43,9 @@ def test_parse_api_file_url():
 @allure.title("测试从API文件中提取URL")
 def test_extract_url_from_api_file():
     _API_FILE_CACHE.clear()
-    test_content = '''from util.client import client
+    test_content = '''from har2pytest.client import client
 
-def _user_order_getStoreAgentOrderList(data=data, headers=headers):
+def user_order_getStoreAgentOrderList(data=data, headers=headers):
     """
     PC店铺查询兑换订单列表
     /user/order/getStoreAgentOrderList
@@ -96,7 +96,7 @@ def test_format_parameter_value():
 @allure.story("Headers提取")
 @allure.title("测试从API文件中提取headers配置")
 def test_parse_api_file_headers():
-    test_content = '''from util.client import client
+    test_content = '''from har2pytest.client import client
 
 headers = {
     "channel": "pc",
@@ -105,7 +105,7 @@ headers = {
     "authorization": f"bearer {os.environ['token']}",
 }
 
-def _user_login(data=data, headers=headers):
+def user_login(data=data, headers=headers):
     """
     用户登录
     /user/login

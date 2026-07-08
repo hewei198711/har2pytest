@@ -292,9 +292,7 @@ def test_form_urlencoded_data():
                     "request": {
                         "url": "https://example.com/api/login",
                         "method": "POST",
-                        "headers": [
-                            {"name": "Content-Type", "value": "application/x-www-form-urlencoded"}
-                        ],
+                        "headers": [{"name": "Content-Type", "value": "application/x-www-form-urlencoded"}],
                         "postData": {
                             "mimeType": "application/x-www-form-urlencoded",
                             "text": "username=testuser&password=123456&remember=true",
@@ -333,9 +331,7 @@ def test_form_urlencoded_with_encoded_chars():
                     "request": {
                         "url": "https://example.com/api/search",
                         "method": "POST",
-                        "headers": [
-                            {"name": "Content-Type", "value": "application/x-www-form-urlencoded"}
-                        ],
+                        "headers": [{"name": "Content-Type", "value": "application/x-www-form-urlencoded"}],
                         "postData": {
                             "mimeType": "application/x-www-form-urlencoded",
                             "text": "keyword=%E6%B5%8B%E8%AF%95&page=1&size=10",
@@ -374,9 +370,7 @@ def test_form_urlencoded_empty():
                     "request": {
                         "url": "https://example.com/api/submit",
                         "method": "POST",
-                        "headers": [
-                            {"name": "Content-Type", "value": "application/x-www-form-urlencoded"}
-                        ],
+                        "headers": [{"name": "Content-Type", "value": "application/x-www-form-urlencoded"}],
                         "postData": {
                             "mimeType": "application/x-www-form-urlencoded",
                             "text": "",

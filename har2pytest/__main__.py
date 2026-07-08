@@ -14,7 +14,6 @@ from .har_parser import HARParser
 from .logger import logger
 from .swagger_handler import SwaggerHandler
 from .testcase_generator import TestCaseGenerator
-from .url_matcher import URLMatcher
 
 
 def main():
@@ -23,7 +22,7 @@ def main():
     """
     # 初始化配置（通过 get_config 触发，会自动缓存）
     APIConfig.get_config("BASE_URLS")
-    
+
     # 创建主解析器
     parser = argparse.ArgumentParser(
         prog="har2pytest",
@@ -50,7 +49,8 @@ def main():
         """,
     )
     parser.add_argument(
-        "--version", action="version",
+        "--version",
+        action="version",
         version=f"har2pytest {importlib.metadata.version('har2pytest')}",
     )
 
@@ -62,12 +62,17 @@ def main():
     api_parser.add_argument("har_file", nargs="?", default="api_request.har", help="HAR文件路径")
     api_parser.add_argument("--output", "-o", default=APIConfig.DEFAULT_API_DIR(), help="输出目录")
     api_parser.add_argument("--overwrite", action="store_true", help="强制覆盖现有文件")
+    api_parser.add_argument(
+        "--async", dest="async_mode", action="store_true", help="生成异步模式代码（使用 async_client + aiohttp）"
+    )
 
     # summary 子命令
     sum_parser = subparsers.add_parser(
         "summary", help="显示HAR文件的API请求摘要", description="显示HAR文件的API请求摘要"
     )
-    sum_parser.add_argument("har_file", nargs="?", default="api_request.har", help="HAR文件路径（默认为 api_request.har）")
+    sum_parser.add_argument(
+        "har_file", nargs="?", default="api_request.har", help="HAR文件路径（默认为 api_request.har）"
+    )
 
     # testcase 子命令
     tc_parser = subparsers.add_parser(
@@ -89,7 +94,9 @@ def main():
         har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
         """,
     )
-    tc_parser.add_argument("har_file", nargs="?", default="api_request.har", help="HAR文件路径（默认 api_request.har，batch模式不需要）")
+    tc_parser.add_argument(
+        "har_file", nargs="?", default="api_request.har", help="HAR文件路径（默认 api_request.har）"
+    )
     tc_parser.add_argument(
         "--pattern",
         default="list_query",
@@ -100,8 +107,11 @@ def main():
     tc_parser.add_argument("--url", "-u", help="目标接口URL（可选，指定后只生成该接口的测试用例）")
     tc_parser.add_argument("--output", "-o", default="testcases", help="输出目录")
     tc_parser.add_argument("--api-dir", default="apis", help="API文件目录")
-    tc_parser.add_argument("--api-files", help="指定API文件或HAR文件（batch模式使用，多个文件用逗号分隔）")
+    tc_parser.add_argument("--api-files", default="api_request.har", help="指定API文件或HAR文件（batch模式使用，多个文件用逗号分隔）")
     tc_parser.add_argument("--overwrite", action="store_true", help="强制覆盖已存在的测试用例文件")
+    tc_parser.add_argument(
+        "--async", dest="async_mode", action="store_true", help="生成异步模式测试代码（使用 async/await）"
+    )
 
     # swagger 子命令
     swagger_parser = subparsers.add_parser(
@@ -127,6 +137,9 @@ def main():
     swagger_parser.add_argument("--output", "-o", default=APIConfig.DEFAULT_API_DIR(), help="输出目录")
     swagger_parser.add_argument("--overwrite", action="store_true", help="强制覆盖现有文件")
     swagger_parser.add_argument("--path", "-p", help="只生成指定的API路径（如 /pet/{petId}）")
+    swagger_parser.add_argument(
+        "--async", dest="async_mode", action="store_true", help="生成异步模式代码（使用 async_client + aiohttp）"
+    )
 
     # 解析参数
     args = parser.parse_args()
@@ -152,7 +165,7 @@ def main():
 
 
 async def handle_api(args):
-    """处理 api 命令"""  
+    """处理 api 命令"""
     har_file = args.har_file
     output_dir = args.output
     force_overwrite = args.overwrite
@@ -162,7 +175,7 @@ async def handle_api(args):
     logger.info(f"强制覆盖: {force_overwrite}")
     logger.info("-" * 50)
 
-    api_generator = APIGenerator(output_dir)
+    api_generator = APIGenerator(output_dir, async_mode=args.async_mode)
     generated_files = await generate_api_files_from_har(
         har_file, force_overwrite=force_overwrite, api_generator=api_generator
     )
@@ -196,7 +209,7 @@ async def handle_swagger(args):
         logger.info(f"只生成指定路径: {specific_path}")
     logger.info("-" * 50)
 
-    api_generator = APIGenerator(output_dir)
+    api_generator = APIGenerator(output_dir, async_mode=args.async_mode)
     swagger_handler = SwaggerHandler(api_generator=api_generator)
     generated_files = await swagger_handler.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)
 
@@ -234,7 +247,7 @@ async def handle_testcase(args):
         logger.info(f"强制覆盖: {overwrite}")
         logger.info("-" * 50)
 
-        generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
+        generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir, async_mode=args.async_mode)
         test_files = await generator.generate_parametrized_list_testcases(
             har_file, task_id, target_url, overwrite=overwrite
         )
@@ -260,14 +273,12 @@ async def handle_testcase(args):
         logger.info(f"强制覆盖: {overwrite}")
         logger.info("-" * 50)
 
-        generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
-        test_file = await generator.generate_scenario_testcase(
-            har_file, target_url, task_id, overwrite=overwrite
-        )
+        generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir, async_mode=args.async_mode)
+        test_file = await generator.generate_scenario_testcase(har_file, target_url, task_id, overwrite=overwrite)
 
         logger.info("-" * 50)
         if test_file:
-            logger.info(f"成功生成测试用例文件: {test_file.replace('\\', '/')}")
+            logger.info("成功生成测试用例文件: %s", test_file.replace("\\", "/"))
         else:
             logger.info("未生成新的测试用例文件")
 
@@ -284,8 +295,8 @@ async def handle_testcase(args):
         input_list = [f.strip() for f in api_files_arg.split(",")]
 
         # 如果输入是 .har 文件，解析 HAR 并提取对应的 API 文件
-        api_files_list = []
-        har_file_for_batch = None
+        api_files_list: list[str] = []
+        har_file_for_batch: str | None = None
         for item in input_list:
             if item.endswith(".har") and os.path.isfile(item):
                 logger.info(f"从 HAR 文件提取 API 请求: {item}")
@@ -296,7 +307,7 @@ async def handle_testcase(args):
                     logger.warning(f"HAR 文件 {item} 中没有找到有效的 API 请求")
                     continue
                 # 为每个不同的接口请求找到对应的 API 文件
-                generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
+                generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir, async_mode=args.async_mode)
                 api_files = await generator.match_api_files_for_har(item, all_requests)
                 api_files_list.extend(api_files)
                 logger.info(f"  从 HAR 文件提取到 {len(api_files)} 个 API 文件")
@@ -315,7 +326,7 @@ async def handle_testcase(args):
             logger.info(f"HAR文件: {har_file_for_batch}")
         logger.info("-" * 50)
 
-        generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir)
+        generator = TestCaseGenerator(api_dir=api_dir, output_dir=output_dir, async_mode=args.async_mode)
         result = await generator.generate_batch_testcases(
             api_files_list, task_id, overwrite=overwrite, har_file_path=har_file_for_batch
         )
@@ -328,7 +339,7 @@ async def handle_testcase(args):
         if result["generated_files"]:
             logger.info("生成的文件:")
             for f in result["generated_files"]:
-                logger.info(f"  - {f.replace('\\', '/')}")
+                logger.info("  - %s", f.replace("\\", "/"))
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 负责加载和管理 har2pytest 的配置信息，包括 API 基础 URL、服务映射、Swagger 文档 URL 等。
 """
 
+import copy
 import json
 import os
 import re
@@ -60,7 +61,7 @@ class APIConfig:
         Returns:
             tuple[dict, bool]: 返回配置字典和配置文件是否存在的标志。
         """
-        config = cls._default_config.copy()
+        config = copy.deepcopy(cls._default_config)
         config_file_exists = False
 
         # 尝试从环境变量读取配置文件路径
@@ -232,7 +233,7 @@ class APIConfig:
         return cls.get_config("STATE_VALUE_PATTERNS")
 
     @classmethod
-    def determine_service_package(cls, url: str) -> str:
+    def determine_service_package(cls, url: str | None) -> str:
         """根据 URL 判断所属的微服务包。
 
         通过 URL 的第一个路径段匹配 SERVICE_MAPPING 配置，
@@ -267,6 +268,3 @@ class APIConfig:
 
         # 默认服务包
         return cls.DEFAULT_API_DIR()
-
-
-

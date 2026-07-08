@@ -1,0 +1,59 @@
+{
+    "BASE_URLS": [
+        "https://api.example.com"
+    ],
+    "KILL_URLS": [
+        ".js",
+        ".css",
+        ".png",
+        ".jpg",
+        ".gif",
+        ".ico",
+        ".svg",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".eot"
+    ],
+    "DEFAULT_API_DIR": "apis",
+    "TESTCASE_DIR": "testcases",
+    "SERVICE_MAPPING": {
+        "mobile": "mobile_application",
+        "invt": "inventory_application",
+        "mgmt": "management_application"
+    },
+    "SWAGGER_DOC_URLS": {
+        "mobile_application": "https://api.example.com/mobile/v2/api-docs",
+        "inventory_application": "https://api.example.com/invt/v2/api-docs"
+    },
+    "HEADERS_TO_INCLUDE": {
+        "authorization": "f\"bearer {os.environ['token']}\"",
+        "content-type": "application/json;charset=UTF-8"
+    },
+    "REQUIRED_HEADERS": {
+        "authorization": "f\"bearer {os.environ['token']}\""
+    },
+    "INVALID_PARAMS": [
+        "rnd",
+        "timestamp",
+        "_",
+        "t",
+        "callback",
+        "jsonp"
+    ],
+    "LIST_QUERY_KEYWORDS": [
+        "列表",
+        "查询"
+    ],
+    "STATE_VALUE_PATTERNS": [
+        "(-?\\d+)\\s*[:：]",
+        {
+            "regex": "(\\w+)\\s*->",
+            "type": "str"
+        }
+    ],
+    "PATH_URLS": [
+        "/order/returnOrder/{id}",
+        "/order/{orderId}/detail"
+    ]
+}

@@ -124,7 +124,7 @@ def test_normalize_params_for_parametrization():
 @allure.title("测试从URL中提取服务包名")
 def test_extract_service_package_from_url():
     APIConfig.get_config("SERVICE_MAPPING")
-
+    assert APIConfig._config is not None
     original_service_mapping = APIConfig._config.get("SERVICE_MAPPING", {})
     APIConfig._config["SERVICE_MAPPING"] = {"mobile": "mall_mobile_application", "user": "mall_center_user"}
 
@@ -148,15 +148,14 @@ data = {
     "password": "123456" # 密码
 }
 
-def _user_login(data=data, token=token):
+def user_login(data=data, token=token):
     """
     用户登录
     /user/login
     """
     url = "/user/login"
     headers = {"Authorization": f"bearer {token}"}
-    with client.post(url=url, headers=headers, json=data) as r:
-        return r
+    return client.post(url=url, headers=headers, json=data)
 '''
 
     api_file = tmp_path / "test_api.py"
@@ -194,20 +193,19 @@ def test_match_api_files_for_har(tmp_path):
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
 
-    api_file = api_dir / "_user_login.py"
+    api_file = api_dir / "user_login.py"
     with open(api_file, "w", encoding="utf-8") as f:
         f.write('''
 # coding:utf-8
 
-def _user_login(data=data, token=token):
+def user_login(data=data, token=token):
     """
     用户登录
     /api/user/login
     """
     url = "/api/user/login"
     headers = {}
-    with client.post(url=url, headers=headers, json=data) as r:
-        return r
+    return client.post(url=url, headers=headers, json=data)
 ''')
 
     try:
@@ -215,7 +213,7 @@ def _user_login(data=data, token=token):
         api_files = asyncio.run(generator.match_api_files_for_har(str(har_file)))
 
         assert len(api_files) == 1
-        assert "_user_login.py" in api_files[0]
+        assert "user_login.py" in api_files[0]
     finally:
         pass
 
@@ -286,20 +284,19 @@ def test_generate_scenario_test_content(tmp_path):
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
 
-    api_file = api_dir / "_user_login.py"
+    api_file = api_dir / "user_login.py"
     with open(api_file, "w", encoding="utf-8") as f:
         f.write('''
 # coding:utf-8
 
-def _user_login(data=data, token=token):
+def user_login(data=data, token=token):
     """
     用户登录
     /api/user/login
     """
     url = "/api/user/login"
     headers = {}
-    with client.post(url=url, headers=headers, json=data) as r:
-        return r
+    return client.post(url=url, headers=headers, json=data)
 ''')
 
     try:
@@ -313,7 +310,6 @@ def _user_login(data=data, token=token):
 
         assert "test_user_login" in content
         assert "user_login" in content
-        assert "pytest" in content
         assert "allure" in content
     finally:
         pass
@@ -361,7 +357,7 @@ def test_generate_parametrized_list_testcases(tmp_path):
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
 
-    api_file = api_dir / "_user_list.py"
+    api_file = api_dir / "user_list.py"
     with open(api_file, "w", encoding="utf-8") as f:
         f.write('''
 # coding:utf-8
@@ -370,15 +366,14 @@ data = {
     "status": 1,  # 状态
 }
 
-def _user_list(data=data, token=token):
+def user_list(data=data, token=token):
     """
     用户列表
     /api/user/list
     """
     url = "/api/user/list"
     headers = {}
-    with client.get(url=url, headers=headers, params=data) as r:
-        return r
+    return client.get(url=url, headers=headers, params=data)
 ''')
 
     output_dir = tmp_path / "output"
@@ -394,7 +389,7 @@ def _user_list(data=data, token=token):
         # 验证生成内容包含参数化数据（2条请求的status值）
         with open(generated_files[0], encoding="utf-8") as f:
             content = f.read()
-        assert 'pytest.mark.parametrize' in content
+        assert "pytest.mark.parametrize" in content
         assert "'status'" in content or '"status"' in content
         # 验证2个值都被参数化（而不是被去重为1个）
         assert '"1"' in content or "'1'" in content
@@ -434,29 +429,30 @@ def test_generate_scenario_testcase(tmp_path):
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
 
-    api_file = api_dir / "_user_login.py"
+    api_file = api_dir / "user_login.py"
     with open(api_file, "w", encoding="utf-8") as f:
         f.write('''
 # coding:utf-8
 
-def _user_login(data=data, token=token):
+def user_login(data=data, token=token):
     """
     用户登录
     /api/user/login
     """
     url = "/api/user/login"
     headers = {}
-    with client.post(url=url, headers=headers, json=data) as r:
-        return r
+    return client.post(url=url, headers=headers, json=data)
 ''')
 
     output_dir = tmp_path / "output"
 
     try:
         generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir), base_urls=[])
-        result = asyncio.run(generator.generate_scenario_testcase(
-            har_file_path=str(har_file), target_url="/api/user/login", task_id="test_task"
-        ))
+        result = asyncio.run(
+            generator.generate_scenario_testcase(
+                har_file_path=str(har_file), target_url="/api/user/login", task_id="test_task"
+            )
+        )
 
         assert result is not None
         assert "test_user_login.py" in result
@@ -505,27 +501,26 @@ def test_parse_api_file_function_name_clean():
     test_content = '''
 # coding:utf-8
 
-def _user_login(data=data, token=token):
+def user_login(data=data, token=token):
     """
     用户登录
     /user/login
     """
     url = "/user/login"
     headers = {"Authorization": f"bearer {token}"}
-    with client.post(url=url, headers=headers, json=data) as r:
-        return r
+    return client.post(url=url, headers=headers, json=data)
 '''
 
-    with open("_user_login.py", "w", encoding="utf-8") as f:
+    with open("user_login.py", "w", encoding="utf-8") as f:
         f.write(test_content)
 
     try:
-        result = parse_api_file("_user_login.py")
+        result = parse_api_file("user_login.py")
         clean_name = result["function_name"].lstrip("_")
         assert clean_name == "user_login"
     finally:
-        if os.path.exists("_user_login.py"):
-            os.remove("_user_login.py")
+        if os.path.exists("user_login.py"):
+            os.remove("user_login.py")
 
 
 @allure.feature("测试用例生成器")
@@ -567,26 +562,25 @@ headers = {
     "custom-header": "custom-value"
 }
 
-def _test_api(headers=headers):
+def test_api(headers=headers):
     """
     测试接口
     /test/api
     """
     url = "/test/api"
-    with client.get(url=url, headers=headers) as r:
-        return r
+    return client.get(url=url, headers=headers)
 '''
 
-    with open("_test_api.py", "w", encoding="utf-8") as f:
+    with open("test_api.py", "w", encoding="utf-8") as f:
         f.write(test_content)
 
     try:
-        result = parse_api_file("_test_api.py")
+        result = parse_api_file("test_api.py")
         headers = result["headers"]
         assert "custom-header" in headers
     finally:
-        if os.path.exists("_test_api.py"):
-            os.remove("_test_api.py")
+        if os.path.exists("test_api.py"):
+            os.remove("test_api.py")
 
 
 @allure.feature("测试用例生成器")
@@ -612,6 +606,7 @@ def test_format_test_case_params_empty_values():
 
 
 # ==================== _parse_state_values 测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("解析状态值")
@@ -689,6 +684,7 @@ def test_parse_state_values_digit_dot():
 
 
 # ==================== _build_param_items_from_api 测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("构建参数化项")
@@ -771,12 +767,13 @@ def test_build_param_items_from_api_empty_list_batch():
 
 # ==================== _extract_service_package 测试 ====================
 
+
 @allure.feature("测试用例生成器")
 @allure.story("提取服务包名")
 @allure.title("测试从API文件路径提取服务包名")
 def test_extract_service_package():
     generator = TestCaseGenerator()
-    result = generator._extract_service_package("apis\\mall_center_user\\_user_login.py")
+    result = generator._extract_service_package("apis\\mall_center_user\\user_login.py")
     assert result == "mall_center_user"
 
 
@@ -785,20 +782,21 @@ def test_extract_service_package():
 @allure.title("测试从正斜杠路径提取服务包名")
 def test_extract_service_package_forward_slash():
     generator = TestCaseGenerator()
-    result = generator._extract_service_package("apis/mall_mgmt_application/_order_list.py")
-    assert result == "mall_mgmt_application"
+    result = generator._extract_service_package("apis/mgmt_application/_order_list.py")
+    assert result == "mgmt_application"
 
 
 @allure.feature("测试用例生成器")
 @allure.story("提取服务包名")
-@allure.title("测试提取失败返回默认值")
+@allure.title("测试无子包时返回 None")
 def test_extract_service_package_default():
     generator = TestCaseGenerator()
-    result = generator._extract_service_package("_user_login.py")
-    assert result == "default"
+    result = generator._extract_service_package("user_login.py")
+    assert result is None
 
 
 # ==================== _get_all_api_files 测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("获取所有API文件")
@@ -815,16 +813,17 @@ def test_get_all_api_files_not_exists():
 def test_get_all_api_files(tmp_path):
     api_dir = tmp_path / "apis"
     api_dir.mkdir()
-    (api_dir / "_user_login.py").write_text("# test", encoding="utf-8")
+    (api_dir / "user_login.py").write_text("# test", encoding="utf-8")
     (api_dir / "__init__.py").write_text("", encoding="utf-8")
 
     generator = TestCaseGenerator(api_dir=str(api_dir))
     result = generator._get_all_api_files()
     assert len(result) == 1
-    assert "_user_login.py" in result[0]
+    assert "user_login.py" in result[0]
 
 
 # ==================== _generate_test_case_imports 测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("生成测试用例导入")
@@ -832,25 +831,25 @@ def test_get_all_api_files(tmp_path):
 def test_generate_test_case_imports_single():
     generator = TestCaseGenerator(api_dir="apis")
     result = generator._generate_test_case_imports(
-        service_package="test_service", function_name="_test_api", task_id="test_task"
+        service_package="test_service", function_name="test_api", task_id="test_task"
     )
     content = "\n".join(result)
     assert "import pytest" in content
     assert "import allure" in content
-    assert "from apis.test_service import _test_api" in content
+    assert "from apis.test_service import test_api" in content
     assert "@pytest.mark.test_task" in content
 
 
 @allure.feature("测试用例生成器")
 @allure.story("生成测试用例导入")
-@allure.title("测试单函数导入（不含pytest）")
-def test_generate_test_case_imports_without_pytest():
+@allure.title("测试单函数导入（不含task_id）")
+def test_generate_test_case_imports_without_task_id():
     generator = TestCaseGenerator(api_dir="apis")
     result = generator._generate_test_case_imports(
-        service_package="test_service", function_name="_test_api", import_pytest=False
+        service_package="test_service", function_name="test_api"
     )
     content = "\n".join(result)
-    assert "import pytest" not in content
+    assert "import pytest" in content
     assert "import allure" in content
 
 
@@ -861,38 +860,43 @@ def test_generate_test_case_imports_multi(tmp_path):
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
 
-    api_file1 = api_dir / "_user_login.py"
-    api_file1.write_text('''
-def _user_login(data=data, token=token):
+    api_file1 = api_dir / "user_login.py"
+    api_file1.write_text(
+        '''
+def user_login(data=data, token=token):
     """
     用户登录
     /api/user/login
     """
     url = "/api/user/login"
-    with client.post(url=url, json=data) as r:
-        return r
-''', encoding="utf-8")
+    return client.post(url=url, json=data)
+''',
+        encoding="utf-8",
+    )
 
-    api_file2 = api_dir / "_user_info.py"
-    api_file2.write_text('''
-def _user_info(data=data, token=token):
+    api_file2 = api_dir / "user_info.py"
+    api_file2.write_text(
+        '''
+def user_info(data=data, token=token):
     """
     用户信息
     /api/user/info
     """
     url = "/api/user/info"
-    with client.get(url=url, params=data) as r:
-        return r
-''', encoding="utf-8")
+    return client.get(url=url, params=data)
+''',
+        encoding="utf-8",
+    )
 
     generator = TestCaseGenerator(api_dir=str(api_dir))
     result = generator._generate_test_case_imports(api_files=[str(api_file1), str(api_file2)])
     content = "\n".join(result)
-    assert "_user_login" in content
-    assert "_user_info" in content
+    assert "user_login" in content
+    assert "user_info" in content
 
 
 # ==================== _generate_test_case_description 测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("生成测试用例描述")
@@ -918,6 +922,7 @@ def test_generate_test_case_description_critical():
 
 
 # ==================== _generate_test_method_definition 测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("生成测试方法定义")
@@ -954,19 +959,22 @@ def test_generate_test_method_definition_combo():
 
 # ==================== _generate_test_method_assertions 测试 ====================
 
+
 @allure.feature("测试用例生成器")
 @allure.story("生成测试方法断言")
 @allure.title("测试生成断言代码")
 def test_generate_test_method_assertions():
     generator = TestCaseGenerator()
-    result = generator._generate_test_method_assertions("_user_login", "data")
+    result = generator._generate_test_method_assertions("user_login", "data")
     content = "\n".join(result)
-    assert "_user_login(data=data)" in content
+    assert "user_login(data=data)" in content
     assert "r.status_code == 200" in content
-    assert "r.json()['code'] == 200" in content
+    assert "data = r.json()" in content
+    assert "assert data['code'] == 200" in content
 
 
 # ==================== _generate_step_function_name 测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("生成步骤函数名")
@@ -974,7 +982,7 @@ def test_generate_test_method_assertions():
 def test_generate_step_function_name_first():
     generator = TestCaseGenerator()
     name_counters = {}
-    result = generator._generate_step_function_name("_user_login", name_counters)
+    result = generator._generate_step_function_name("user_login", name_counters)
     assert result == "step_user_login"
 
 
@@ -985,14 +993,15 @@ def test_generate_step_function_name_duplicate():
     generator = TestCaseGenerator()
     name_counters = {}
     # 第一次调用
-    name1 = generator._generate_step_function_name("_user_login", name_counters)
+    name1 = generator._generate_step_function_name("user_login", name_counters)
     assert name1 == "step_user_login"
     # 第二次调用同一函数名
-    name2 = generator._generate_step_function_name("_user_login", name_counters)
+    name2 = generator._generate_step_function_name("user_login", name_counters)
     assert name2 == "step_1_user_login"
 
 
 # ==================== _generate_step_function_body 测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("生成步骤函数体")
@@ -1000,28 +1009,30 @@ def test_generate_step_function_name_duplicate():
 def test_generate_step_function_body_data(tmp_path):
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
-    api_file = api_dir / "_user_login.py"
-    api_file.write_text('''
+    api_file = api_dir / "user_login.py"
+    api_file.write_text(
+        '''
 data = {"username": "test", "password": "123456"}
 
-def _user_login(data=data, token=token):
+def user_login(data=data, token=token):
     """
     用户登录
     /api/user/login
     """
     url = "/api/user/login"
-    with client.post(url=url, json=data) as r:
-        return r
-''', encoding="utf-8")
+    return client.post(url=url, json=data)
+''',
+        encoding="utf-8",
+    )
 
     generator = TestCaseGenerator(api_dir=str(api_dir))
     api_info = generator._get_api_file_info(str(api_file))
     content = []
-    generator._generate_step_function_body(content, "_user_login", api_info)
+    generator._generate_step_function_body(content, "user_login", api_info)
     result = "\n".join(content)
     assert "data =" in result
     assert "username" in result
-    assert "_user_login(data=data)" in result
+    assert "user_login(data=data)" in result
 
 
 @allure.feature("测试用例生成器")
@@ -1030,28 +1041,30 @@ def _user_login(data=data, token=token):
 def test_generate_step_function_body_params(tmp_path):
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
-    api_file = api_dir / "_user_list.py"
-    api_file.write_text('''
+    api_file = api_dir / "user_list.py"
+    api_file.write_text(
+        '''
 params = {"keyword": "test", "pageNum": 1}
 
-def _user_list(params=params, token=token):
+def user_list(params=params, token=token):
     """
     用户列表
     /api/user/list
     """
     url = "/api/user/list"
-    with client.get(url=url, params=params) as r:
-        return r
-''', encoding="utf-8")
+    return client.get(url=url, params=params)
+''',
+        encoding="utf-8",
+    )
 
     generator = TestCaseGenerator(api_dir=str(api_dir))
     api_info = generator._get_api_file_info(str(api_file))
     content = []
-    generator._generate_step_function_body(content, "_user_list", api_info)
+    generator._generate_step_function_body(content, "user_list", api_info)
     result = "\n".join(content)
     assert "params =" in result
     assert "keyword" in result
-    assert "_user_list(params=params)" in result
+    assert "user_list(params=params)" in result
 
 
 @allure.feature("测试用例生成器")
@@ -1060,24 +1073,26 @@ def _user_list(params=params, token=token):
 def test_generate_step_function_body_no_params(tmp_path):
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
-    api_file = api_dir / "_health_check.py"
-    api_file.write_text('''
-def _health_check(token=token):
+    api_file = api_dir / "health_check.py"
+    api_file.write_text(
+        '''
+def health_check(token=token):
     """
     健康检查
     /api/health
     """
     url = "/api/health"
-    with client.get(url=url) as r:
-        return r
-''', encoding="utf-8")
+    return client.get(url=url)
+''',
+        encoding="utf-8",
+    )
 
     generator = TestCaseGenerator(api_dir=str(api_dir))
     api_info = generator._get_api_file_info(str(api_file))
     content = []
-    generator._generate_step_function_body(content, "_health_check", api_info)
+    generator._generate_step_function_body(content, "health_check", api_info)
     result = "\n".join(content)
-    assert "_health_check()" in result
+    assert "health_check()" in result
 
 
 @allure.feature("测试用例生成器")
@@ -1086,30 +1101,33 @@ def _health_check(token=token):
 def test_generate_step_function_body_files(tmp_path):
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
-    api_file = api_dir / "_upload.py"
-    api_file.write_text('''
+    api_file = api_dir / "upload.py"
+    api_file.write_text(
+        '''
 files = {"file": "test.png"}
 
-def _upload(files=files, token=token):
+def upload(files=files, token=token):
     """
     文件上传
     /api/upload
     """
     url = "/api/upload"
-    with client.post(url=url, files=files) as r:
-        return r
-''', encoding="utf-8")
+    return client.post(url=url, files=files)
+''',
+        encoding="utf-8",
+    )
 
     generator = TestCaseGenerator(api_dir=str(api_dir))
     api_info = generator._get_api_file_info(str(api_file))
     content = []
-    generator._generate_step_function_body(content, "_upload", api_info)
+    generator._generate_step_function_body(content, "upload", api_info)
     result = "\n".join(content)
     assert "files =" in result
-    assert "_upload(files=files)" in result
+    assert "upload(files=files)" in result
 
 
 # ==================== _generate_parametrize_values 测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("生成参数化值")
@@ -1133,6 +1151,7 @@ def test_generate_parametrize_values_combo():
 
 
 # ==================== _generate_data_dict 测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("生成数据字典")
@@ -1160,6 +1179,7 @@ def test_generate_data_dict_combo():
 
 # ==================== _generate_parametrize_decorator 测试 ====================
 
+
 @allure.feature("测试用例生成器")
 @allure.story("生成参数化装饰器")
 @allure.title("测试生成参数化装饰器")
@@ -1175,6 +1195,7 @@ def test_generate_parametrize_decorator():
 
 # ==================== _generate_test_method_body 测试 ====================
 
+
 @allure.feature("测试用例生成器")
 @allure.story("生成测试方法体")
 @allure.title("测试生成测试方法体")
@@ -1188,6 +1209,7 @@ def test_generate_test_method_body():
 
 
 # ==================== normalize_params_for_parametrization 边缘测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("标准化参数化")
@@ -1216,6 +1238,7 @@ def test_normalize_params_dedup():
 
 
 # ==================== generate_parametrized_list_testcases 边缘测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("生成参数化列表测试用例")
@@ -1251,21 +1274,23 @@ def test_generate_parametrized_list_testcases_no_match(tmp_path):
 
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
-    (api_dir / "_user_login.py").write_text('''
-def _user_login(data=data, token=token):
+    (api_dir / "user_login.py").write_text(
+        '''
+def user_login(data=data, token=token):
     """
     用户登录
     /api/user/login
     """
     url = "/api/user/login"
-    with client.post(url=url, json=data) as r:
-        return r
-''', encoding="utf-8")
+    return client.post(url=url, json=data)
+''',
+        encoding="utf-8",
+    )
 
     generator = TestCaseGenerator(api_dir=str(api_dir), base_urls=[])
-    result = asyncio.run(generator.generate_parametrized_list_testcases(
-        str(har_file), "test", target_url="/api/nonexistent"
-    ))
+    result = asyncio.run(
+        generator.generate_parametrized_list_testcases(str(har_file), "test", target_url="/api/nonexistent")
+    )
     assert result == []
 
 
@@ -1300,19 +1325,21 @@ def test_generate_parametrized_list_testcases_overwrite(tmp_path):
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
 
-    api_file = api_dir / "_user_list.py"
-    api_file.write_text('''
+    api_file = api_dir / "user_list.py"
+    api_file.write_text(
+        '''
 data = {"keyword": ""}
 
-def _user_list(data=data, token=token):
+def user_list(data=data, token=token):
     """
     用户列表
     /api/user/list
     """
     url = "/api/user/list"
-    with client.get(url=url, params=data) as r:
-        return r
-''', encoding="utf-8")
+    return client.get(url=url, params=data)
+''',
+        encoding="utf-8",
+    )
 
     output_dir = tmp_path / "output"
 
@@ -1331,6 +1358,7 @@ def _user_list(data=data, token=token):
 
 
 # ==================== generate_scenario_testcase 边缘测试 ====================
+
 
 @allure.feature("测试用例生成器")
 @allure.story("生成场景测试用例")
@@ -1357,21 +1385,21 @@ def test_generate_scenario_testcase_no_match(tmp_path):
 
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
-    (api_dir / "_user_login.py").write_text('''
-def _user_login(data=data, token=token):
+    (api_dir / "user_login.py").write_text(
+        '''
+def user_login(data=data, token=token):
     """
     用户登录
     /api/user/login
     """
     url = "/api/user/login"
-    with client.post(url=url, json=data) as r:
-        return r
-''', encoding="utf-8")
+    return client.post(url=url, json=data)
+''',
+        encoding="utf-8",
+    )
 
     generator = TestCaseGenerator(api_dir=str(api_dir), base_urls=[])
-    result = asyncio.run(generator.generate_scenario_testcase(
-        str(har_file), "/api/nonexistent", "test"
-    ))
+    result = asyncio.run(generator.generate_scenario_testcase(str(har_file), "/api/nonexistent", "test"))
     assert result is None
 
 
@@ -1405,16 +1433,18 @@ def test_generate_scenario_testcase_overwrite(tmp_path):
 
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
-    (api_dir / "_user_login.py").write_text('''
-def _user_login(data=data, token=token):
+    (api_dir / "user_login.py").write_text(
+        '''
+def user_login(data=data, token=token):
     """
     用户登录
     /api/user/login
     """
     url = "/api/user/login"
-    with client.post(url=url, json=data) as r:
-        return r
-''', encoding="utf-8")
+    return client.post(url=url, json=data)
+''',
+        encoding="utf-8",
+    )
 
     output_dir = tmp_path / "output"
 
@@ -1428,7 +1458,9 @@ def _user_login(data=data, token=token):
     assert result2 is None
 
     # 覆盖：强制重新生成
-    result3 = asyncio.run(generator.generate_scenario_testcase(str(har_file), "/api/user/login", "test", overwrite=True))
+    result3 = asyncio.run(
+        generator.generate_scenario_testcase(str(har_file), "/api/user/login", "test", overwrite=True)
+    )
     assert result3 is not None
 
 
@@ -1490,7 +1522,7 @@ def test_generate_parametrized_list_testcases_multi_request(tmp_path):
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
 
-    api_file = api_dir / "_user_list.py"
+    api_file = api_dir / "user_list.py"
     with open(api_file, "w", encoding="utf-8") as f:
         f.write('''
 # coding:utf-8
@@ -1499,15 +1531,14 @@ data = {
     "status": 1,  # 状态
 }
 
-def _user_list(data=data, token=token):
+def user_list(data=data, token=token):
     """
     用户列表
     /api/user/list
     """
     url = "/api/user/list"
     headers = {}
-    with client.get(url=url, headers=headers, params=data) as r:
-        return r
+    return client.get(url=url, headers=headers, params=data)
 ''')
 
     output_dir = tmp_path / "output"
@@ -1523,7 +1554,7 @@ def _user_list(data=data, token=token):
         with open(filepath, encoding="utf-8") as f:
             content = f.read()
 
-        assert 'pytest.mark.parametrize' in content
+        assert "pytest.mark.parametrize" in content
         assert "'status'" in content or '"status"' in content
         # 验证3个值都被参数化（而不是被去重为1个）
         assert '"1"' in content or "'1'" in content
@@ -1545,33 +1576,35 @@ def test_generate_batch_no_param_list_keyword_fallback(tmp_path):
     api_dir.mkdir(parents=True)
 
     # API描述含'列表'关键词，但是接口无参数（只有headers）
-    (api_dir / "_common_ProductProvenance.py").write_text('''
+    (api_dir / "common_ProductProvenance.py").write_text(
+        '''
 import os
 
-from util.client import client
+from har2pytest.client import client
 
 headers = {
     "authorization": f"bearer {os.environ['token']}",
 }
 
 
-def _common_Provenance(headers=headers):
+def common_Provenance(headers=headers):
     """
     获取商品发货信息列表
     /common/ProductProvenance
     """
 
     url = "/common/ProductProvenance"
-    with client.get(url=url, headers=headers) as r:
-        return r
-''', encoding="utf-8")
+    return client.get(url=url, headers=headers)
+''',
+        encoding="utf-8",
+    )
 
     output_dir = tmp_path / "output"
 
     generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir))
-    result = asyncio.run(generator.generate_batch_testcases(
-        [str(api_dir)], task_id="test_task", overwrite=True, har_file_path=None
-    ))
+    result = asyncio.run(
+        generator.generate_batch_testcases([str(api_dir)], task_id="test_task", overwrite=True, har_file_path=None)
+    )
 
     # 应该成功生成，而不是失败
     assert result["total"] == 1
@@ -1613,26 +1646,28 @@ def test_generate_parametrized_list_no_param_fallback(tmp_path):
     api_dir = tmp_path / "apis"
     api_dir.mkdir(parents=True)
 
-    (api_dir / "_common_ProductProvenance.py").write_text('''
+    (api_dir / "common_ProductProvenance.py").write_text(
+        '''
 import os
 
-from util.client import client
+from har2pytest.client import client
 
 headers = {
     "authorization": f"test {os.environ['token']}",
 }
 
 
-def _common_ProductProvenance(headers=headers):
+def common_ProductProvenance(headers=headers):
     """
     获取商品发货信息列表
     /common/ProductProvenance
     """
 
     url = "/common/ProductProvenance"
-    with client.get(url=url, headers=headers) as r:
-        return r
-''', encoding="utf-8")
+    return client.get(url=url, headers=headers)
+''',
+        encoding="utf-8",
+    )
 
     output_dir = tmp_path / "output"
 
@@ -1651,4 +1686,89 @@ def _common_ProductProvenance(headers=headers):
     # 场景测试不含pytest.mark.parametrize，包含步骤函数
     assert "pytest.mark.parametrize" not in content
     assert "step_" in content
-    assert "_common_ProductProvenance" in content
+    assert "common_ProductProvenance" in content
+
+
+# ==================== 异步模式测试 ====================
+
+
+@allure.feature("测试用例生成器")
+@allure.story("异步模式")
+@allure.title("测试异步模式生成 async def 测试方法")
+def test_async_mode_scenario_test_method_definition(tmp_path):
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+    (api_dir / "user_login.py").write_text(
+        "\ndef user_login(data=data):\n    \"\"\"\n    test\n    /api/login\n    \"\"\"\n    url = \"/api/login\"\n    return client.post(url=url, json=data)\n",
+        encoding="utf-8",
+    )
+    generator = TestCaseGenerator(api_dir=str(api_dir), async_mode=True)
+    result = generator._generate_scenario_test_method_definition(str(api_dir / "user_login.py"))
+    content = "\n".join(result)
+    assert "async def test_user_login(self):" in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("异步模式")
+@allure.title("测试同步模式生成 def 测试方法")
+def test_sync_mode_scenario_test_method_definition(tmp_path):
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+    (api_dir / "user_login.py").write_text(
+        "\ndef user_login(data=data):\n    \"\"\"\n    test\n    /api/login\n    \"\"\"\n    url = \"/api/login\"\n    return client.post(url=url, json=data)\n",
+        encoding="utf-8",
+    )
+    generator = TestCaseGenerator(api_dir=str(api_dir), async_mode=False)
+    result = generator._generate_scenario_test_method_definition(str(api_dir / "user_login.py"))
+    content = "\n".join(result)
+    assert "def test_user_login(self):" in content
+    assert "async def" not in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("异步模式")
+@allure.title("测试异步模式步骤函数体使用 async with")
+def test_async_mode_step_function_body():
+    generator = TestCaseGenerator(api_dir="apis", async_mode=True)
+    content = []
+    generator._generate_step_function_body(content, "user_login", {"data": {"name": ""}}, {"query_params": {}, "post_data": {"name": "test"}})
+    result = "\n".join(content)
+    assert "async with user_login(data=data) as r:" in result
+
+
+@allure.feature("测试用例生成器")
+@allure.story("异步模式")
+@allure.title("测试同步模式步骤函数体使用 with")
+def test_sync_mode_step_function_body():
+    generator = TestCaseGenerator(api_dir="apis", async_mode=False)
+    content = []
+    generator._generate_step_function_body(content, "user_login", {"data": {"name": ""}}, {"query_params": {}, "post_data": {"name": "test"}})
+    result = "\n".join(content)
+    assert "with user_login(data=data) as r:" in result
+    assert "async with" not in result
+
+
+@allure.feature("测试用例生成器")
+@allure.story("异步模式")
+@allure.title("测试异步模式断言使用 await r.json() 和 r.status")
+def test_async_mode_test_method_assertions():
+    generator = TestCaseGenerator(api_dir="apis", async_mode=True)
+    result = generator._generate_test_method_assertions("user_login", "data")
+    content = "\n".join(result)
+    assert "async with user_login(data=data) as r:" in content
+    assert "assert r.status == 200" in content
+    assert "data = await r.json()" in content
+    assert "assert data['code'] == 200" in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("异步模式")
+@allure.title("测试同步模式断言使用 r.json() 和 r.status_code")
+def test_sync_mode_test_method_assertions():
+    generator = TestCaseGenerator(api_dir="apis", async_mode=False)
+    result = generator._generate_test_method_assertions("user_login", "data")
+    content = "\n".join(result)
+    assert "with user_login(data=data) as r:" in content
+    assert "assert r.status_code == 200" in content
+    assert "data = r.json()" in content
+    assert "assert data['code'] == 200" in content

@@ -18,7 +18,7 @@ class HARParser:
     用于从 HAR 文件中提取 API 请求信息，支持过滤无效参数、重复 URL 等功能。
     """
 
-    def __init__(self, base_urls: list[str] = None, kill_urls: list[str] = None):
+    def __init__(self, base_urls: list[str] | None = None, kill_urls: list[str] | None = None):
         """初始化 HAR 解析器。
 
         Args:
@@ -74,7 +74,9 @@ class HARParser:
         logger.info(f"开始解析HAR文件，共 {len(entries)} 个请求记录")
 
         for i, entry in enumerate(entries):
-            if entry.get("_resourceType") != "xhr":
+            # 跳过非 XHR 请求（图片、CSS、JS 等），兼容无 _resourceType 字段的 HAR
+            resource_type = entry.get("_resourceType", "xhr")
+            if resource_type not in ("xhr", "fetch"):
                 continue
 
             request = entry.get("request", {})
@@ -136,10 +138,7 @@ class HARParser:
                 elif content_type.startswith("application/x-www-form-urlencoded"):
                     parsed = parse_qs(post_data_text)
                     # parse_qs 返回 {key: [value, ...]}，取每个 key 的最后一个值
-                    post_data = {
-                        k: unquote(v[-1]) if isinstance(v[-1], str) else v[-1]
-                        for k, v in parsed.items()
-                    }
+                    post_data = {k: v[-1] for k, v in parsed.items()}
                     post_data = self._filter_invalid_params(post_data)
                 else:
                     logger.warning(f"不支持的Content-Type: {content_type}, URL: {full_url}，跳过该请求")
@@ -162,7 +161,7 @@ class HARParser:
             else:
                 origin = raw_origin
                 if origin and full_url.startswith(origin):
-                    clean_url = URLMatcher.normalize_url(full_url[len(origin):])
+                    clean_url = URLMatcher.normalize_url(full_url[len(origin) :])
                     logger.debug(f"使用 origin header 作为 base URL: {origin}")
                 else:
                     # 无 base_urls 也无 origin，仍需去掉查询参数
@@ -174,7 +173,7 @@ class HARParser:
                 "full_url": full_url,
                 "headers": headers,
                 "content_type": content_type,
-                "cookies": dict(request.get("cookies", [])),
+                "cookies": {c.get("name", ""): c.get("value", "") for c in request.get("cookies", [])},
                 "query_params": query_params,
                 "post_data": post_data,
                 "response_status": response.get("status", 0),

@@ -18,9 +18,7 @@ def test_find_api_info_in_swagger():
                 "get": {
                     "summary": "测试API",
                     "description": "这是一个测试API",
-                    "parameters": [
-                        {"name": "id", "in": "query", "type": "integer", "description": "ID参数"}
-                    ]
+                    "parameters": [{"name": "id", "in": "query", "type": "integer", "description": "ID参数"}],
                 }
             }
         }
@@ -35,16 +33,7 @@ def test_find_api_info_in_swagger():
 @allure.title("测试带BasePath查找API信息")
 def test_find_api_info_with_basepath():
     handler = SwaggerHandler()
-    swagger_data = {
-        "basePath": "/v1",
-        "paths": {
-            "/api/test": {
-                "get": {
-                    "summary": "测试API"
-                }
-            }
-        }
-    }
+    swagger_data = {"basePath": "/v1", "paths": {"/api/test": {"get": {"summary": "测试API"}}}}
     result = handler.find_api_info_in_swagger(swagger_data, "/v1/api/test", "GET")
     assert result is not None
     assert result["summary"] == "测试API"
@@ -60,27 +49,13 @@ def test_model_reference_handling():
             "/api/test": {
                 "get": {
                     "summary": "测试API",
-                    "parameters": [
-                        {
-                            "name": "body",
-                            "in": "body",
-                            "schema": {
-                                "$ref": "#/definitions/TestModel"
-                            }
-                        }
-                    ]
+                    "parameters": [{"name": "body", "in": "body", "schema": {"$ref": "#/definitions/TestModel"}}],
                 }
             }
         },
         "definitions": {
-            "TestModel": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "age": {"type": "integer"}
-                }
-            }
-        }
+            "TestModel": {"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "integer"}}}
+        },
     }
     result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
     assert result is not None
@@ -106,7 +81,7 @@ def test_extract_params_from_swagger():
     swagger_info = {
         "parameters": [
             {"name": "id", "in": "query", "type": "integer", "required": True},
-            {"name": "name", "in": "query", "type": "string", "required": False}
+            {"name": "name", "in": "query", "type": "string", "required": False},
         ]
     }
     params = handler._extract_params_from_swagger(swagger_info["parameters"], {})
@@ -127,13 +102,7 @@ def test_extract_params_from_swagger_with_properties():
             {
                 "name": "body",
                 "in": "body",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "age": {"type": "integer"}
-                    }
-                }
+                "schema": {"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "integer"}}},
             }
         ]
     }
@@ -154,37 +123,16 @@ def test_extract_params_from_swagger_empty():
 
 
 @allure.feature("Swagger处理器")
-@allure.story("Swagger缓存")
-@allure.title("测试Swagger缓存存取值")
-def test_swagger_cache():
-    handler = SwaggerHandler()
-    swagger_data = {"paths": {"/api/test": {"get": {}}}}
-    handler.swagger_cache["https://example.com"] = swagger_data
-    result = handler.swagger_cache.get("https://example.com")
-    assert result == swagger_data
-
-
-@allure.feature("Swagger处理器")
 @allure.story("提取Body参数")
 @allure.title("测试提取引用类型Body参数")
 def test_extract_body_params_with_ref():
     handler = SwaggerHandler()
     swagger_data = {
         "definitions": {
-            "TestModel": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "age": {"type": "integer"}
-                }
-            }
+            "TestModel": {"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "integer"}}}
         }
     }
-    param = {
-        "name": "body",
-        "in": "body",
-        "schema": {"$ref": "#/definitions/TestModel"}
-    }
+    param = {"name": "body", "in": "body", "schema": {"$ref": "#/definitions/TestModel"}}
     params = handler._extract_body_params(param["schema"], swagger_data)
     assert len(params) == 2
 
@@ -197,13 +145,7 @@ def test_extract_body_params_with_properties():
     param = {
         "name": "body",
         "in": "body",
-        "schema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "age": {"type": "integer"}
-            }
-        }
+        "schema": {"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "integer"}}},
     }
     params = handler._extract_body_params(param["schema"], {})
     assert len(params) == 2
@@ -223,11 +165,7 @@ def test_extract_body_params_empty_schema():
 @allure.title("测试引用未找到时提取Body参数")
 def test_extract_body_params_ref_not_found():
     handler = SwaggerHandler()
-    param = {
-        "name": "body",
-        "in": "body",
-        "schema": {"$ref": "#/definitions/NotFound"}
-    }
+    param = {"name": "body", "in": "body", "schema": {"$ref": "#/definitions/NotFound"}}
     params = handler._extract_body_params(param["schema"], {})
     assert params == {}
 
@@ -247,14 +185,7 @@ def test_find_api_info_path_not_found():
 @allure.title("测试方法未找到时有回退")
 def test_find_api_info_method_not_found_but_has_fallback():
     handler = SwaggerHandler()
-    swagger_data = {
-        "paths": {
-            "/api/test": {
-                "get": {"summary": "GET测试"},
-                "post": {"summary": "POST测试"}
-            }
-        }
-    }
+    swagger_data = {"paths": {"/api/test": {"get": {"summary": "GET测试"}, "post": {"summary": "POST测试"}}}}
     result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "PUT")
     assert result is not None
 
@@ -288,24 +219,11 @@ def test_find_api_info_with_param_ref():
             "/api/test": {
                 "get": {
                     "summary": "测试API",
-                    "parameters": [
-                        {
-                            "name": "body",
-                            "in": "body",
-                            "schema": {"$ref": "#/definitions/TestModel"}
-                        }
-                    ]
+                    "parameters": [{"name": "body", "in": "body", "schema": {"$ref": "#/definitions/TestModel"}}],
                 }
             }
         },
-        "definitions": {
-            "TestModel": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"}
-                }
-            }
-        }
+        "definitions": {"TestModel": {"type": "object", "properties": {"name": {"type": "string"}}}},
     }
     result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
     assert result is not None
@@ -316,13 +234,7 @@ def test_find_api_info_with_param_ref():
 @allure.title("测试方法回退查找API信息")
 def test_find_api_info_method_fallback():
     handler = SwaggerHandler()
-    swagger_data = {
-        "paths": {
-            "/api/test": {
-                "get": {"summary": "GET测试"}
-            }
-        }
-    }
+    swagger_data = {"paths": {"/api/test": {"get": {"summary": "GET测试"}}}}
     result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
     assert result is not None
 
@@ -351,30 +263,11 @@ def test_swagger_handler_init():
 def test_get_swagger_doc_all_paths_failed(monkeypatch):
     async def mock_send_request(url):
         raise Exception("Connection failed")
+
     handler = SwaggerHandler()
     monkeypatch.setattr(handler, "_send_request", mock_send_request)
     result = asyncio.run(handler.get_swagger_doc("https://invalid-url.com"))
     assert result is None
-
-
-@allure.feature("Swagger处理器")
-@allure.story("从Swagger生成API")
-@allure.title("测试带BasePath从Swagger生成API")
-def test_find_api_info_in_swagger_with_basepath():
-    handler = SwaggerHandler()
-    swagger_data = {
-        "basePath": "/v1",
-        "paths": {
-            "/api/test": {
-                "get": {
-                    "summary": "测试API",
-                    "parameters": []
-                }
-            }
-        }
-    }
-    result = handler.find_api_info_in_swagger(swagger_data, "/v1/api/test", "GET")
-    assert result is not None
 
 
 @allure.feature("Swagger处理器")
@@ -384,18 +277,8 @@ def test_find_api_info_in_swagger_specific_path():
     handler = SwaggerHandler()
     swagger_data = {
         "paths": {
-            "/api/test": {
-                "get": {
-                    "summary": "测试API",
-                    "parameters": []
-                }
-            },
-            "/api/other": {
-                "post": {
-                    "summary": "其他API",
-                    "parameters": []
-                }
-            }
+            "/api/test": {"get": {"summary": "测试API", "parameters": []}},
+            "/api/other": {"post": {"summary": "其他API", "parameters": []}},
         }
     }
     result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
@@ -415,8 +298,8 @@ def test_find_api_info_in_swagger_extract_params():
                     "summary": "测试API",
                     "parameters": [
                         {"name": "id", "in": "query", "type": "integer", "description": "ID参数"},
-                        {"name": "name", "in": "query", "type": "string", "description": "名称参数"}
-                    ]
+                        {"name": "name", "in": "query", "type": "string", "description": "名称参数"},
+                    ],
                 }
             }
         }
@@ -471,16 +354,7 @@ def test_get_swagger_doc_cache():
 @allure.title("测试提取枚举类型参数")
 def test_extract_params_with_enum():
     handler = SwaggerHandler()
-    swagger_info = {
-        "parameters": [
-            {
-                "name": "status",
-                "in": "query",
-                "type": "string",
-                "enum": ["active", "inactive"]
-            }
-        ]
-    }
+    swagger_info = {"parameters": [{"name": "status", "in": "query", "type": "string", "enum": ["active", "inactive"]}]}
     params = handler._extract_params_from_swagger(swagger_info["parameters"], {})
     assert len(params) == 6
     query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions = params
@@ -492,16 +366,7 @@ def test_extract_params_with_enum():
 @allure.title("测试提取路径参数")
 def test_extract_params_path_param():
     handler = SwaggerHandler()
-    swagger_info = {
-        "parameters": [
-            {
-                "name": "id",
-                "in": "path",
-                "type": "integer",
-                "required": True
-            }
-        ]
-    }
+    swagger_info = {"parameters": [{"name": "id", "in": "path", "type": "integer", "required": True}]}
     params = handler._extract_params_from_swagger(swagger_info["parameters"], {})
     assert len(params) == 6
     query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions = params
@@ -512,22 +377,9 @@ def test_extract_params_path_param():
 @allure.title("测试提取引用类型参数值")
 def test_extract_param_value_with_ref():
     handler = SwaggerHandler()
-    swagger_data = {
-        "definitions": {
-            "TestModel": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"}
-                }
-            }
-        }
-    }
-    param = {
-        "name": "body",
-        "in": "body",
-        "schema": {"$ref": "#/definitions/TestModel"}
-    }
-    value = handler._extract_param_value(param, swagger_data)
+    swagger_data = {"definitions": {"TestModel": {"type": "object", "properties": {"name": {"type": "string"}}}}}
+    param = {"name": "body", "in": "body", "schema": {"$ref": "#/definitions/TestModel"}}
+    value = handler._extract_param_value(param["schema"], swagger_data)
     assert value is not None
 
 
@@ -542,18 +394,12 @@ def test_extract_param_value_nested_object():
         "schema": {
             "type": "object",
             "properties": {
-                "user": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "age": {"type": "integer"}
-                    }
-                }
-            }
-        }
+                "user": {"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "integer"}}}
+            },
+        },
     }
-    value = handler._extract_param_value(param, {})
-    assert value is not None
+    value = handler._extract_param_value(param["schema"], {})
+    assert isinstance(value, dict)
 
 
 @allure.feature("Swagger处理器")
@@ -571,26 +417,10 @@ def test_extract_param_value_empty_object():
 @allure.title("测试提取引用类型数组参数值")
 def test_extract_param_value_array_with_ref():
     handler = SwaggerHandler()
-    swagger_data = {
-        "definitions": {
-            "ItemModel": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"}
-                }
-            }
-        }
-    }
-    param = {
-        "name": "items",
-        "in": "body",
-        "schema": {
-            "type": "array",
-            "items": {"$ref": "#/definitions/ItemModel"}
-        }
-    }
-    value = handler._extract_param_value(param, swagger_data)
-    assert value is not None
+    swagger_data = {"definitions": {"ItemModel": {"type": "object", "properties": {"name": {"type": "string"}}}}}
+    param = {"name": "items", "in": "body", "schema": {"type": "array", "items": {"$ref": "#/definitions/ItemModel"}}}
+    value = handler._extract_param_value(param["schema"], swagger_data)
+    assert isinstance(value, list)
 
 
 @allure.feature("Swagger处理器")
@@ -601,18 +431,10 @@ def test_extract_param_value_array_with_properties():
     param = {
         "name": "items",
         "in": "body",
-        "schema": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"}
-                }
-            }
-        }
+        "schema": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}}}},
     }
-    value = handler._extract_param_value(param, {})
-    assert value is not None
+    value = handler._extract_param_value(param["schema"], {})
+    assert isinstance(value, list)
 
 
 @allure.feature("Swagger处理器")
@@ -626,6 +448,7 @@ def test_extract_param_value_empty_array():
 
 
 # ==================== _clean_swagger_url 测试 ====================
+
 
 class TestCleanSwaggerUrl:
     @allure.feature("Swagger处理器")
@@ -680,6 +503,7 @@ class TestCleanSwaggerUrl:
 
 # ==================== _extract_param_value 边缘测试 ====================
 
+
 class TestExtractParamValueEdge:
     @allure.feature("Swagger处理器")
     @allure.story("提取参数值-边缘")
@@ -728,18 +552,10 @@ class TestExtractParamValueEdge:
         handler = SwaggerHandler()
         swagger_data = {
             "definitions": {
-                "Address": {
-                    "type": "object",
-                    "properties": {
-                        "city": {"type": "string"},
-                        "street": {"type": "string"}
-                    }
-                }
+                "Address": {"type": "object", "properties": {"city": {"type": "string"}, "street": {"type": "string"}}}
             }
         }
-        value = handler._extract_param_value(
-            {"$ref": "#/definitions/Address"}, swagger_data
-        )
+        value = handler._extract_param_value({"$ref": "#/definitions/Address"}, swagger_data)
         assert isinstance(value, dict)
         assert "city" in value
 
@@ -748,20 +564,8 @@ class TestExtractParamValueEdge:
     @allure.title("测试array类型带$ref items")
     def test_array_with_ref_items(self):
         handler = SwaggerHandler()
-        swagger_data = {
-            "definitions": {
-                "Tag": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"}
-                    }
-                }
-            }
-        }
-        value = handler._extract_param_value(
-            {"type": "array", "items": {"$ref": "#/definitions/Tag"}},
-            swagger_data
-        )
+        swagger_data = {"definitions": {"Tag": {"type": "object", "properties": {"name": {"type": "string"}}}}}
+        value = handler._extract_param_value({"type": "array", "items": {"$ref": "#/definitions/Tag"}}, swagger_data)
         assert isinstance(value, list)
         assert len(value) == 1
 
@@ -771,14 +575,14 @@ class TestExtractParamValueEdge:
     def test_array_with_properties_items(self):
         handler = SwaggerHandler()
         value = handler._extract_param_value(
-            {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}}}},
-            {}
+            {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}}}}, {}
         )
         assert isinstance(value, list)
         assert len(value) == 1
 
 
 # ==================== _extract_nested_descriptions 测试 ====================
+
 
 class TestExtractNestedDescriptions:
     @allure.feature("Swagger处理器")
@@ -792,15 +596,13 @@ class TestExtractNestedDescriptions:
                     "type": "object",
                     "properties": {
                         "name": {"type": "string", "description": "用户名称"},
-                        "age": {"type": "integer", "description": "用户年龄"}
-                    }
+                        "age": {"type": "integer", "description": "用户年龄"},
+                    },
                 }
             }
         }
         descriptions = {}
-        handler._extract_nested_descriptions(
-            {"$ref": "#/definitions/UserInfo"}, swagger_data, descriptions
-        )
+        handler._extract_nested_descriptions({"$ref": "#/definitions/UserInfo"}, swagger_data, descriptions)
         assert "name" in descriptions
         assert descriptions["name"] == "用户名称"
         assert "age" in descriptions
@@ -815,8 +617,8 @@ class TestExtractNestedDescriptions:
             "type": "object",
             "properties": {
                 "id": {"type": "integer", "description": "ID"},
-                "name": {"type": "string", "description": "名称"}
-            }
+                "name": {"type": "string", "description": "名称"},
+            },
         }
         descriptions = {}
         handler._extract_nested_descriptions(schema, {}, descriptions)
@@ -833,13 +635,8 @@ class TestExtractNestedDescriptions:
         schema = {
             "type": "object",
             "properties": {
-                "user": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "用户名"}
-                    }
-                }
-            }
+                "user": {"type": "object", "properties": {"name": {"type": "string", "description": "用户名"}}}
+            },
         }
         descriptions = {}
         handler._extract_nested_descriptions(schema, {}, descriptions)
@@ -857,14 +654,9 @@ class TestExtractNestedDescriptions:
             "properties": {
                 "items": {
                     "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "id": {"type": "integer", "description": "项目ID"}
-                        }
-                    }
+                    "items": {"type": "object", "properties": {"id": {"type": "integer", "description": "项目ID"}}},
                 }
-            }
+            },
         }
         descriptions = {}
         handler._extract_nested_descriptions(schema, {}, descriptions)
@@ -878,18 +670,11 @@ class TestExtractNestedDescriptions:
         handler = SwaggerHandler()
         swagger_data = {
             "definitions": {
-                "Address": {
-                    "type": "object",
-                    "properties": {
-                        "city": {"type": "string", "description": "城市"}
-                    }
-                }
+                "Address": {"type": "object", "properties": {"city": {"type": "string", "description": "城市"}}}
             }
         }
         descriptions = {}
-        handler._extract_nested_descriptions(
-            {"$ref": "#/definitions/Address"}, swagger_data, descriptions, "address"
-        )
+        handler._extract_nested_descriptions({"$ref": "#/definitions/Address"}, swagger_data, descriptions, "address")
         assert "address.city" in descriptions
         assert descriptions["address.city"] == "城市"
 
@@ -908,7 +693,5 @@ class TestExtractNestedDescriptions:
     def test_extract_nested_desc_ref_not_found(self):
         handler = SwaggerHandler()
         descriptions = {}
-        handler._extract_nested_descriptions(
-            {"$ref": "#/definitions/NotFound"}, {}, descriptions
-        )
+        handler._extract_nested_descriptions({"$ref": "#/definitions/NotFound"}, {}, descriptions)
         assert descriptions == {}

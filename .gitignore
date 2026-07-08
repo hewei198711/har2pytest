@@ -9,7 +9,7 @@ venv
 allure-results/*
 coverage_report/
 reports
-*log
+*.log
 dist/
 build/
 *.egg-info/
@@ -20,9 +20,10 @@ site/
 htmlcov/
 
 har2pytest_config.json
-apis/
-api/
-testcases/
-util/
+apis/*
+async_apis/*
+api/*
+async_api/*
+testcases/*
 har_main.py
 *.har

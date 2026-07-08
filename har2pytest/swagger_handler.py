@@ -196,10 +196,7 @@ class SwaggerHandler:
                         api_info["parameters"][param_name] = param_desc
                 elif "schema" in param:
                     # body 参数：统一使用递归提取嵌套描述（支持 $ref 和 properties）
-                    self._extract_nested_descriptions(
-                        param["schema"], swagger_data, api_info["parameters"]
-                    )
-
+                    self._extract_nested_descriptions(param["schema"], swagger_data, api_info["parameters"])
 
         return api_info
 
@@ -397,7 +394,7 @@ class SwaggerHandler:
                     self._extract_nested_descriptions(items, swagger_data, descriptions, full_key)
 
     async def generate_apis_from_swagger(
-        self, swagger_url: str, force_overwrite: bool = False, specific_path: str = None
+        self, swagger_url: str, force_overwrite: bool = False, specific_path: str | None = None
     ) -> list[str]:
         """
         从Swagger文档异步批量生成API文件
@@ -469,13 +466,18 @@ class SwaggerHandler:
                         "url": full_path,
                         "query_params": {},
                         "post_data": {},
-                        "headers": APIConfig.REQUIRED_HEADERS(),
+                        "headers": dict(APIConfig.REQUIRED_HEADERS()),
                     }
 
                     # 提取参数
                     parameters = method_data.get("parameters", [])
                     (
-                        query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions,
+                        query_params,
+                        post_data,
+                        has_query_param,
+                        has_body_param,
+                        path_params,
+                        param_descriptions,
                     ) = self._extract_params_from_swagger(parameters, swagger_data)
 
                     request_info["query_params"] = query_params
@@ -495,10 +497,14 @@ class SwaggerHandler:
 
                     # 生成API文件
                     if self.api_generator:
-                        filepath = await self.api_generator.generate_api_file(request_info, force_overwrite, swagger_info)
+                        filepath = await self.api_generator.generate_api_file(
+                            request_info, force_overwrite, swagger_info
+                        )
                         elapsed = time.time() - task_start
                         if filepath:
-                            logger.debug(f"  [任务完成] {method.upper()} {full_path} → {filepath} (耗时 {elapsed:.2f}s)")
+                            logger.debug(
+                                f"  [任务完成] {method.upper()} {full_path} → {filepath} (耗时 {elapsed:.2f}s)"
+                            )
                         else:
                             logger.debug(f"  [任务跳过] {method.upper()} {full_path} (耗时 {elapsed:.2f}s)")
                         return filepath

@@ -41,7 +41,9 @@ def test_generate_api_files_from_har():
         mock_api_generator = MagicMock()
         mock_api_generator.generate_api_file = AsyncMock(return_value="api/_user_login.py")
 
-        generated_files = asyncio.run(generate_api_files_from_har("test_har_generator.har", api_generator=mock_api_generator))
+        generated_files = asyncio.run(
+            generate_api_files_from_har("test_har_generator.har", api_generator=mock_api_generator)
+        )
 
         assert len(generated_files) == 1
         assert generated_files[0] == "api/_user_login.py"

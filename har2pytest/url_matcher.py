@@ -154,16 +154,18 @@ class URLMatcher:
     def generate_function_name(url: str | None) -> str:
         """从 URL 生成函数名。
 
+        将 URL 中的非字母数字字符替换为下划线，并去除前导下划线。
+
         Args:
-            url: URL 字符串，为 None 时返回 "_unknown"。
+            url: URL 字符串，为 None 时返回 "unknown"。
 
         Returns:
             str: 生成的函数名。
         """
         if url is None:
-            return "_unknown"
+            return "unknown"
         clean_url = re.sub(r"[{}]", "", url)
-        return re.sub(r"[^a-zA-Z0-9_]", "_", clean_url)
+        return re.sub(r"[^a-zA-Z0-9_]", "_", clean_url).lstrip("_")
 
     def get_url_info(self, url: str) -> dict[str, Any]:
         """获取 URL 的完整信息。

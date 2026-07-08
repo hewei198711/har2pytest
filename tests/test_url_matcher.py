@@ -97,17 +97,16 @@ class TestFindMatchingApiFile:
         api_dir = tmp_path / "apis"
         api_dir.mkdir()
 
-        api_file = api_dir / "_user_info.py"
+        api_file = api_dir / "user_info.py"
         with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def _user_info(data=data, token=token):
+            f.write('''def user_info(data=data, token=token):
     """
     用户信息
     /api/user/info
     """
     url = "/api/user/info"
     headers = {}
-    with client.get(url=url, headers=headers, params=data) as r:
-        return r
+    return client.get(url=url, headers=headers, params=data)
 ''')
 
         result = URLMatcher.find_matching_api_file("/api/user/info", [str(api_file)])
@@ -120,17 +119,16 @@ class TestFindMatchingApiFile:
         api_dir = tmp_path / "apis"
         api_dir.mkdir()
 
-        api_file = api_dir / "_user_info.py"
+        api_file = api_dir / "user_info.py"
         with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def _user_info(data=data, token=token):
+            f.write('''def user_info(data=data, token=token):
     """
     用户信息
     /api/user/{userId}/info
     """
     url = "/api/user/{userId}/info"
     headers = {}
-    with client.get(url=url, headers=headers, params=data) as r:
-        return r
+    return client.get(url=url, headers=headers, params=data)
 ''')
 
         result = URLMatcher.find_matching_api_file("/api/user/123/info", [str(api_file)])
@@ -143,17 +141,16 @@ class TestFindMatchingApiFile:
         api_dir = tmp_path / "apis"
         api_dir.mkdir()
 
-        api_file = api_dir / "_user_info.py"
+        api_file = api_dir / "user_info.py"
         with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def _user_info(data=data, token=token):
+            f.write('''def user_info(data=data, token=token):
     """
     用户信息
     /api/user/{userId}/info
     """
     url = "/api/user/{userId}/info"
     headers = {}
-    with client.get(url=url, headers=headers, params=data) as r:
-        return r
+    return client.get(url=url, headers=headers, params=data)
 ''')
 
         request_url_map = {"/api/user/123/info": "/api/user/{userId}/info"}
@@ -168,17 +165,16 @@ class TestFindMatchingApiFile:
         api_dir = tmp_path / "apis"
         api_dir.mkdir()
 
-        api_file = api_dir / "_user_info.py"
+        api_file = api_dir / "user_info.py"
         with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def _user_info(data=data, token=token):
+            f.write('''def user_info(data=data, token=token):
     """
     用户信息
     /api/user/info
     """
     url = "/api/user/info"
     headers = {}
-    with client.get(url=url, headers=headers, params=data) as r:
-        return r
+    return client.get(url=url, headers=headers, params=data)
 ''')
 
         result = URLMatcher.find_matching_api_file("/api/order/list", [str(api_file)])
@@ -191,30 +187,28 @@ class TestFindMatchingApiFile:
         api_dir = tmp_path / "apis"
         api_dir.mkdir()
 
-        api_file1 = api_dir / "_user_info.py"
+        api_file1 = api_dir / "user_info.py"
         with open(api_file1, "w", encoding="utf-8") as f:
-            f.write('''def _user_info(data=data, token=token):
+            f.write('''def user_info(data=data, token=token):
     """
     用户信息
     /api/user/info
     """
     url = "/api/user/info"
     headers = {}
-    with client.get(url=url, headers=headers, params=data) as r:
-        return r
+    return client.get(url=url, headers=headers, params=data)
 ''')
 
-        api_file2 = api_dir / "_user_info_param.py"
+        api_file2 = api_dir / "user_info_param.py"
         with open(api_file2, "w", encoding="utf-8") as f:
-            f.write('''def _user_info_param(data=data, token=token):
+            f.write('''def user_info_param(data=data, token=token):
     """
     用户信息带参数
     /api/user/{userId}/info
     """
     url = "/api/user/{userId}/info"
     headers = {}
-    with client.get(url=url, headers=headers, params=data) as r:
-        return r
+    return client.get(url=url, headers=headers, params=data)
 ''')
 
         result = URLMatcher.find_matching_api_file("/api/user/info", [str(api_file1), str(api_file2)])
@@ -227,17 +221,16 @@ class TestFindMatchingApiFile:
         api_dir = tmp_path / "apis"
         api_dir.mkdir()
 
-        api_file = api_dir / "_user_info.py"
+        api_file = api_dir / "user_info.py"
         with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def _user_info(data=data, token=token):
+            f.write('''def user_info(data=data, token=token):
     """
     用户信息
     /api/user/{userId}/info
     """
     url = "/api/user/{userId}/info"
     headers = {}
-    with client.get(url=url, headers=headers, params=data) as r:
-        return r
+    return client.get(url=url, headers=headers, params=data)
 ''')
 
         result = URLMatcher.find_matching_api_file("/api/user/123/info", [str(api_file)])
@@ -252,6 +245,7 @@ class TestFindMatchingApiFile:
 
 
 # ==================== _has_numeric_path_segment 测试 ====================
+
 
 class TestHasNumericPathSegment:
     @allure.feature("URL匹配器")
@@ -287,6 +281,7 @@ class TestHasNumericPathSegment:
 
 # ==================== normalize_url 测试 ====================
 
+
 class TestNormalizeUrl:
     @allure.feature("URL匹配器")
     @allure.story("URL规范化")
@@ -306,10 +301,7 @@ class TestNormalizeUrl:
     @allure.story("URL规范化")
     @allure.title("测试移除基础URL前缀")
     def test_remove_base_url(self):
-        result = URLMatcher.normalize_url(
-            "https://example.com/api/user/list",
-            base_urls=["https://example.com"]
-        )
+        result = URLMatcher.normalize_url("https://example.com/api/user/list", base_urls=["https://example.com"])
         assert result == "/api/user/list"
 
     @allure.feature("URL匹配器")
@@ -330,27 +322,28 @@ class TestNormalizeUrl:
 
 # ==================== generate_function_name 测试 ====================
 
+
 class TestGenerateFunctionName:
     @allure.feature("URL匹配器")
     @allure.story("生成函数名")
     @allure.title("测试从普通URL生成函数名")
     def test_normal_url(self):
         result = URLMatcher.generate_function_name("/api/user/login")
-        assert result == "_api_user_login"
+        assert result == "api_user_login"
 
     @allure.feature("URL匹配器")
     @allure.story("生成函数名")
     @allure.title("测试从带路径参数的URL生成函数名")
     def test_url_with_path_params(self):
         result = URLMatcher.generate_function_name("/api/user/{userId}/info")
-        assert result == "_api_user_userId_info"
+        assert result == "api_user_userId_info"
 
     @allure.feature("URL匹配器")
     @allure.story("生成函数名")
     @allure.title("测试None输入")
     def test_none_url(self):
         result = URLMatcher.generate_function_name(None)
-        assert result == "_unknown"
+        assert result == "unknown"
 
     @allure.feature("URL匹配器")
     @allure.story("生成函数名")
@@ -361,6 +354,7 @@ class TestGenerateFunctionName:
 
 
 # ==================== extract_url_template 测试 ====================
+
 
 class TestExtractUrlTemplate:
     @allure.feature("URL匹配器")
@@ -391,6 +385,7 @@ class TestExtractUrlTemplate:
 
 
 # ==================== get_url_info 测试 ====================
+
 
 class TestGetUrlInfo:
     @allure.feature("URL匹配器")
@@ -432,6 +427,7 @@ class TestGetUrlInfo:
 
 # ==================== remove_base_path 测试 ====================
 
+
 class TestRemoveBasePath:
     @allure.feature("URL匹配器")
     @allure.story("移除基础路径")
@@ -464,6 +460,7 @@ class TestRemoveBasePath:
 
 # ==================== _add_base_path 测试 ====================
 
+
 class TestAddBasePath:
     @allure.feature("URL匹配器")
     @allure.story("添加基础路径")
@@ -489,27 +486,25 @@ class TestAddBasePath:
 
 # ==================== _extract_path_parts 测试 ====================
 
+
 class TestExtractPathParts:
     @allure.feature("URL匹配器")
     @allure.story("提取路径部分")
     @allure.title("测试提取路径部分（含参数）")
     def test_extract_with_params(self):
-        result = URLMatcher._extract_path_parts(
-            "/api/user/123/info", "/api/user/{userId}/info"
-        )
+        result = URLMatcher._extract_path_parts("/api/user/123/info", "/api/user/{userId}/info")
         assert result == ["api", "user", "userId", "info"]
 
     @allure.feature("URL匹配器")
     @allure.story("提取路径部分")
     @allure.title("测试提取路径部分（无参数）")
     def test_extract_without_params(self):
-        result = URLMatcher._extract_path_parts(
-            "/api/user/login", "/api/user/login"
-        )
+        result = URLMatcher._extract_path_parts("/api/user/login", "/api/user/login")
         assert result == ["api", "user", "login"]
 
 
 # ==================== match_with_swagger 测试 ====================
+
 
 class TestMatchWithSwagger:
     @allure.feature("URL匹配器")
@@ -537,7 +532,7 @@ class TestMatchWithSwagger:
             "paths": {
                 "/user/{userId}/info": {"get": {}},
                 "/order/list": {"get": {}},
-            }
+            },
         }
         matcher = URLMatcher(swagger_data)
         full_path, params, parts = matcher.match_with_swagger("/api/user/123/info")
@@ -553,7 +548,7 @@ class TestMatchWithSwagger:
             "basePath": "/api",
             "paths": {
                 "/user/{userId}/info": {"get": {}},
-            }
+            },
         }
         matcher = URLMatcher(swagger_data)
         result = matcher.match_with_swagger("/api/order/list")
@@ -567,7 +562,7 @@ class TestMatchWithSwagger:
             "basePath": "",
             "paths": {
                 "/user/{userId}/info": {"get": {}},
-            }
+            },
         }
         matcher = URLMatcher(swagger_data)
         result1 = matcher.match_with_swagger("/user/123/info")
@@ -577,6 +572,7 @@ class TestMatchWithSwagger:
 
 # ==================== find_matching_api_file 边缘测试 ====================
 
+
 class TestFindMatchingApiFileEdge:
     @allure.feature("URL匹配器")
     @allure.story("查找匹配API文件-边缘")
@@ -585,17 +581,16 @@ class TestFindMatchingApiFileEdge:
         api_dir = tmp_path / "apis"
         api_dir.mkdir()
 
-        api_file = api_dir / "_user_info.py"
+        api_file = api_dir / "user_info.py"
         with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def _user_info(data=data, token=token):
+            f.write('''def user_info(data=data, token=token):
     """
     用户信息
     /api/user/info
     """
     url = "/api/user/info"
     headers = {}
-    with client.get(url=url, headers=headers, params=data) as r:
-        return r
+    return client.get(url=url, headers=headers, params=data)
 ''')
 
         # 带查询参数的URL应该匹配到标准化的API文件URL
@@ -605,20 +600,19 @@ class TestFindMatchingApiFileEdge:
     @allure.feature("URL匹配器")
     @allure.story("查找匹配API文件-边缘")
     @allure.title("测试API文件无URL")
-    def test_api_file_no_url(self, tmp_path):
+    def test_api_fileno_url(self, tmp_path):
         api_dir = tmp_path / "apis"
         api_dir.mkdir()
 
-        api_file = api_dir / "_no_url.py"
+        api_file = api_dir / "no_url.py"
         with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def _no_url(data=data, token=token):
+            f.write('''def no_url(data=data, token=token):
     """
     无URL
     """
     url = None
     headers = {}
-    with client.get(url=url, headers=headers, params=data) as r:
-        return r
+    return client.get(url=url, headers=headers, params=data)
 ''')
 
         result = URLMatcher.find_matching_api_file("/api/user/info", [str(api_file)])

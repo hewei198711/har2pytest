@@ -9,6 +9,7 @@ API工具包 - 用于从HAR文件生成API接口和测试用例
 """
 
 from .api_generator import APIGenerator
+from .client import AsyncClient, AsyncResponseContext, Client, ResponseContext, async_client, client
 from .config import APIConfig
 from .har_parser import HARParser
 from .logger import get_logger, logger
@@ -33,6 +34,12 @@ __all__ = [
     "URLMatcher",
     "get_logger",
     "logger",
+    "Client",
+    "ResponseContext",
+    "AsyncClient",
+    "AsyncResponseContext",
+    "client",
+    "async_client",
     "format_directory",
     "parse_api_file",
     "format_parameter_value",

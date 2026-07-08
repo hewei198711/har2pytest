@@ -3,8 +3,8 @@
 提供参数格式化、文件处理等通用工具函数。
 """
 
-import asyncio
 import ast
+import asyncio
 import json
 import keyword
 import os
@@ -61,7 +61,7 @@ def deduplicate_values(values: list[Any]) -> list[Any]:
     return unique_values
 
 
-def get_output_dir(base_output_dir: str, task_id: str = None) -> str:
+def get_output_dir(base_output_dir: str, task_id: str | None = None) -> str:
     """获取输出目录路径。
 
     如果目录不存在则创建。
@@ -108,7 +108,12 @@ async def format_directory(dir_path: str) -> None:
     logger.info(f"批量格式化目录: {dir_path}")
     try:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "ruff", "check", "--fix", dir_path,
+            sys.executable,
+            "-m",
+            "ruff",
+            "check",
+            "--fix",
+            dir_path,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -118,7 +123,11 @@ async def format_directory(dir_path: str) -> None:
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "ruff", "format", dir_path,
+            sys.executable,
+            "-m",
+            "ruff",
+            "format",
+            dir_path,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -180,15 +189,15 @@ def parse_api_file(filepath: str) -> dict:
         with open(filepath, encoding="utf-8") as f:
             content = f.read()
 
-        # 提取描述和URL（仅支持双引号的docstring）
-        docstring_match = re.search(r'"""(.*?)"""', content, re.DOTALL)
+        # 提取描述和URL（支持双引号和单引号的docstring）
+        docstring_match = re.search(r'"""([\s\S]*?)"""', content) or re.search(r"'''([\s\S]*?)'''", content)
         if docstring_match:
             # 获取第一个非空的捕获组
             docstring_content = docstring_match.group(1)
             lines = [line.strip() for line in docstring_content.split("\n") if line.strip()]
             if lines:
                 result["description"] = lines[0]
-                result["url"]  = lines[1]
+                result["url"] = lines[1]
 
         # 提取参数值和备注（params、data 和 files）
         for param_type in ["params", "data", "files"]:
@@ -220,7 +229,7 @@ def parse_api_file(filepath: str) -> dict:
                         parent_keys.append(enter_match.group(1))
                         continue
                     # 检测退出嵌套 dict： } 或 },
-                    if re.match(r'^\}\s*,?\s*$', stripped):
+                    if re.match(r"^\}\s*,?\s*$", stripped):
                         if parent_keys:
                             parent_keys.pop()
                         continue
@@ -231,7 +240,7 @@ def parse_api_file(filepath: str) -> dict:
                         remark = comment_match.group(2).strip()
                         full_key = ".".join(parent_keys + [key_name]) if parent_keys else key_name
                         result["param_remarks"][full_key] = remark
-                
+
                 # 移除行尾注释后解析字典值
                 try:
                     # 移除变量名赋值部分，只保留字典内容
@@ -247,7 +256,7 @@ def parse_api_file(filepath: str) -> dict:
                     params_dict = ast.literal_eval(dict_str)
                     if isinstance(params_dict, dict):
                         result[param_type].update(params_dict)
-                    break # API文件只会有第一个参数类型
+                    break  # API文件只会有第一个参数类型
                 except Exception as e:
                     logger.error(f"解析 {param_type} 字典失败: {str(e)}")
 
@@ -265,10 +274,10 @@ def parse_api_file(filepath: str) -> dict:
                 elif content[headers_end] == "}":
                     brace_count -= 1
                 headers_end += 1
-            
+
             headers_content = "{" + content[headers_start:headers_end]
-            
-            header_pattern = r'"(\w+[-]?\w+)"\s*:\s*(f"[^"]*"|f\'[^\']*\'|"[^"]*"|\'[^\']*\')'
+
+            header_pattern = r'"([\w-]+)"\s*:\s*(f"[^"]*"|f\'[^\']*\'|"[^"]*"|\'[^\']*\')'
             for key, value in re.findall(header_pattern, headers_content):
                 if value.startswith('f"') or value.startswith("f'"):
                     result["headers"][key] = value
@@ -303,7 +312,7 @@ def format_headers_for_python(headers: dict[str, str]) -> str:
 def format_params_for_python(
     params: dict,
     value_formatter: Callable | None = None,
-    comments: dict = None,
+    comments: dict | None = None,
     inline: bool = False,
     indent: int = 4,
     key_prefix: str = "",
@@ -340,15 +349,19 @@ def format_params_for_python(
         if isinstance(value, dict) and value:
             # 递归处理嵌套字典，传递 key_prefix 用于 dotted key 查找
             formatted_value = format_params_for_python(
-                value, value_formatter, comments,
-                inline=False, indent=indent + 4, key_prefix=full_key,
+                value,
+                value_formatter,
+                comments,
+                inline=False,
+                indent=indent + 4,
+                key_prefix=full_key,
             )
         else:
             formatted_value = value_formatter(value)
         comment = comments.get(full_key, "")
         if comment:
             # 将注释中的换行符替换为空格，避免语法错误
-            safe_comment = comment.replace('\n', ' ').replace('\r', ' ')
+            safe_comment = comment.replace("\n", " ").replace("\r", " ")
             items.append(f'{indent_str}"{key}": {formatted_value},  # {safe_comment}')
         elif comments:
             # 有 comments 字典但无此 key 的描述，添加回退注释
@@ -365,10 +378,10 @@ def format_params_for_python(
 
 def merge_request_params(request_info: dict[str, Any]) -> dict[str, Any]:
     """合并请求中的 query_params 和 post_data。
-    
+
     Args:
         request_info: 请求信息字典，包含 query_params 和 post_data
-        
+
     Returns:
         dict: 合并后的参数字典
     """

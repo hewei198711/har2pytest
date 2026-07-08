@@ -40,7 +40,7 @@ def test_check_api_exists_not_found(monkeypatch, tmp_path):
 @allure.title("测试根目录下API文件存在")
 def test_check_api_exists_root_dir(tmp_path):
     generator = APIGenerator(output_dir=str(tmp_path))
-    func_name = "_api_test_endpoint"
+    func_name = "api_test_endpoint"
     file_path = os.path.join(str(tmp_path), f"{func_name}.py")
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, "w", encoding="utf-8") as f:
@@ -53,7 +53,7 @@ def test_check_api_exists_root_dir(tmp_path):
 @allure.title("测试服务包目录下API文件存在")
 def test_check_api_exists_service_package_dir(tmp_path):
     generator = APIGenerator(output_dir=str(tmp_path))
-    func_name = "_api_test_endpoint"
+    func_name = "api_test_endpoint"
     package_dir = os.path.join(str(tmp_path), "test_service")
     os.makedirs(package_dir, exist_ok=True)
     with open(os.path.join(package_dir, f"{func_name}.py"), "w", encoding="utf-8") as f:
@@ -71,7 +71,7 @@ def test_parse_request_info_get():
         "url": "/api/test",
         "query_params": {"id": 1},
         "post_data": {},
-        "headers": {"Authorization": "Bearer token"}
+        "headers": {"Authorization": "Bearer token"},
     }
     result = generator._parse_request_info(request_info)
     assert result["method"] == "GET"
@@ -89,7 +89,7 @@ def test_parse_request_info_post():
         "url": "/api/create",
         "query_params": {},
         "post_data": {"name": "test"},
-        "headers": {"content-type": "application/json"}
+        "headers": {"content-type": "application/json"},
     }
     result = generator._parse_request_info(request_info)
     assert result["method"] == "POST"
@@ -106,7 +106,7 @@ def test_parse_request_info_file_upload():
         "url": "/api/upload",
         "query_params": {},
         "post_data": {"file": "@test.txt"},
-        "headers": {"content-type": "multipart/form-data"}
+        "headers": {"content-type": "multipart/form-data"},
     }
     result = generator._parse_request_info(request_info)
     assert result["is_file_upload"] is True
@@ -117,7 +117,7 @@ def test_parse_request_info_file_upload():
         "url": "/api/form",
         "query_params": {},
         "post_data": {"orderNo": "SG001", "remarks": "test"},
-        "headers": {"content-type": "multipart/form-data"}
+        "headers": {"content-type": "multipart/form-data"},
     }
     result2 = generator._parse_request_info(request_info2)
     assert result2["is_file_upload"] is False
@@ -129,7 +129,7 @@ def test_parse_request_info_file_upload():
         "url": "/api/storage/upload",
         "query_params": {},
         "post_data": {"storageType": "PublicCloud", "clientKey": "mall-center-product", "file": "(binary)"},
-        "headers": {"content-type": "multipart/form-data; boundary=----WebKitFormBoundary33zTNLfGBAtCpQkw"}
+        "headers": {"content-type": "multipart/form-data; boundary=----WebKitFormBoundary33zTNLfGBAtCpQkw"},
     }
     result3 = generator._parse_request_info(request_info3)
     assert result3["is_file_upload"] is True
@@ -146,7 +146,7 @@ def test_parse_request_info_urlencoded_empty_body():
         "url": "/api/submit",
         "query_params": {},
         "post_data": {},
-        "headers": {"content-length": "0"}
+        "headers": {"content-length": "0"},
     }
     result = generator._parse_request_info(request_info)
     assert result["is_need_urlencode"] is True
@@ -157,13 +157,7 @@ def test_parse_request_info_urlencoded_empty_body():
 @allure.title("测试请求信息默认补充headers")
 def test_parse_request_info_default_headers():
     generator = APIGenerator(output_dir="test_output")
-    request_info = {
-        "method": "GET",
-        "url": "/api/test",
-        "query_params": {},
-        "post_data": {},
-        "headers": {}
-    }
+    request_info = {"method": "GET", "url": "/api/test", "query_params": {}, "post_data": {}, "headers": {}}
     result = generator._parse_request_info(request_info)
     assert len(result["headers"]) > 0
 
@@ -173,13 +167,10 @@ def test_parse_request_info_default_headers():
 @allure.title("测试生成普通请求的导入语句")
 def test_generate_imports_normal():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "is_file_upload": False,
-        "is_need_urlencode": False
-    }
+    parsed_info = {"is_file_upload": False, "is_need_urlencode": False}
     imports = generator._generate_imports(parsed_info)
     assert "import os" in imports
-    assert "from util.client import client" in imports
+    assert "from har2pytest.client import client" in imports
 
 
 @allure.feature("API生成器")
@@ -187,10 +178,7 @@ def test_generate_imports_normal():
 @allure.title("测试生成文件上传的导入语句")
 def test_generate_imports_file_upload():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "is_file_upload": True,
-        "is_need_urlencode": False
-    }
+    parsed_info = {"is_file_upload": True, "is_need_urlencode": False}
     imports = generator._generate_imports(parsed_info)
     assert "from requests_toolbelt import MultipartEncoder" in imports
 
@@ -200,10 +188,7 @@ def test_generate_imports_file_upload():
 @allure.title("测试生成urlencoded的导入语句")
 def test_generate_imports_urlencoded():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "is_file_upload": False,
-        "is_need_urlencode": True
-    }
+    parsed_info = {"is_file_upload": False, "is_need_urlencode": True}
     imports = generator._generate_imports(parsed_info)
     assert "from urllib.parse import urlencode" in imports
 
@@ -251,7 +236,7 @@ def test_process_parameters_get():
         "post_data": {},
         "is_file_upload": False,
         "is_need_urlencode": False,
-        "headers": {"Authorization": "Bearer token"}
+        "headers": {"Authorization": "Bearer token"},
     }
     result = generator._process_parameters(parsed_info)
     assert any("params =" in line for line in result)
@@ -270,7 +255,7 @@ def test_process_parameters_post():
         "post_data": {"name": "test"},
         "is_file_upload": False,
         "is_need_urlencode": False,
-        "headers": {"content-type": "application/json"}
+        "headers": {"content-type": "application/json"},
     }
     result = generator._process_parameters(parsed_info)
     assert any("data =" in line for line in result)
@@ -288,10 +273,10 @@ def test_process_parameters_urlencoded():
         "post_data": {},
         "is_file_upload": False,
         "is_need_urlencode": True,
-        "headers": {"content-type": "application/x-www-form-urlencoded"}
+        "headers": {"content-type": "application/x-www-form-urlencoded"},
     }
     result = generator._process_parameters(parsed_info)
-    assert any("content-Type" in line for line in result)
+    assert any("content-type" in line for line in result)
 
 
 @allure.feature("API生成器")
@@ -306,7 +291,7 @@ def test_process_parameters_path_params():
         "post_data": {},
         "is_file_upload": False,
         "is_need_urlencode": False,
-        "headers": {}
+        "headers": {},
     }
     result = generator._process_parameters(parsed_info)
     assert any("params =" in line for line in result)
@@ -427,11 +412,11 @@ def test_generate_function_definition_get():
         "is_need_urlencode": False,
         "path_params": {},
         "url_pattern": "/api/test",
-        "headers": {}
+        "headers": {},
     }
     swagger_info = {"summary": "测试API", "description": "", "parameters": {}}
-    result = generator._generate_function_definition(parsed_info, "_api_test", swagger_info)
-    assert any("def _api_test" in line for line in result)
+    result = generator._generate_function_definition(parsed_info, "api_test", swagger_info)
+    assert any("def api_test" in line for line in result)
 
 
 @allure.feature("API生成器")
@@ -448,11 +433,11 @@ def test_generate_function_definition_post():
         "is_need_urlencode": False,
         "path_params": {},
         "url_pattern": "/api/create",
-        "headers": {}
+        "headers": {},
     }
     swagger_info = {"description": "创建接口", "parameters": {}, "summary": ""}
-    result = generator._generate_function_definition(parsed_info, "_api_create", swagger_info)
-    assert any("def _api_create" in line for line in result)
+    result = generator._generate_function_definition(parsed_info, "api_create", swagger_info)
+    assert any("def api_create" in line for line in result)
 
 
 @allure.feature("API生成器")
@@ -469,7 +454,7 @@ def test_generate_function_definition_with_path_params():
         "is_need_urlencode": False,
         "path_params": {"id": "123"},
         "url_pattern": "/api/user/{id}",
-        "headers": {}
+        "headers": {},
     }
     swagger_info = {"summary": "用户详情", "description": "", "parameters": {}}
     result = generator._generate_function_definition(parsed_info, "_api_user_detail", swagger_info)
@@ -490,7 +475,7 @@ def test_generate_function_definition_with_summary():
         "is_need_urlencode": False,
         "path_params": {},
         "url_pattern": "/api/test",
-        "headers": {}
+        "headers": {},
     }
     swagger_info = {"summary": "获取用户列表", "description": "", "parameters": {}}
     result = generator._generate_function_definition(parsed_info, "_api_users", swagger_info)
@@ -511,7 +496,7 @@ def test_generate_function_definition_with_description():
         "is_need_urlencode": False,
         "path_params": {},
         "url_pattern": "/api/test",
-        "headers": {}
+        "headers": {},
     }
     swagger_info = {"summary": "", "description": "获取用户信息", "parameters": {}}
     result = generator._generate_function_definition(parsed_info, "_api_users", swagger_info)
@@ -532,10 +517,10 @@ def test_generate_function_definition_with_parameters():
         "is_need_urlencode": False,
         "path_params": {},
         "url_pattern": "/api/test",
-        "headers": {}
+        "headers": {},
     }
     swagger_info = {"summary": "测试", "description": "", "parameters": {"id": "用户ID"}}
-    result = generator._generate_function_definition(parsed_info, "_api_test", swagger_info)
+    result = generator._generate_function_definition(parsed_info, "api_test", swagger_info)
     content = "\n".join(result)
     assert "用户ID" in content
 
@@ -554,12 +539,12 @@ def test_generate_function_definition_with_params():
         "is_need_urlencode": False,
         "path_params": {},
         "url_pattern": "/api/create",
-        "headers": {}
+        "headers": {},
     }
     swagger_info = {"summary": "", "description": "", "parameters": {}}
-    result = generator._generate_function_definition(parsed_info, "_api_create", swagger_info)
+    result = generator._generate_function_definition(parsed_info, "api_create", swagger_info)
     content = "\n".join(result)
-    assert "def _api_create(data=data, headers=headers)" in content
+    assert "def api_create(data=data, headers=headers)" in content
 
 
 @allure.feature("API生成器")
@@ -572,11 +557,11 @@ def test_generate_file_content_get():
         "url": "/api/test",
         "query_params": {"id": 1},
         "post_data": {},
-        "headers": {"Authorization": "Bearer token"}
+        "headers": {"Authorization": "Bearer token"},
     }
-    content = generator.generate_file_content(request_info, "_api_test")
+    content = generator.generate_file_content(request_info, "api_test")
     assert "import os" in content  # headers 模板使用 os.environ，始终需要 import os
-    assert "def _api_test" in content
+    assert "def api_test" in content
     assert "client.get" in content
 
 
@@ -590,11 +575,11 @@ def test_generate_file_content_post():
         "url": "/api/create",
         "query_params": {},
         "post_data": {"name": "test"},
-        "headers": {"content-type": "application/json"}
+        "headers": {"content-type": "application/json"},
     }
-    content = generator.generate_file_content(request_info, "_api_create")
+    content = generator.generate_file_content(request_info, "api_create")
     assert "import os" in content  # headers 模板使用 os.environ，始终需要 import os
-    assert "def _api_create" in content
+    assert "def api_create" in content
     assert "client.post" in content
 
 
@@ -603,15 +588,9 @@ def test_generate_file_content_post():
 @allure.title("测试带Swagger信息生成文件内容")
 def test_generate_file_content_with_swagger_info():
     generator = APIGenerator(output_dir="test_output")
-    request_info = {
-        "method": "GET",
-        "url": "/api/test",
-        "query_params": {"id": 1},
-        "post_data": {},
-        "headers": {}
-    }
+    request_info = {"method": "GET", "url": "/api/test", "query_params": {"id": 1}, "post_data": {}, "headers": {}}
     swagger_info = {"summary": "获取用户", "description": "", "parameters": {"id": "用户ID"}}
-    content = generator.generate_file_content(request_info, "_api_test", swagger_info)
+    content = generator.generate_file_content(request_info, "api_test", swagger_info)
     assert "获取用户" in content
 
 
@@ -624,7 +603,7 @@ def test_generate_index_file(tmp_path):
 
     service_dir = os.path.join(output_dir, "test_service")
     os.makedirs(service_dir, exist_ok=True)
-    test_file = os.path.join(service_dir, "_api_test.py")
+    test_file = os.path.join(service_dir, "api_test.py")
     with open(test_file, "w", encoding="utf-8") as f:
         f.write("# test")
 
@@ -634,7 +613,7 @@ def test_generate_index_file(tmp_path):
     assert os.path.exists(init_file)
     with open(init_file, encoding="utf-8") as f:
         content = f.read()
-    assert "from ._api_test import _api_test" in content
+    assert "from .api_test import api_test" in content
 
 
 @allure.feature("API生成器")
@@ -646,7 +625,7 @@ def test_generate_index_file_main_init(tmp_path):
 
     service_dir = os.path.join(output_dir, "test_service")
     os.makedirs(service_dir, exist_ok=True)
-    test_file = os.path.join(service_dir, "_api_test.py")
+    test_file = os.path.join(service_dir, "api_test.py")
     with open(test_file, "w", encoding="utf-8") as f:
         f.write("# test")
 
@@ -665,7 +644,7 @@ def test_generate_index_file_duplicate_no_append(tmp_path):
 
     service_dir = os.path.join(output_dir, "test_service")
     os.makedirs(service_dir, exist_ok=True)
-    test_file = os.path.join(service_dir, "_api_test.py")
+    test_file = os.path.join(service_dir, "api_test.py")
     with open(test_file, "w", encoding="utf-8") as f:
         f.write("# test")
 
@@ -675,4 +654,53 @@ def test_generate_index_file_duplicate_no_append(tmp_path):
     init_file = os.path.join(service_dir, "__init__.py")
     with open(init_file, encoding="utf-8") as f:
         content = f.read()
-    assert content.count("from ._api_test import _api_test") == 1
+    assert content.count("from .api_test import api_test") == 1
+
+
+# ==================== 异步模式测试 ====================
+
+
+@allure.feature("API生成器")
+@allure.story("异步模式")
+@allure.title("测试异步模式生成 async_client 导入")
+def test_async_mode_generate_imports():
+    generator = APIGenerator(output_dir="test_output", async_mode=True)
+    parsed_info = {"is_file_upload": False, "is_need_urlencode": False}
+    imports = generator._generate_imports(parsed_info)
+    assert "from har2pytest.client import async_client as client" in imports
+    assert "from har2pytest.client import client" not in "".join(imports).replace("async_client as client", "")
+
+
+@allure.feature("API生成器")
+@allure.story("异步模式")
+@allure.title("测试异步模式文件上传导入 FormData")
+def test_async_mode_file_upload_imports():
+    generator = APIGenerator(output_dir="test_output", async_mode=True)
+    parsed_info = {"is_file_upload": True, "is_need_urlencode": False}
+    imports = generator._generate_imports(parsed_info)
+    assert "from aiohttp import FormData" in imports
+    assert "from requests_toolbelt import MultipartEncoder" not in imports
+
+
+@allure.feature("API生成器")
+@allure.story("异步模式")
+@allure.title("测试异步模式文件上传代码生成")
+def test_async_mode_handle_file_upload():
+    generator = APIGenerator(output_dir="test_output", async_mode=True)
+    post_data = {"file": "(binary)", "description": "test file"}
+    result = generator._handle_file_upload(post_data)
+    content = "\n".join(result)
+    assert "FormData()" in content
+    assert "add_field" in content
+    assert "MultipartEncoder" not in content
+
+
+@allure.feature("API生成器")
+@allure.story("异步模式")
+@allure.title("测试同步模式文件上传仍使用 MultipartEncoder")
+def test_sync_mode_file_upload_imports():
+    generator = APIGenerator(output_dir="test_output", async_mode=False)
+    parsed_info = {"is_file_upload": True, "is_need_urlencode": False}
+    imports = generator._generate_imports(parsed_info)
+    assert "from requests_toolbelt import MultipartEncoder" in imports
+    assert "from aiohttp import FormData" not in imports
