@@ -63,7 +63,12 @@ def test_generate_api_files_from_empty_har():
         json.dump(test_har, f)
 
     try:
-        generated_files = asyncio.run(generate_api_files_from_har("test_empty_har.har"))
+        mock_api_generator = MagicMock()
+        mock_api_generator.generate_api_file = AsyncMock(return_value=None)
+
+        generated_files = asyncio.run(
+            generate_api_files_from_har("test_empty_har.har", api_generator=mock_api_generator)
+        )
 
         assert len(generated_files) == 0
     finally:
@@ -107,6 +112,11 @@ def test_generate_api_files_failure():
 @allure.story("不存在的HAR文件")
 @allure.title("测试不存在的HAR文件")
 def test_generate_api_files_nonexistent_har():
-    generated_files = asyncio.run(generate_api_files_from_har("nonexistent.har"))
+    mock_api_generator = MagicMock()
+    mock_api_generator.generate_api_file = AsyncMock(return_value=None)
+
+    generated_files = asyncio.run(
+        generate_api_files_from_har("nonexistent.har", api_generator=mock_api_generator)
+    )
 
     assert len(generated_files) == 0

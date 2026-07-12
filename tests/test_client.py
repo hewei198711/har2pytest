@@ -117,7 +117,7 @@ def test_response_context_init():
     assert ctx._method == "GET"
     assert ctx._url == "/api/test"
     assert ctx._response is None
-    assert ctx._request_info is None
+    assert ctx._request_info == {}
 
 
 # ==================== ResponseContext.__enter__ 测试 ====================

@@ -27,11 +27,11 @@
         "inventory_application": "https://api.example.com/invt/v2/api-docs"
     },
     "HEADERS_TO_INCLUDE": {
-        "authorization": "f\"bearer {os.environ['token']}\"",
+        "authorization": "f\"bearer {os.environ.get('token', '')}\"",
         "content-type": "application/json;charset=UTF-8"
     },
     "REQUIRED_HEADERS": {
-        "authorization": "f\"bearer {os.environ['token']}\""
+        "authorization": "f\"bearer {os.environ.get('token', '')}\""
     },
     "INVALID_PARAMS": [
         "rnd",
@@ -40,6 +40,10 @@
         "t",
         "callback",
         "jsonp"
+    ],
+    "PAGINATION_PARAMS": [
+        "pageNum",
+        "pageSize"
     ],
     "LIST_QUERY_KEYWORDS": [
         "列表",

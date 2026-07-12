@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +36,8 @@ jobs:
             "SERVICE_MAPPING": {"api": "example_service"},
             "SWAGGER_DOC_URLS": {"example_service": "https://example.com/swagger"},
             "DEFAULT_API_DIR": "apis",
-            "TESTCASE_DIR": "testcases"
+            "TESTCASE_DIR": "testcases",
+            "PAGINATION_PARAMS": ["pageNum", "pageSize"]
           }
           EOF
 

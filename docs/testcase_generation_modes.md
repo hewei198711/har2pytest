@@ -47,7 +47,7 @@ flowchart TD
 #### Step 1: `generate_parametrized_list_testcases()`
 
 ```
-输入: har_file_pathtask_id, target_url?, overwrite=False
+输入: har_file_path, task_id, target_url?, overwrite=False
  └─ 校验 HAR 文件存在
  └─ match_api_files_for_har() → 获取匹配的 API 文件列表
  └─ 遍历每个 api_file:
@@ -88,8 +88,8 @@ flowchart TD
  ├─ 无参数 → 返回 None
  │
  └─ [生成代码]
-      ├─ _generate_test_case_imports(单函数, )
-     ├─ _generate_test_case_description(severity="NORMAL")
+      ├─ _generate_test_case_imports(单函数)
+    ├─ _generate_test_case_description(severity="NORMAL")
      └─ _generate_parametrized_test_methods(param_items, ...)
 ```
 
@@ -135,7 +135,7 @@ flowchart TD
       │    ├─ 构建 {param_name: param_value, other_key: other_value, ...}
       │    └─ data = {...} 或 params = {...}
       └─ _generate_test_method_assertions(function_name, param_var_name)
-           └─ with function_name(params=params, headers=self.headers) as r:
+           └─ with function_name(params=params) as r:
               assert r.status_code == 200
               assert r.json()['code'] == 200
 ```
@@ -146,7 +146,7 @@ flowchart TD
 import pytest
 import allure
 from allure_commons.types import Severity
-from apis.mall_center import _list_page
+from apis.mall_center import list_page
 
 @allure.severity(Severity.NORMAL)
 @allure.feature('mall_center')
@@ -161,7 +161,7 @@ class TestClass:
             "page": "1",
             "page_size": "20",
         }
-        with _list_page(params=params) as r:
+        with list_page(params=params) as r:
             assert r.status_code == 200
             data = r.json()
             assert data['code'] == 200
@@ -174,7 +174,7 @@ class TestClass:
             "page": "1",
             "page_size": "20",
         }
-        with _list_page(params=params) as r:
+        with list_page(params=params) as r:
             assert r.status_code == 200
             data = r.json()
             assert data['code'] == 200
@@ -198,9 +198,9 @@ flowchart TD
     C -->|是 或文件不存在| E[har_parser.extract_requests_from_har<br/>一次解析HAR]
     E --> F[match_api_files_for_har<br/>传入预解析请求列表]
     F --> G[URLMatcher.find_matching_api_file<br/>target_url → 定位目标API]
-    G --> H[generate_scenario_test_content<br/>har_file_path, api_filestask_id, target_api_file]
+    G --> H[generate_scenario_test_content<br/>har_file_path, api_files, task_id, target_api_file]
     H --> I[_get_requests_from_source<br/>优先HAR/回退API文件]
-    I --> J[_generate_test_case_imports<br/>多函数, ]
+    I --> J[_generate_test_case_imports<br/>多函数]
     J --> K[_extract_api_info<br/>feature_name, story_name]
     K --> L[_generate_test_case_description<br/>severity=CRITICAL]
     L --> N[_generate_scenario_test_method_definition]
@@ -214,7 +214,7 @@ flowchart TD
 #### Step 1: `generate_scenario_testcase()`
 
 ```
-输入: har_file_path, target_urltask_id, overwrite=False
+输入: har_file_path, target_url, task_id, overwrite=False
  └─ 校验 HAR 文件存在
  └─ har_parser.extract_requests_from_har() → 一次解析 HAR
  └─ match_api_files_for_har(har_file_path, all_requests) → 传入预解析请求列表
@@ -228,12 +228,12 @@ flowchart TD
 #### Step 2: `generate_scenario_test_content()`
 
 ```
-输入: har_file_path?, api_filestask_id?, target_api_file?
+输入: har_file_path?, api_files, task_id?, target_api_file?
  └─ _get_requests_from_source(har_file_path, api_files, target_api_file)
  │    ├─ HAR 存在: har_parser.extract_requests_from_har() → 请求列表
  │    └─ 无 HAR: 从 API 文件构建模拟请求信息
  │
- ├─ _generate_test_case_imports(api_files, )
+ ├─ _generate_test_case_imports(api_files)
  │    └─ 多函数模式: 按服务包分组导入，不导入 pytest
  │
  ├─ _extract_api_info(target_api_file)
@@ -241,7 +241,7 @@ flowchart TD
  │
  ├─ _generate_test_case_description(severity="CRITICAL")
  │
-├─ _generate_scenario_test_method_definition(target_api_file)
+ ├─ _generate_scenario_test_method_definition(target_api_file)
  │    ├─ @allure.title("接口描述")
  │    └─ def test_funcname(self):
  │       test_data = {}
@@ -273,9 +273,9 @@ import os
 import allure
 from allure_commons.types import Severity
 from apis.mall_center import (
-    _login,
-    _list_page,
-    _submit_order,
+    login,
+    list_page,
+    submit_order,
 )
 
 @allure.severity(Severity.CRITICAL)
@@ -292,7 +292,7 @@ class TestClass:
         @allure.step("用户登录")
         def step_login():
             data = {"username": "test", "password": "123456"}
-            with _login(data=data) as r:
+            with login(data=data) as r:
                 assert r.status_code == 200
                 data = r.json()
                 assert data['code'] == 200
@@ -301,7 +301,7 @@ class TestClass:
         @allure.step("获取商品列表")
         def step_list_page():
             params = {"page": "1", "page_size": "20"}
-            with _list_page(params=params) as r:
+            with list_page(params=params) as r:
                 assert r.status_code == 200
                 data = r.json()
                 assert data['code'] == 200
@@ -310,7 +310,7 @@ class TestClass:
         @allure.step("提交订单")
         def step_submit_order():
             data = {"product_id": test_data['product_list']['data'][0]['id']}
-            with _submit_order(data=data) as r:
+            with submit_order(data=data) as r:
                 assert r.status_code == 200
                 data = r.json()
                 assert data['code'] == 200
@@ -409,7 +409,7 @@ flowchart TD
 import pytest
 import allure
 from allure_commons.types import Severity
-from apis.mall_center import _list_page
+from apis.mall_center import list_page
 
 @allure.severity(Severity.NORMAL)
 @allure.feature('mall_center')
@@ -424,7 +424,7 @@ class TestClass:
             "page": "1",
             "page_size": "20",
         }
-        with _list_page(data=data) as r:
+        with list_page(data=data) as r:
             assert r.status_code == 200
             data = r.json()
             assert data['code'] == 200

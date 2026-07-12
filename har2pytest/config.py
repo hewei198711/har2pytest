@@ -27,7 +27,7 @@ class APIConfig:
         "INVALID_PARAMS": [],
         # 请求头配置
         # NOTE: 默认配置值包含 f-string 代码，运行时通过 eval 求值。请确保配置文件来源可信。
-        "REQUIRED_HEADERS": {"authorization": "f\"bearer {os.environ['token']}\""},
+        "REQUIRED_HEADERS": {"authorization": "f\"bearer {os.environ.get('token', '')}\""},
         "HEADERS_TO_INCLUDE": {},
         # 列表查询用例，这些参数不进行参数化处理
         "PAGINATION_PARAMS": [],
@@ -47,7 +47,7 @@ class APIConfig:
     }
 
     # 初始化配置
-    _config = None
+    _config: dict | None = None
     _config_warned = False
     _config_file_exists = False
 
@@ -99,7 +99,7 @@ class APIConfig:
                 "配置文件格式错误：HEADERS_TO_INCLUDE 仅支持字典格式，请使用字典格式。\n"
                 "示例：\n"
                 '    "HEADERS_TO_INCLUDE": {\n'
-                '        "authorization": "bearer {os.environ[\'token\']}",\n'
+                '        "authorization": "bearer {os.environ.get(\'token\', \'\')}",\n'
                 '        "channel": "pc",\n'
                 '        "client": "op"\n'
                 "    }"

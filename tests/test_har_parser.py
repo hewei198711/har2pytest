@@ -18,6 +18,7 @@ def test_extract_requests_from_har():
     from har2pytest.config import APIConfig
 
     APIConfig.get_config("BASE_URLS")
+    assert APIConfig._config is not None
 
     original_base_urls = APIConfig._config.get("BASE_URLS", [])
     APIConfig._config["BASE_URLS"] = ["https://taobao.com/api"]
@@ -68,6 +69,7 @@ def test_filter_invalid_params():
     from har2pytest.config import APIConfig
 
     APIConfig.get_config("INVALID_PARAMS")
+    assert APIConfig._config is not None
 
     original_invalid_params = APIConfig._config.get("INVALID_PARAMS", set())
     APIConfig._config["INVALID_PARAMS"] = {"sign", "timestamp"}
@@ -125,9 +127,10 @@ def test_filter_headers():
     from har2pytest.config import APIConfig
 
     APIConfig.get_config("HEADERS_TO_INCLUDE")
+    assert APIConfig._config is not None
 
-    original_headers = APIConfig._config.get("HEADERS_TO_INCLUDE", [])
-    APIConfig._config["HEADERS_TO_INCLUDE"] = ["content-type", "authorization"]
+    original_headers = APIConfig._config.get("HEADERS_TO_INCLUDE", {})
+    APIConfig._config["HEADERS_TO_INCLUDE"] = {"content-type": "", "authorization": ""}
 
     try:
         parser = HARParser()
@@ -159,9 +162,10 @@ def test_filter_headers_no_config():
     from har2pytest.config import APIConfig
 
     APIConfig.get_config("HEADERS_TO_INCLUDE")
+    assert APIConfig._config is not None
 
-    original_headers = APIConfig._config.get("HEADERS_TO_INCLUDE", [])
-    APIConfig._config["HEADERS_TO_INCLUDE"] = []
+    original_headers = APIConfig._config.get("HEADERS_TO_INCLUDE", {})
+    APIConfig._config["HEADERS_TO_INCLUDE"] = {}
 
     try:
         parser = HARParser()

@@ -21,8 +21,6 @@ from .logger import logger
 # 共享工具函数
 # ---------------------------------------------------------------------------
 
-_last_request_response = None
-
 
 def _value_with_color(value: float, thresholds: dict) -> str:
     """根据阈值返回带颜色的 HTML 文本。"""
@@ -33,6 +31,93 @@ def _value_with_color(value: float, thresholds: dict) -> str:
     else:
         color = "red"
     return f'<span style="color: {color}; font-weight: bold;">{value:.3f}</span>'
+
+
+def _build_request_info(method: str, full_url: str, headers: dict, params, json_data, data, upload_class_name: str | None = None) -> dict:
+    """构建请求信息字典（同步/异步共用）。
+
+    Args:
+        method: HTTP 方法
+        full_url: 完整 URL
+        headers: 请求头
+        params: 查询参数
+        json_data: JSON 数据
+        data: 请求体数据
+        upload_class_name: 文件上传对象的类名标识（如 "MultipartEncoder" 或 "FormData"）
+    """
+    request_info = {
+        "url": full_url,
+        "method": method,
+        "headers": headers,
+    }
+    if params is not None:
+        request_info["params"] = params
+    if json_data is not None:
+        request_info["json"] = json_data
+    if data is not None:
+        if upload_class_name and hasattr(data, "__class__") and upload_class_name in data.__class__.__name__:
+            request_info["data"] = f"[文件上传请求 - {upload_class_name}对象]"
+        else:
+            request_info["data"] = str(data)[:500]
+    return request_info
+
+
+def _attach_request_response_to_allure(request_info: dict, response_info: dict, exc_val: BaseException | None = None):
+    """将请求和响应数据附加到 Allure 报告（同步/异步共用）。
+
+    Args:
+        request_info: 请求信息字典
+        response_info: 响应信息字典
+        exc_val: 异常对象（断言失败时传入）
+    """
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+    # 附加请求数据
+    try:
+        allure.attach(
+            json.dumps(request_info, indent=2, ensure_ascii=False),
+            name=f"{timestamp} Request data",
+            attachment_type=allure.attachment_type.JSON,
+        )
+    except Exception as e:
+        logger.error(f"添加 Allure 请求数据失败: {e}")
+
+    # 附加响应数据
+    try:
+        allure.attach(
+            json.dumps(response_info, indent=2, ensure_ascii=False),
+            name=f"{timestamp} Response data",
+            attachment_type=allure.attachment_type.JSON,
+        )
+    except Exception as e:
+        logger.error(f"添加 Allure 响应数据失败: {e}")
+
+    # 附加错误信息（仅断言失败时）
+    if exc_val is not None:
+        try:
+            allure.attach(
+                str(exc_val),
+                name="Assertion Error",
+                attachment_type=allure.attachment_type.TEXT,
+            )
+        except Exception:
+            pass
+
+
+def _build_log_request_data(method: str, url: str, request_info: dict) -> dict:
+    """构建请求日志数据（同步/异步共用）。"""
+    log_data = {
+        "method": method.upper(),
+        "url": url,
+        "headers": request_info.get("headers", {}),
+    }
+    if "params" in request_info:
+        log_data["params"] = request_info["params"]
+    elif "json" in request_info:
+        log_data["json"] = request_info["json"]
+    elif "data" in request_info:
+        log_data["data"] = request_info["data"]
+    return log_data
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +138,7 @@ class ResponseContext:
         self._url = url
         self._kwargs = dict(kwargs)
         self._response: requests.Response | None = None
-        self._request_info: dict | None = None
+        self._request_info: dict = {}
         self._start_time: float | None = None
 
     def __enter__(self) -> requests.Response:
@@ -70,20 +155,9 @@ class ResponseContext:
         verify = self._kwargs.pop("verify", None)
 
         # 构建请求信息
-        self._request_info = {
-            "url": full_url,
-            "method": self._method,
-            "headers": headers,
-        }
-        if params is not None:
-            self._request_info["params"] = params
-        if json_data is not None:
-            self._request_info["json"] = json_data
-        if data is not None:
-            if hasattr(data, "__class__") and "MultipartEncoder" in data.__class__.__name__:
-                self._request_info["data"] = "[文件上传请求 - MultipartEncoder对象]"
-            else:
-                self._request_info["data"] = str(data)[:500]
+        self._request_info = _build_request_info(
+            self._method, full_url, headers, params, json_data, data, "MultipartEncoder"
+        )
 
         # 确定超时和 verify
         final_timeout = timeout if timeout is not None else self._client.default_timeout
@@ -108,10 +182,6 @@ class ResponseContext:
             **request_kwargs,
         )
 
-        # 更新全局变量
-        global _last_request_response
-        _last_request_response = self._response
-
         # 检查响应状态码
         self._response.raise_for_status()
 
@@ -131,7 +201,6 @@ class ResponseContext:
         """将请求和响应数据附加到 Allure 报告。"""
         if self._response is None:
             return
-        # 解析响应体
         body = self._parse_response_body(self._response)
 
         response_info = {
@@ -140,46 +209,7 @@ class ResponseContext:
             "body": body,
         }
 
-        # 性能监控
-        # if self._start_time:
-        #     elapsed = time.time() - self._start_time
-        #     thresholds = {"red": 30, "yellow": 8, "green": 1}
-        #     allure.attach(
-        #         f"<html><body>{_value_with_color(elapsed, thresholds)}</body></html>",
-        #         name=f"性能监控: {self._url} 响应时间: {elapsed:.3f}s",
-        #         attachment_type=allure.attachment_type.HTML,
-        #     )
-
-        # 附加请求数据
-        try:
-            allure.attach(
-                json.dumps(self._request_info, indent=2, ensure_ascii=False),
-                name=f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} Request data",
-                attachment_type=allure.attachment_type.JSON,
-            )
-        except Exception as e:
-            logger.error(f"添加 Allure 请求数据失败: {e}")
-
-        # 附加响应数据
-        try:
-            allure.attach(
-                json.dumps(response_info, indent=2, ensure_ascii=False),
-                name=f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} Response data",
-                attachment_type=allure.attachment_type.JSON,
-            )
-        except Exception as e:
-            logger.error(f"添加 Allure 响应数据失败: {e}")
-
-        # 附加错误信息（仅断言失败时）
-        if exc_val is not None:
-            try:
-                allure.attach(
-                    str(exc_val),
-                    name="Assertion Error",
-                    attachment_type=allure.attachment_type.TEXT,
-                )
-            except Exception:
-                pass
+        _attach_request_response_to_allure(self._request_info, response_info, exc_val)
 
     @staticmethod
     def _parse_response_body(response: requests.Response) -> Any:
@@ -216,18 +246,8 @@ class Client:
 
     def _log_request(self, method: str, url: str, request_info: dict):
         """记录请求日志。"""
-        log_data = {
-            "method": method.upper(),
-            "url": url,
-            "headers": request_info.get("headers", {}),
-        }
-        if "params" in request_info:
-            log_data["params"] = request_info["params"]
-        elif "json" in request_info:
-            log_data["json"] = request_info["json"]
-        elif "data" in request_info:
-            log_data["data"] = request_info["data"]
-        self.logger.info("Request data:", extra={"request": log_data})
+        log_data = _build_log_request_data(method, url, request_info)
+        self.logger.info(f"Request data: {log_data}")
 
     def _log_response(self, response: requests.Response):
         """记录响应日志。"""
@@ -245,13 +265,13 @@ class Client:
             "headers": dict(response.headers),
             "body": body,
         }
-        self.logger.info("Response data:", extra={"response": log_data})
+        self.logger.info(f"Response data: {log_data}")
 
     def request(self, method: str, url: str = "", **kwargs) -> ResponseContext:
         """创建同步请求上下文管理器。
 
         Args:
-            method: HTTP 请求方法（GET/POST/PUT等）
+            method: HTTP 请求方法（GET/POST/PUT/DELETE/PATCH等）
             url: 请求 URL 路径
             **kwargs: 请求参数（headers, params, json, data, timeout, verify等）
 
@@ -272,6 +292,14 @@ class Client:
         """创建 PUT 请求上下文管理器。"""
         return self.request("PUT", url, **kwargs)
 
+    def delete(self, url: str = "", **kwargs) -> ResponseContext:
+        """创建 DELETE 请求上下文管理器。"""
+        return self.request("DELETE", url, **kwargs)
+
+    def patch(self, url: str = "", **kwargs) -> ResponseContext:
+        """创建 PATCH 请求上下文管理器。"""
+        return self.request("PATCH", url, **kwargs)
+
 
 # ---------------------------------------------------------------------------
 # 异步 HTTP 客户端（基于 aiohttp）
@@ -291,7 +319,7 @@ class AsyncResponseContext:
         self._url = url
         self._kwargs = dict(kwargs)
         self._response = None
-        self._request_info = None
+        self._request_info = {}
         self._start_time = None
 
     async def __aenter__(self):
@@ -308,20 +336,9 @@ class AsyncResponseContext:
         timeout = self._kwargs.pop("timeout", None)
 
         # 构建请求信息
-        self._request_info = {
-            "url": full_url,
-            "method": self._method,
-            "headers": headers,
-        }
-        if params is not None:
-            self._request_info["params"] = params
-        if json_data is not None:
-            self._request_info["json"] = json_data
-        if data is not None:
-            if hasattr(data, "__class__") and "FormData" in data.__class__.__name__:
-                self._request_info["data"] = "[文件上传请求 - FormData对象]"
-            else:
-                self._request_info["data"] = str(data)[:500]
+        self._request_info = _build_request_info(
+            self._method, full_url, headers, params, json_data, data, "FormData"
+        )
 
         # 发起请求
         request_kwargs = {}
@@ -340,10 +357,6 @@ class AsyncResponseContext:
             timeout=aiohttp.ClientTimeout(total=timeout) if timeout else None,
             **request_kwargs,
         )
-
-        # 更新全局变量
-        global _last_request_response
-        _last_request_response = self._response
 
         # 检查响应状态码
         try:
@@ -372,7 +385,6 @@ class AsyncResponseContext:
         """将请求和响应数据附加到 Allure 报告。"""
         if self._response is None:
             return
-        global _last_request_response
 
         body = await self._parse_response_body(self._response)
 
@@ -382,46 +394,7 @@ class AsyncResponseContext:
             "body": body,
         }
 
-        # 性能监控
-        # if self._start_time:
-        #     elapsed = time.time() - self._start_time
-        #     thresholds = {"red": 30, "yellow": 8, "green": 1}
-        #     allure.attach(
-        #         f"<html><body>{_value_with_color(elapsed, thresholds)}</body></html>",
-        #         name=f"性能监控: {self._url} 响应时间: {elapsed:.3f}s",
-        #         attachment_type=allure.attachment_type.HTML,
-        #     )
-
-        # 附加请求数据
-        try:
-            allure.attach(
-                json.dumps(self._request_info, indent=2, ensure_ascii=False),
-                name=f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} Request data",
-                attachment_type=allure.attachment_type.JSON,
-            )
-        except Exception as e:
-            logger.error(f"添加 Allure 请求数据失败: {e}")
-
-        # 附加响应数据
-        try:
-            allure.attach(
-                json.dumps(response_info, indent=2, ensure_ascii=False),
-                name=f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} Response data",
-                attachment_type=allure.attachment_type.JSON,
-            )
-        except Exception as e:
-            logger.error(f"添加 Allure 响应数据失败: {e}")
-
-        # 附加错误信息（仅断言失败时）
-        if exc_val is not None:
-            try:
-                allure.attach(
-                    str(exc_val),
-                    name="Assertion Error",
-                    attachment_type=allure.attachment_type.TEXT,
-                )
-            except Exception:
-                pass
+        _attach_request_response_to_allure(self._request_info, response_info, exc_val)
 
     async def _parse_response_body(self, response) -> Any:
         """解析异步响应体。"""
@@ -495,18 +468,8 @@ class AsyncClient:
 
     def _log_request(self, method: str, url: str, request_info: dict):
         """记录请求日志。"""
-        log_data = {
-            "method": method.upper(),
-            "url": url,
-            "headers": request_info.get("headers", {}),
-        }
-        if "params" in request_info:
-            log_data["params"] = request_info["params"]
-        elif "json" in request_info:
-            log_data["json"] = request_info["json"]
-        elif "data" in request_info:
-            log_data["data"] = request_info["data"]
-        self.logger.info("Request data:", extra={"request": log_data})
+        log_data = _build_log_request_data(method, url, request_info)
+        self.logger.info(f"Request data: {log_data}")
 
     async def _log_response(self, response):
         """记录响应日志。"""
@@ -525,7 +488,7 @@ class AsyncClient:
             "headers": dict(response.headers),
             "body": body,
         }
-        self.logger.info("Response data:", extra={"response": log_data})
+        self.logger.info(f"Response data: {log_data}")
 
     def request(self, method: str, url: str = "", **kwargs) -> AsyncResponseContext:
         """创建异步请求上下文管理器。"""
@@ -542,6 +505,14 @@ class AsyncClient:
     def put(self, url: str = "", **kwargs) -> AsyncResponseContext:
         """创建 PUT 请求上下文管理器。"""
         return self.request("PUT", url, **kwargs)
+
+    def delete(self, url: str = "", **kwargs) -> AsyncResponseContext:
+        """创建 DELETE 请求上下文管理器。"""
+        return self.request("DELETE", url, **kwargs)
+
+    def patch(self, url: str = "", **kwargs) -> AsyncResponseContext:
+        """创建 PATCH 请求上下文管理器。"""
+        return self.request("PATCH", url, **kwargs)
 
 
 # ---------------------------------------------------------------------------

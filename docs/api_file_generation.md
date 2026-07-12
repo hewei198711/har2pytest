@@ -153,11 +153,10 @@ params = {
 
 headers = {
     "authorization": f"bearer {os.environ['token']}",
-    "content-length": "0",
 }
 
 
-def _mobile_order_list(params=params, headers=headers):
+def mobile_order_list(params=params, headers=headers):
     """
     订单分页查询
     /mobile/order/list
@@ -191,7 +190,7 @@ headers = {
 }
 
 
-def _order_export_handledDetail(data=data, headers=headers):
+def order_export_handledDetail(data=data, headers=headers):
     """
     明细导出
     /order/export/handledDetail
@@ -216,7 +215,7 @@ headers = {
 }
 
 
-def _mobile_order_id(params=params, headers=headers):
+def mobile_order_id(params=params, headers=headers):
     """
     订单详情
     /mobile/order/{id}
@@ -336,11 +335,10 @@ params = {
 
 headers = {
     "authorization": f"bearer {os.environ['token']}",
-    "content-length": "0",
 }
 
 
-def _mgmt_user_list(params=params, headers=headers):
+def mgmt_user_list(params=params, headers=headers):
     """
     用户列表查询
     /mgmt/user/list
