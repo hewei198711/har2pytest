@@ -133,7 +133,8 @@ flowchart TD
     └── 请求调用:
         ├── GET:  client.get(url=url, params=params, headers=headers)
         ├── POST: client.post(url=url, json=data, headers=headers)
-        ├── 文件上传: MultipartEncoder + client.post(url=url, data=m, headers=headers)
+        ├── 文件上传: build_multipart_data + client.post(url=url, data=data, headers=headers)
+        ├── Multipart表单: build_form_data + client.post(url=url, data=m, headers=headers)
         └── URL编码: client.post(url=url, data=urlencode(data), headers=headers)
 ```
 
@@ -383,9 +384,6 @@ har2pytest api api_request.har --output apis
 
 # 强制覆盖已存在的文件
 har2pytest api api_request.har --output apis --overwrite
-
-# 生成异步模式 API 文件（使用 async_client + aiohttp）
-har2pytest api api_request.har --async
 ```
 
 ### 从 Swagger 文档生成
@@ -405,20 +403,18 @@ har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --path /m
 
 # 组合使用
 har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --output apis --overwrite --path /mgmt/user/list
-
-# 生成异步模式 API 文件
-har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --async
 ```
 
-### 异步模式说明
+### 同步/异步统一说明
 
-使用 `--async` 参数生成的 API 文件与同步模式有以下区别：
+API 文件不再区分同步和异步模式，始终生成一套代码，运行时自动适配：
 
-| 特性 | 同步模式（默认） | 异步模式（--async） |
-|------|----------------|---------------------|
-| 客户端导入 | `from har2pytest.client import client` | `from har2pytest.client import async_client as client` |
-| 文件上传 | `from requests_toolbelt import MultipartEncoder` | `from aiohttp import FormData` |
-| 适用场景 | pytest + requests | pytest-asyncio + aiohttp |
+| 特性 | 说明 |
+|------|------|
+| 客户端导入 | `from har2pytest.client import client`（`client` 是 `_ClientProxy` 代理） |
+| 文件上传 | `from har2pytest.client import client, build_multipart_data`（自动适配同步/异步） |
+| 同步测试 | 默认使用 `Client`（requests），测试用例用 `with func() as r:` |
+| 异步测试 | 测试用例加 `--async` 生成，导入部分自动添加 `client.set_client(async_client)`，用 `async with func() as r:` |
 
 ---
 

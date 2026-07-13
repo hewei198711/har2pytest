@@ -1772,3 +1772,30 @@ def test_sync_mode_test_method_assertions():
     assert "assert r.status_code == 200" in content
     assert "data = r.json()" in content
     assert "assert data['code'] == 200" in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("异步模式")
+@allure.title("测试异步模式导入包含 client.set_client")
+def test_async_mode_imports_include_set_client():
+    """异步模式测试用例应在导入部分切换 client 为 async_client。"""
+    generator = TestCaseGenerator(api_dir="apis", async_mode=True)
+    result = generator._generate_test_case_imports(
+        service_package="test_service", function_name="test_api"
+    )
+    content = "\n".join(result)
+    assert "from har2pytest.client import client, async_client" in content
+    assert "client.set_client(async_client)" in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("异步模式")
+@allure.title("测试同步模式导入不包含 client.set_client")
+def test_sync_mode_imports_exclude_set_client():
+    """同步模式测试用例不应切换 client。"""
+    generator = TestCaseGenerator(api_dir="apis", async_mode=False)
+    result = generator._generate_test_case_imports(
+        service_package="test_service", function_name="test_api"
+    )
+    content = "\n".join(result)
+    assert "client.set_client" not in content

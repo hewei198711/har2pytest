@@ -12,7 +12,6 @@ import requests
 from har2pytest.client import Client, ResponseContext, _value_with_color, client
 from har2pytest.logger import logger
 
-
 # ==================== _value_with_color 测试 ====================
 
 
@@ -236,7 +235,7 @@ def test_response_context_exit_exception_attaches_allure():
 
     with patch("har2pytest.client.allure.attach") as mock_attach:
         try:
-            with c.get("/api/test") as r:
+            with c.get("/api/test"):
                 raise AssertionError("test failure")
         except AssertionError:
             pass
@@ -531,7 +530,29 @@ def test_client_log_response_exception():
 @allure.story("全局实例")
 @allure.title("测试 client 全局实例")
 def test_client_global_instance():
-    assert isinstance(client, Client)
+    """client 是 _ClientProxy，默认包装同步 Client 实例。"""
+    from har2pytest.client import _ClientProxy
+
+    assert isinstance(client, _ClientProxy)
+    assert client.is_async is False
+
+
+@allure.feature("同步客户端")
+@allure.story("全局实例")
+@allure.title("测试 _ClientProxy 切换客户端")
+def test_client_proxy_set_client():
+    """_ClientProxy.set_client 可切换同步/异步客户端。"""
+    from har2pytest.client import AsyncClient, Client, _ClientProxy
+
+    proxy = _ClientProxy(Client(base_url=""))
+    assert proxy.is_async is False
+
+    proxy.set_client(AsyncClient(base_url=""))
+    assert proxy.is_async is True
+
+    # 恢复同步
+    proxy.set_client(Client(base_url=""))
+    assert proxy.is_async is False
 
 
 # ==================== HTTP 错误测试 ====================

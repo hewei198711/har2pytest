@@ -180,7 +180,7 @@ def test_generate_imports_file_upload():
     generator = APIGenerator(output_dir="test_output")
     parsed_info = {"is_file_upload": True, "is_need_urlencode": False}
     imports = generator._generate_imports(parsed_info)
-    assert "from requests_toolbelt import MultipartEncoder" in imports
+    assert "from har2pytest.client import client, build_multipart_data" in imports
 
 
 @allure.feature("API生成器")
@@ -377,7 +377,9 @@ def test_handle_file_upload():
     generator = APIGenerator(output_dir="test_output")
     post_data = {"file": "(binary)", "description": "test file"}
     result = generator._handle_file_upload(post_data)
-    assert any("MultipartEncoder" in line for line in result)
+    content = "\n".join(result)
+    assert "build_multipart_data" in content
+    assert "MultipartEncoder" not in content
 
 
 @allure.feature("API生成器")
@@ -657,50 +659,43 @@ def test_generate_index_file_duplicate_no_append(tmp_path):
     assert content.count("from .api_test import api_test") == 1
 
 
-# ==================== 异步模式测试 ====================
+# ==================== 统一客户端模式测试 ====================
 
 
 @allure.feature("API生成器")
-@allure.story("异步模式")
-@allure.title("测试异步模式生成 async_client 导入")
-def test_async_mode_generate_imports():
-    generator = APIGenerator(output_dir="test_output", async_mode=True)
+@allure.story("统一客户端模式")
+@allure.title("测试统一模式生成 client 导入")
+def test_unified_mode_generate_imports():
+    """API 文件始终使用 from har2pytest.client import client，不再区分同步/异步。"""
+    generator = APIGenerator(output_dir="test_output")
     parsed_info = {"is_file_upload": False, "is_need_urlencode": False}
     imports = generator._generate_imports(parsed_info)
-    assert "from har2pytest.client import async_client as client" in imports
-    assert "from har2pytest.client import client" not in "".join(imports).replace("async_client as client", "")
+    assert "from har2pytest.client import client" in imports
+    assert "async_client" not in "".join(imports)
 
 
 @allure.feature("API生成器")
-@allure.story("异步模式")
-@allure.title("测试异步模式文件上传导入 FormData")
-def test_async_mode_file_upload_imports():
-    generator = APIGenerator(output_dir="test_output", async_mode=True)
+@allure.story("统一客户端模式")
+@allure.title("测试文件上传导入 build_multipart_data")
+def test_unified_mode_file_upload_imports():
+    """文件上传导入 client 和 build_multipart_data，运行时自动适配同步/异步。"""
+    generator = APIGenerator(output_dir="test_output")
     parsed_info = {"is_file_upload": True, "is_need_urlencode": False}
     imports = generator._generate_imports(parsed_info)
-    assert "from aiohttp import FormData" in imports
+    assert "from har2pytest.client import client, build_multipart_data" in imports
+    assert "from aiohttp import FormData" not in imports
     assert "from requests_toolbelt import MultipartEncoder" not in imports
 
 
 @allure.feature("API生成器")
-@allure.story("异步模式")
-@allure.title("测试异步模式文件上传代码生成")
-def test_async_mode_handle_file_upload():
-    generator = APIGenerator(output_dir="test_output", async_mode=True)
+@allure.story("统一客户端模式")
+@allure.title("测试文件上传代码使用 build_multipart_data")
+def test_unified_mode_handle_file_upload():
+    """文件上传代码调用 build_multipart_data，自动适配同步/异步客户端。"""
+    generator = APIGenerator(output_dir="test_output")
     post_data = {"file": "(binary)", "description": "test file"}
     result = generator._handle_file_upload(post_data)
     content = "\n".join(result)
-    assert "FormData()" in content
-    assert "add_field" in content
+    assert "build_multipart_data" in content
     assert "MultipartEncoder" not in content
-
-
-@allure.feature("API生成器")
-@allure.story("异步模式")
-@allure.title("测试同步模式文件上传仍使用 MultipartEncoder")
-def test_sync_mode_file_upload_imports():
-    generator = APIGenerator(output_dir="test_output", async_mode=False)
-    parsed_info = {"is_file_upload": True, "is_need_urlencode": False}
-    imports = generator._generate_imports(parsed_info)
-    assert "from requests_toolbelt import MultipartEncoder" in imports
-    assert "from aiohttp import FormData" not in imports
+    assert "FormData" not in content

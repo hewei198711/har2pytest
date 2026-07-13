@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+from typing import Any
 
 from .config import APIConfig
 from .logger import logger
@@ -14,19 +14,19 @@ from .utils import (
     write_test_file,
 )
 
+
 class APIGenerator:
     """API文件生成器类"""
 
     # 定义默认的 Swagger 信息结构常量
     DEFAULT_SWAGGER_INFO = {"description": "", "parameters": {}, "summary": ""}
 
-    def __init__(self, output_dir: str | None = None, async_mode: bool = False):
+    def __init__(self, output_dir: str | None = None):
         """
         初始化API生成器
 
         Args:
             output_dir: API文件输出目录，默认为APIConfig.DEFAULT_API_DIR
-            async_mode: 是否生成异步模式代码（使用 async_client + aiohttp）
 
         Example:
             generator = APIGenerator(output_dir="api")
@@ -34,7 +34,6 @@ class APIGenerator:
         if output_dir is None:
             output_dir = APIConfig.DEFAULT_API_DIR()
         self.output_dir = output_dir
-        self.async_mode = async_mode
         self.swagger_handler = SwaggerHandler(api_generator=self)
         self.url_matcher = URLMatcher()
 
@@ -261,18 +260,15 @@ class APIGenerator:
         is_need_urlencode = parsed_info["is_need_urlencode"]
 
         imports.append("import os")
-        if is_file_upload or is_multipart:
-            if self.async_mode:
-                imports.append("from aiohttp import FormData")
-            else:
-                imports.append("from requests_toolbelt import MultipartEncoder")
+        if is_file_upload:
+            imports.append("from har2pytest.client import client, build_multipart_data")
+        elif is_multipart:
+            imports.append("from har2pytest.client import client, build_form_data")
 
         if is_need_urlencode:
             imports.append("from urllib.parse import urlencode")
 
-        if self.async_mode:
-            imports.append("from har2pytest.client import async_client as client")
-        else:
+        if not (is_file_upload or is_multipart):
             imports.append("from har2pytest.client import client")
         imports.append("")
         return imports
@@ -365,37 +361,13 @@ class APIGenerator:
         if file_key is None:
             raise ValueError("文件上传参数格式错误：未找到文件参数")
 
-        if self.async_mode:
-            # 异步模式：使用 aiohttp FormData
-            function_def = []
-            function_def.append('    data = FormData()')
-            for key in post_data:
-                if key == file_key:
-                    function_def.append(f'    data.add_field("{file_key}", open(files["{file_key}"], "rb"),')
-                    function_def.append(f'        filename=os.path.basename(files["{file_key}"]),')
-                    function_def.append('        content_type="text/plain")')
-                else:
-                    function_def.append(f'    data.add_field("{key}", files["{key}"])')
-            function_def.append("    return client.post(url=url, headers=headers, data=data)")
-            return function_def
-        else:
-            # 同步模式：使用 MultipartEncoder
-            function_def = []
-            function_def.append(f'    filename = os.path.basename(files["{file_key}"])')
-            function_def.append("    m = MultipartEncoder(")
-            function_def.append("        fields={")
-            for key, value in post_data.items():
-                if key == file_key:
-                    function_def.append(
-                        f'            "{file_key}": (filename, open(files["{file_key}"], "rb"), "text/plain")'
-                    )
-                else:
-                    function_def.append(f'            "{key}": files["{key}"],')
-            function_def.append("        }")
-            function_def.append("    )")
-            function_def.append('    headers["content-type"] = m.content_type')
-            function_def.append("    return client.post(url=url, headers=headers, data=m)")
-            return function_def
+        # 统一使用 build_multipart_data，自动适配同步/异步客户端
+        function_def = []
+        function_def.append(f'    data, content_type = build_multipart_data(files, "{file_key}")')
+        function_def.append("    if content_type:")
+        function_def.append('        headers["content-type"] = content_type')
+        function_def.append("    return client.post(url=url, headers=headers, data=data)")
+        return function_def
 
     def _handle_multipart_form(self) -> list[str]:
         """处理 multipart/form-data 请求（无文件上传）。
@@ -404,25 +376,17 @@ class APIGenerator:
             List[str]: multipart 表单代码列表
         """
         function_def = []
-        if self.async_mode:
-            function_def.append("    # 构建 multipart/form-data 请求")
-            function_def.append("    fd = FormData()")
-            function_def.append("    for k, v in data.items():")
-            function_def.append("        fd.add_field(k, str(v))")
-            function_def.append("    return client.post(url=url, data=fd, headers=headers)")
-        else:
-            function_def.append("    # 构建 multipart/form-data 请求")
-            function_def.append("    m = MultipartEncoder(fields=data)")
-            function_def.append("")
-            function_def.append("    # 设置正确的 Content-Type（包含 boundary）")
-            function_def.append('    headers["content-type"] = m.content_type')
-            function_def.append("    return client.post(url=url, data=m, headers=headers)")
+        function_def.append("    # 构建 multipart/form-data 请求")
+        function_def.append("    m, content_type = build_form_data(data)")
+        function_def.append("    if content_type:")
+        function_def.append('        headers["content-type"] = content_type')
+        function_def.append("    return client.post(url=url, data=m, headers=headers)")
         return function_def
 
     def _handle_http_method(
         self,
         method: str,
-        params_var: Optional[str] | None,
+        params_var: str | None,
         path_params: dict[str, Any],
         query_params: dict[str, Any],
         is_need_urlencode: bool,

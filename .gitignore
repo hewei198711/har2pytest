@@ -25,5 +25,7 @@ async_apis/*
 api/*
 async_api/*
 testcases/*
+testcases_async/*
+data/*
 har_main.py
 *.har

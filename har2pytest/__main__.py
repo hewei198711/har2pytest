@@ -62,9 +62,6 @@ def main():
     api_parser.add_argument("har_file", nargs="?", default="api_request.har", help="HAR文件路径")
     api_parser.add_argument("--output", "-o", default=APIConfig.DEFAULT_API_DIR(), help="输出目录")
     api_parser.add_argument("--overwrite", action="store_true", help="强制覆盖现有文件")
-    api_parser.add_argument(
-        "--async", dest="async_mode", action="store_true", help="生成异步模式代码（使用 async_client + aiohttp）"
-    )
 
     # summary 子命令
     sum_parser = subparsers.add_parser(
@@ -110,7 +107,7 @@ def main():
     tc_parser.add_argument("--api-files", default="api_request.har", help="指定API文件或HAR文件（batch模式使用，多个文件用逗号分隔）")
     tc_parser.add_argument("--overwrite", action="store_true", help="强制覆盖已存在的测试用例文件")
     tc_parser.add_argument(
-        "--async", dest="async_mode", action="store_true", help="生成异步模式测试代码（使用 async/await）"
+        "--async", dest="async_mode", action="store_true", help="生成异步模式测试代码（使用 async/await + async_client）"
     )
 
     # swagger 子命令
@@ -137,9 +134,6 @@ def main():
     swagger_parser.add_argument("--output", "-o", default=APIConfig.DEFAULT_API_DIR(), help="输出目录")
     swagger_parser.add_argument("--overwrite", action="store_true", help="强制覆盖现有文件")
     swagger_parser.add_argument("--path", "-p", help="只生成指定的API路径（如 /pet/{petId}）")
-    swagger_parser.add_argument(
-        "--async", dest="async_mode", action="store_true", help="生成异步模式代码（使用 async_client + aiohttp）"
-    )
 
     # 解析参数
     args = parser.parse_args()
@@ -175,7 +169,7 @@ async def handle_api(args):
     logger.info(f"强制覆盖: {force_overwrite}")
     logger.info("-" * 50)
 
-    api_generator = APIGenerator(output_dir, async_mode=args.async_mode)
+    api_generator = APIGenerator(output_dir)
     generated_files = await generate_api_files_from_har(
         har_file, force_overwrite=force_overwrite, api_generator=api_generator
     )
@@ -209,7 +203,7 @@ async def handle_swagger(args):
         logger.info(f"只生成指定路径: {specific_path}")
     logger.info("-" * 50)
 
-    api_generator = APIGenerator(output_dir, async_mode=args.async_mode)
+    api_generator = APIGenerator(output_dir)
     swagger_handler = SwaggerHandler(api_generator=api_generator)
     generated_files = await swagger_handler.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)
 

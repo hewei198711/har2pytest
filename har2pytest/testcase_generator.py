@@ -1079,6 +1079,16 @@ class TestCaseGenerator:
             ]
         )
 
+        # 异步模式：切换全局 client 为 async_client
+        if self.async_mode:
+            content.extend(
+                [
+                    "from har2pytest.client import client, async_client",
+                    "client.set_client(async_client)",
+                    "",
+                ]
+            )
+
         if api_files:
             # 多函数模式：按服务包分组导入
             service_imports: dict[str | None, list[str]] = {}

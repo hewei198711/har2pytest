@@ -516,8 +516,123 @@ class AsyncClient:
 
 
 # ---------------------------------------------------------------------------
+# 客户端代理 & 统一文件上传
+# ---------------------------------------------------------------------------
+
+
+class _ClientProxy:
+    """客户端代理，支持运行时切换同步/异步客户端。
+
+    生成的 API 文件通过 from har2pytest.client import client 导入此代理。
+    异步测试用例可通过 client.set_client(async_client) 切换为异步客户端。
+    """
+
+    def __init__(self, default_client):
+        self._client = default_client
+
+    def set_client(self, new_client):
+        """切换当前客户端实例。
+
+        Args:
+            new_client: 新的客户端实例（Client 或 AsyncClient）
+        """
+        self._client = new_client
+
+    @property
+    def is_async(self) -> bool:
+        """当前是否使用异步客户端。"""
+        return isinstance(self._client, AsyncClient)
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+
+def build_multipart_data(files: dict, file_key: str) -> tuple[Any, str | None]:
+    """构建文件上传数据，自动适配同步/异步客户端。
+
+    Args:
+        files: 文件参数字典，包含文件路径和其他表单字段
+        file_key: 文件参数的键名
+
+    Returns:
+        (data, content_type) 元组。异步模式 content_type 为 None，同步模式为 MultipartEncoder.content_type
+    """
+    logger.debug(f"[build_multipart_data] 开始构建文件上传数据，文件键: {file_key}, 字段: {list(files.keys())}")
+
+    if client.is_async:
+        logger.debug("[build_multipart_data] 当前为异步模式，使用 aiohttp FormData")
+        from aiohttp import FormData
+
+        data = FormData()
+        for key in files:
+            if key == file_key:
+                file_path = files[file_key]
+                filename = os.path.basename(file_path)
+                logger.debug(f"[build_multipart_data] 添加文件字段: {file_key}={file_path} (filename={filename})")
+                data.add_field(
+                    file_key,
+                    open(file_path, "rb"),
+                    filename=filename,
+                    content_type="text/plain",
+                )
+            else:
+                logger.debug(f"[build_multipart_data] 添加普通字段: {key}={files[key]}")
+                data.add_field(key, files[key])
+        logger.debug("[build_multipart_data] FormData 构建完成，content_type=None")
+        return data, None
+    else:
+        logger.debug("[build_multipart_data] 当前为同步模式，使用 requests_toolbelt MultipartEncoder")
+        from requests_toolbelt import MultipartEncoder
+
+        filename = os.path.basename(files[file_key])
+        fields = {}
+        for key, value in files.items():
+            if key == file_key:
+                logger.debug(f"[build_multipart_data] 添加文件字段: {file_key}={value} (filename={filename})")
+                fields[file_key] = (filename, open(value, "rb"), "text/plain")
+            else:
+                logger.debug(f"[build_multipart_data] 添加普通字段: {key}={value}")
+                fields[key] = value
+        m = MultipartEncoder(fields=fields)
+        logger.debug(f"[build_multipart_data] MultipartEncoder 构建完成, content_type: {m.content_type}")
+        return m, m.content_type
+
+
+def build_form_data(data: dict) -> tuple[Any, str | None]:
+    """构建 multipart/form-data 表单数据（无文件上传），自动适配同步/异步客户端。
+
+    Args:
+        data: 表单字段字典
+
+    Returns:
+        (data, content_type) 元组。异步模式 content_type 为 None，同步模式为 MultipartEncoder.content_type
+    """
+    logger.debug(f"[build_form_data] 开始构建 multipart 表单数据，字段数量: {len(data)}")
+    logger.debug(f"[build_form_data] 输入字段: {list(data.keys())}")
+
+    if client.is_async:
+        logger.debug("[build_form_data] 当前为异步模式，使用 aiohttp FormData")
+        from aiohttp import FormData
+
+        form = FormData()
+        for k, v in data.items():
+            str_v = str(v)
+            logger.debug(f"[build_form_data] 添加字段: {k}={str_v[:200]}{'...' if len(str_v) > 200 else ''}")
+            form.add_field(k, str_v)
+        logger.debug("[build_form_data] FormData 构建完成，content_type=None")
+        return form, None
+    else:
+        logger.debug("[build_form_data] 当前为同步模式，使用 requests_toolbelt MultipartEncoder")
+        from requests_toolbelt import MultipartEncoder
+
+        m = MultipartEncoder(fields=data)
+        logger.debug(f"[build_form_data] MultipartEncoder 构建完成, content_type: {m.content_type}")
+        return m, m.content_type
+
+
+# ---------------------------------------------------------------------------
 # 全局实例
 # ---------------------------------------------------------------------------
 
-client = Client(base_url=os.environ.get("base_url", ""))
+client = _ClientProxy(Client(base_url=os.environ.get("base_url", "")))
 async_client = AsyncClient(base_url=os.environ.get("base_url", ""))

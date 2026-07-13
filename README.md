@@ -19,21 +19,14 @@ har2pytest --help
 ### 1. 从 HAR 文件生成 API 文件
 
 ```bash
-# 同步模式（默认，使用 requests）
+# 生成 API 文件（同步/异步统一，运行时自动适配）
 har2pytest api api_request.har
-
-# 异步模式（使用 aiohttp + async/await）
-har2pytest api api_request.har --async
 ```
 
 ### 2. 从 Swagger 文档生成 API 文件
 
 ```bash
-# 同步模式
 har2pytest swagger https://petstore.swagger.io/v2/api-docs
-
-# 异步模式
-har2pytest swagger https://petstore.swagger.io/v2/api-docs --async
 ```
 
 ### 3. 生成测试用例
@@ -57,8 +50,8 @@ har2pytest testcase --pattern batch --api-files api_request.har
 # 强制覆盖已存在的测试用例文件
 har2pytest testcase api_request.har --pattern list_query --url /api/user/list --overwrite
 
-# 异步模式（生成 async/await 测试代码，适用于所有模式）
-har2pytest testcase api_request.har --pattern list_query --url /api/user/list --async
+# 异步模式测试用例（生成 async/await 代码，自动切换为 async_client）
+har2pytest testcase api_request.har --pattern list_query --url /api/user/list --async --output testcases_async
 ```
 
 ### 4. 查看 HAR 文件摘要
