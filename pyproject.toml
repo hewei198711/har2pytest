@@ -1,6 +1,6 @@
 [project]
 name = "har2pytest"
-version = "1.4.0"
+version = "1.4.1"
 description = "从HAR文件，Swagger接口文档自动生成API接口文件和pytest+allure测试用例"
 authors = [
     { name = "hewei", email = "hewei1987@163.com" }
@@ -24,7 +24,8 @@ dependencies = [
     "httpx>=0.27.0",
     "pytest-asyncio>=0.24.0",
     "requests>=2.31.0",
-    "requests-toolbelt>=1.0.0"
+    "requests-toolbelt>=1.0.0",
+    "tenacity>=9.0.0"
 ]
 
 [project.urls]

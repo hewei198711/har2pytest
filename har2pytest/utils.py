@@ -16,6 +16,35 @@ from typing import Any
 from .logger import logger
 
 
+def _format_nested(value: Any) -> str:
+    """递归格式化值，生成合法的 Python 代码字符串。
+
+    与 json.dumps 不同，输出使用 Python 字面量（None/True/False）
+    而非 JSON 字面量（null/true/false）。
+
+    Args:
+        value: 要格式化的值。
+
+    Returns:
+        str: 格式化后的 Python 代码字符串。
+    """
+    if value is None:
+        return "None"
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, list):
+        items = [_format_nested(item) for item in value]
+        return "[" + ", ".join(items) + "]"
+    if isinstance(value, dict):
+        items = [f"{json.dumps(k, ensure_ascii=False)}: {_format_nested(v)}" for k, v in value.items()]
+        return "{" + ", ".join(items) + "}"
+    return repr(value)
+
+
 def format_parameter_value(value: Any) -> str:
     """生成参数值的 Python 代码字符串。
 
@@ -36,7 +65,7 @@ def format_parameter_value(value: Any) -> str:
     if isinstance(value, (int, float)):
         return repr(value)
     if isinstance(value, (list, dict)):
-        return json.dumps(value, ensure_ascii=False)
+        return _format_nested(value)
     return repr(value)
 
 

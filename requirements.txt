@@ -5,6 +5,7 @@ requests>=2.31.0
 requests-toolbelt>=1.0.0
 allure-pytest>=2.15.3
 allure-python-commons>=2.15.3
+tenacity>=9.0.0
 
 # Development dependencies (install with: pip install -r requirements.txt)
 pytest>=9.0.3

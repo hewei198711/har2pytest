@@ -13,6 +13,7 @@ from .client import AsyncClient, AsyncResponseContext, Client, ResponseContext, 
 from .config import APIConfig
 from .har_parser import HARParser
 from .logger import get_logger, logger
+from .pytest_utils import retry_step
 from .swagger_handler import SwaggerHandler
 from .testcase_generator import TestCaseGenerator
 from .url_matcher import URLMatcher
@@ -46,4 +47,5 @@ __all__ = [
     "format_headers_for_python",
     "format_params_for_python",
     "write_test_file",
+    "retry_step",
 ]
