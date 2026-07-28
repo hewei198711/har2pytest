@@ -99,21 +99,28 @@ class TestCaseGenerator:
                     api_files.append(os.path.join(root, file))
         return api_files
 
-    def _extract_service_package(self, api_file: str, index: int = 1) -> str | None:
+    def _extract_service_package(self, api_file: str) -> str | None:
         """从 API 文件路径中提取服务包名称。
+
+        通过计算相对于 api_dir 的路径来提取子包名称。
+        例如：api_dir=apis, api_file=apis/mall_user/order.py -> mall_user
 
         Args:
             api_file: API 文件路径
-            index: 分割后取第几部分，默认1（apis.mall_user.xxx -> mall_user）
 
         Returns:
-            服务包名称，无子包时返回 None
+            服务包名称，文件直接在 api_dir 下时返回 None
         """
-        module_path = api_file.replace(".py", "").replace("\\", ".").replace("/", ".")
-        parts = module_path.split(".")
-        # 当 index 位置是路径最后一段时（即文件名），说明没有子包，返回 None
-        if len(parts) > index + 1:
-            return parts[index]
+        try:
+            rel_path = os.path.relpath(api_file, self.api_dir)
+        except ValueError:
+            # Windows 下跨盘符无法计算相对路径
+            return None
+        # 去掉 .py 后缀，统一分隔符
+        module_path = rel_path.replace(".py", "").replace("\\", "/")
+        parts = module_path.split("/")
+        if len(parts) > 1:
+            return parts[0]
         return None
 
     # ==================== Swagger/URL 匹配相关 ====================

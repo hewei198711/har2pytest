@@ -791,7 +791,8 @@ def test_extract_service_package_forward_slash():
 @allure.title("测试无子包时返回 None")
 def test_extract_service_package_default():
     generator = TestCaseGenerator()
-    result = generator._extract_service_package("user_login.py")
+    # 文件直接在 api_dir 下，无子包
+    result = generator._extract_service_package("apis/login.py")
     assert result is None
 
 

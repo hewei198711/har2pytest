@@ -79,8 +79,7 @@ class APIGenerator:
         headers = dict(raw_headers)
         required_headers = APIConfig.REQUIRED_HEADERS()
         for key, default_value in required_headers.items():
-            if key not in headers:
-                headers[key] = default_value
+            headers[key] = default_value
 
         # 一次性遍历 raw_headers 提取 content-type 和 content-length
         content_type = ""
