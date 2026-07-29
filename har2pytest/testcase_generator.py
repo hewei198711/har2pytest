@@ -730,13 +730,17 @@ class TestCaseGenerator:
         # 构建参数化项
         has_har = har_file_path is not None and os.path.exists(har_file_path)
         param_items = []
-        request_method = "GET"  # 默认请求方法
+        # 从 API 文件参数类型确定调用参数名
+        if api_info.get("data") or api_info.get("files"):
+            param_var_name = "data"
+        else:
+            param_var_name = "params"
 
         # 如果有HAR文件，从HAR文件提取参数
         if has_har and har_file_path is not None:
             if requests is None:
                 requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
-            _all_params, all_requests_params, request_method = self._extract_requests_for_url(requests, api_info["url"])
+            _all_params, all_requests_params, _request_method = self._extract_requests_for_url(requests, api_info["url"])
 
             if all_requests_params:
                 param_items = self.normalize_params_for_parametrization(all_requests_params)
@@ -754,12 +758,15 @@ class TestCaseGenerator:
             service_package=feature_name, function_name=function_name, task_id=task_id
         )
         content.extend(
-            self._generate_test_case_description(story_name, feature_name or "TODO", severity="NORMAL")
+            self._generate_test_case_description(
+                story_name, feature_name or "TODO", severity="NORMAL",
+                api_description=api_info["description"], param_remarks=api_info["param_remarks"]
+            )
         )
 
         content.extend(
             self._generate_parametrized_test_methods(
-                param_items, api_info["description"], function_name, request_method or "GET", api_info["param_remarks"]
+                param_items, api_info["description"], function_name, param_var_name, api_info["param_remarks"]
             )
         )
 
@@ -798,8 +805,17 @@ class TestCaseGenerator:
         feature_name, story_name = self._extract_api_info(target_api_file)
 
         # 4. 生成测试用例描述（使用 CRITICAL 级别）
+        api_description = ""
+        param_remarks = None
+        if target_api_file:
+            api_info = self._get_api_file_info(target_api_file)
+            api_description = api_info.get("description", "")
+            param_remarks = api_info.get("param_remarks")
         content.extend(
-            self._generate_test_case_description(story_name, feature_name or "TODO", severity="CRITICAL")
+            self._generate_test_case_description(
+                story_name, feature_name or "TODO", severity="CRITICAL",
+                api_description=api_description, param_remarks=param_remarks
+            )
         )
 
         # 5. 生成测试方法定义
@@ -1137,8 +1153,37 @@ class TestCaseGenerator:
 
         return content
 
+    def _generate_allure_description(
+        self,
+        api_url: str,
+        api_description: str = "",
+        param_remarks: dict[str, Any] | None = None,
+    ) -> str:
+        """生成 @allure.description 装饰器代码行。
+
+        Args:
+            api_url: 接口地址
+            api_description: 接口名称/描述
+            param_remarks: 参数备注字典 {param_name: remark}
+
+        Returns:
+            单行 @allure.description(...) 代码字符串
+        """
+        desc_lines = [f"接口说明：\n- 接口名称：{api_description}", f"- 接口地址：{api_url}"]
+        if param_remarks:
+            desc_lines.append("")
+            desc_lines.append("主要参数说明：")
+            for param_name, remark in param_remarks.items():
+                desc_lines.append(f"- {param_name}：{remark or '# TODO 请填写参数备注'}")
+        return f'@allure.description("""{chr(10).join(desc_lines)}""")'
+
     def _generate_test_case_description(
-        self, api_url: str, service_package: str, severity: str = "NORMAL"
+        self,
+        api_url: str,
+        service_package: str,
+        severity: str = "NORMAL",
+        api_description: str = "",
+        param_remarks: dict[str, Any] | None = None,
     ) -> list[str]:
         """生成测试用例的描述部分。
 
@@ -1146,17 +1191,22 @@ class TestCaseGenerator:
             api_url: API URL
             service_package: 服务包名称
             severity: 测试用例严重级别，可选值：NORMAL、CRITICAL、MINOR、MAJOR、BLOCKER
+            api_description: 接口名称/描述
+            param_remarks: 参数备注字典
 
         Returns:
             描述语句列表
         """
-        return [
+        content = [
             f"@allure.severity(Severity.{severity})",
             f"@allure.feature('{service_package}')",
             f"@allure.story('{api_url}')",
-            "class TestClass:",
-            "",
         ]
+        if api_description:
+            content.append(self._generate_allure_description(api_url, api_description, param_remarks))
+        content.append("class TestClass:")
+        content.append("")
+        return content
 
     # ==================== 参数化测试辅助方法 ====================
 
@@ -1165,7 +1215,7 @@ class TestCaseGenerator:
         param_items: list[dict[str, Any]],
         api_description: str,
         function_name: str,
-        request_method: str,
+        param_var_name: str,
         param_remarks: dict[str, Any],
     ) -> list[str]:
         """生成参数化测试方法。
@@ -1174,7 +1224,7 @@ class TestCaseGenerator:
             param_items: 参数化数据列表
             api_description: API 描述信息
             function_name: API 函数名称（带下划线前缀）
-            request_method: 请求方法
+            param_var_name: 调用参数名（data 或 params，由 API 文件结构决定）
             param_remarks: 参数备注字典
 
         Returns:
@@ -1191,7 +1241,6 @@ class TestCaseGenerator:
             param_values = item[param_name]
             other_params = item["other_params"]
             is_combination = "," in param_name
-            param_var_name = "params" if request_method == "GET" else "data"
 
             content.extend(self._generate_parametrize_decorator(param_name, param_values, is_combination))
             content.extend(

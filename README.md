@@ -31,27 +31,80 @@ har2pytest swagger https://petstore.swagger.io/v2/api-docs
 
 ### 3. 生成测试用例
 
+**命令格式：**
+
+```bash
+har2pytest testcase [har_file] --pattern <模式> [options]
+```
+
+**参数说明：**
+
+| 参数 | 缩写 | 默认值 | 说明 |
+|------|------|--------|------|
+| `har_file` | - | `api_request.har` | HAR 文件路径（位置参数，可省略） |
+| `--pattern` | - | `list_query` | 生成模式：`list_query` / `complex_scenario` / `batch` |
+| `--url` | `-u` | - | 目标接口 URL，指定后只生成该接口的测试用例 |
+| `--mark` | `-m` | - | pytest 标记（如 `test_4291`），生成 `@pytest.mark.test_4291` |
+| `--output` | `-o` | `testcases` | 测试用例输出目录 |
+| `--api-dir` | - | `apis` | API 文件目录（用于匹配 API 文件） |
+| `--api-files` | - | `api_request.har` | batch 模式专用：API 文件目录或 HAR 文件，多个用逗号分隔 |
+| `--overwrite` | - | `False` | 强制覆盖已存在的测试用例文件 |
+| `--async` | - | `False` | 生成异步模式代码（async/await + async_client） |
+
+**示例：**
+
 ```bash
 # 查询类参数化测试（指定 URL）
 har2pytest testcase api_request.har --pattern list_query --url /api/user/list
 
-# 查询类参数化测试（带 task_id 标记）
-har2pytest testcase api_request.har --pattern list_query --url /api/user/list --mark test_4291
+# 查询类参数化测试（全参数）,生成异步测试用例
+har2pytest testcase api_request.har \
+  --pattern list_query \
+  --url /api/user/list \
+  --mark test_4291 \
+  --output testcases/async \
+  --api-dir apis \
+  --overwrite \
+  --async
 
-# 复杂场景流程测试
-har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login
+# 复杂场景流程测试（多步骤业务流），生成同步测试用例
+har2pytest testcase api_request.har \
+  --pattern complex_scenario \
+  --url /api/order/create \
+  --mark test_5012 \
+  --output testcases/sync \
+  --api-dir apis \
+  --overwrite
 
-# 批量生成（指定 API 文件目录）
-har2pytest testcase --pattern batch --api-files apis/mobile_application
+# 批量生成（指定 API 文件目录，无 HAR 文件）
+har2pytest testcase \
+  --pattern batch \
+  --api-files apis/mall_store_application \
+  --output testcases/sync \
+  --api-dir apis \
+  --overwrite
 
 # 批量生成（指定 HAR 文件，自动提取接口并匹配 API 文件）
-har2pytest testcase --pattern batch --api-files api_request.har
+har2pytest testcase \
+  --pattern batch \
+  --api-files api_request.har \
+  --output testcases/sync \
+  --api-dir apis
 
-# 强制覆盖已存在的测试用例文件
-har2pytest testcase api_request.har --pattern list_query --url /api/user/list --overwrite
+# 批量生成（多个 API 文件目录，用逗号分隔）
+har2pytest testcase \
+  --pattern batch \
+  --api-files apis/mall_store_application,apis/mall_center_member \
+  --output testcases/sync \
+  --overwrite
 
 # 异步模式测试用例（生成 async/await 代码，自动切换为 async_client）
-har2pytest testcase api_request.har --pattern list_query --url /api/user/list --async --output testcases_async
+har2pytest testcase api_request.har \
+  --pattern list_query \
+  --url /api/user/list \
+  --output testcases/async \
+  --async \
+  --overwrite
 ```
 
 ### 4. 查看 HAR 文件摘要

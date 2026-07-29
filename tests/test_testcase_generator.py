@@ -910,6 +910,8 @@ def test_generate_test_case_description():
     assert "test_service" in content
     assert "/api/user/login" in content
     assert "class TestClass:" in content
+    # 未传 api_description 时不生成 description
+    assert "@allure.description" not in content
 
 
 @allure.feature("测试用例生成器")
@@ -920,6 +922,66 @@ def test_generate_test_case_description_critical():
     result = generator._generate_test_case_description("/api/order/create", "order_service", severity="CRITICAL")
     content = "\n".join(result)
     assert "Severity.CRITICAL" in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成测试用例描述")
+@allure.title("测试带接口描述和参数备注的描述生成")
+def test_generate_test_case_description_with_description():
+    generator = TestCaseGenerator()
+    result = generator._generate_test_case_description(
+        "/api/user/login", "user_service", severity="NORMAL",
+        api_description="用户登录",
+        param_remarks={"username": "会员账号", "password": "登录密码"},
+    )
+    content = "\n".join(result)
+    assert "@allure.description" in content
+    assert "用户登录" in content
+    assert "- 接口地址：/api/user/login" in content
+    assert "- username：会员账号" in content
+    assert "- password：登录密码" in content
+    assert "class TestClass:" in content
+
+
+# ==================== _generate_allure_description 测试 ====================
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成 allure description")
+@allure.title("测试基本 description 生成")
+def test_generate_allure_description_basic():
+    generator = TestCaseGenerator()
+    result = generator._generate_allure_description("/api/user/login", api_description="用户登录")
+    assert result.startswith('@allure.description("""')
+    assert result.endswith('""")')
+    assert "用户登录" in result
+    assert "- 接口地址：/api/user/login" in result
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成 allure description")
+@allure.title("测试带参数备注的 description 生成")
+def test_generate_allure_description_with_remarks():
+    generator = TestCaseGenerator()
+    result = generator._generate_allure_description(
+        "/api/order/create",
+        api_description="创建订单",
+        param_remarks={"productId": "产品ID", "quantity": "数量", "remark": ""},
+    )
+    assert "主要参数说明：" in result
+    assert "- productId：产品ID" in result
+    assert "- quantity：数量" in result
+    # 空备注显示 TODO
+    assert "- remark：# TODO 请填写参数备注" in result
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成 allure description")
+@allure.title("测试无参数备注时不包含参数说明段")
+def test_generate_allure_description_no_remarks():
+    generator = TestCaseGenerator()
+    result = generator._generate_allure_description("/api/test", api_description="测试接口")
+    assert "主要参数说明" not in result
 
 
 # ==================== _generate_test_method_definition 测试 ====================
