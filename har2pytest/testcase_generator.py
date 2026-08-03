@@ -16,6 +16,7 @@ from .utils import (
     format_parameter_value,
     format_params_for_python,
     get_output_dir,
+    header_value_formatter,
     merge_request_params,
     parse_api_file,
     sanitize_param_name,
@@ -64,6 +65,8 @@ class TestCaseGenerator:
         self.url_matcher = URLMatcher()
         # API文件缓存
         self._api_file_cache = {}
+        # 场景模式下目标API的 headers（用于生成类级别 headers 属性，步骤 headers 差异对比基准）
+        self._class_headers: dict[str, Any] = {}
 
     # ==================== API 文件处理相关 ====================
 
@@ -625,6 +628,11 @@ class TestCaseGenerator:
                 api_description = api_info.get("description", "")
                 list_keywords = APIConfig.LIST_QUERY_KEYWORDS()
                 is_list_query = any(kw in api_description for kw in list_keywords) if list_keywords else False
+                # 描述含排除关键字（如“详情”）时，即使命中列表关键字也不使用参数化列表模式
+                if is_list_query:
+                    exclude_keywords = APIConfig.LIST_QUERY_EXCLUDE_KEYWORDS()
+                    if exclude_keywords and any(kw in api_description for kw in exclude_keywords):
+                        is_list_query = False
                 if is_list_query:
                     test_content = self.generate_parametrized_test_content(
                         har_file_path, api_file, task_id, cached_requests
@@ -760,7 +768,8 @@ class TestCaseGenerator:
         content.extend(
             self._generate_test_case_description(
                 story_name, feature_name or "TODO", severity="NORMAL",
-                api_description=api_info["description"], param_remarks=api_info["param_remarks"]
+                api_description=api_info["description"], param_remarks=api_info["param_remarks"],
+                api_headers=api_info.get("headers"),
             )
         )
 
@@ -807,14 +816,18 @@ class TestCaseGenerator:
         # 4. 生成测试用例描述（使用 CRITICAL 级别）
         api_description = ""
         param_remarks = None
+        api_headers = None
         if target_api_file:
             api_info = self._get_api_file_info(target_api_file)
             api_description = api_info.get("description", "")
             param_remarks = api_info.get("param_remarks")
+            api_headers = api_info.get("headers")
+            self._class_headers = api_headers or {}
         content.extend(
             self._generate_test_case_description(
                 story_name, feature_name or "TODO", severity="CRITICAL",
-                api_description=api_description, param_remarks=param_remarks
+                api_description=api_description, param_remarks=param_remarks,
+                api_headers=api_headers,
             )
         )
 
@@ -1043,29 +1056,58 @@ class TestCaseGenerator:
 
         ctx = "async with" if self.async_mode else "with"
 
+        # 步骤 API 的 headers 与类级别 headers 存在差异时，生成局部 headers 覆盖（如额外的 content-type）
+        header_lines, headers_arg = self._build_step_headers_arg(api_info.get("headers") or {})
+        if header_lines:
+            content.extend(header_lines)
+
         if is_file_upload:
             # 文件上传请求，使用 files 参数
             actual_values = {**api_files, **har_values} if har_values else api_files
             files_str = format_params_for_python(actual_values, indent=16)
             content.extend([f"            files = {files_str}", ""])
-            content.extend([f"            {ctx} {api_function_name}(files=files) as r:"])
+            content.extend([f"            {ctx} {api_function_name}(files=files, {headers_arg}) as r:"])
         elif api_data:
             # API 定义使用 data 参数，合并 HAR 值和 API 默认值
             actual_values = {**api_data, **har_values} if har_values else api_data
             data_str = format_params_for_python(actual_values, indent=16)
             content.extend([f"            data = {data_str}", ""])
-            content.extend([f"            {ctx} {api_function_name}(data=data) as r:"])
+            content.extend([f"            {ctx} {api_function_name}(data=data, {headers_arg}) as r:"])
         elif api_params:
             # API 定义使用 params 参数
             actual_values = {**api_params, **har_values} if har_values else api_params
             params_str = format_params_for_python(actual_values, indent=16)
             content.extend([f"            params = {params_str}", ""])
-            content.extend([f"            {ctx} {api_function_name}(params=params) as r:"])
+            content.extend([f"            {ctx} {api_function_name}(params=params, {headers_arg}) as r:"])
         else:
-            # 没有参数时，直接调用函数
-            content.extend([f"            {ctx} {api_function_name}() as r:"])
+            # 没有参数时，直接调用函数（仍传 headers 覆盖模块级默认值）
+            content.extend([f"            {ctx} {api_function_name}({headers_arg}) as r:"])
 
     # ==================== 通用方法 ====================
+
+    def _build_step_headers_arg(self, step_headers: dict[str, Any]) -> tuple[list[str], str]:
+        """构建步骤调用的 headers 参数。
+
+        步骤 API 的 headers 与类级别 headers（self._class_headers）存在差异时，
+        生成局部 headers 变量（基于 self.headers 覆盖差异项）；否则直接使用 self.headers。
+
+        Args:
+            step_headers: 步骤对应 API 文件中的 headers 字典
+
+        Returns:
+            (额外的代码行列表, headers 参数字符串)
+        """
+        diff = {k: v for k, v in step_headers.items() if self._class_headers.get(k) != v}
+        if not diff:
+            return [], "headers=self.headers"
+
+        if self._class_headers:
+            diff_str = ", ".join(f'"{k}": {header_value_formatter(v)}' for k, v in diff.items())
+            line = f"            headers = {{**self.headers, {diff_str}}}"
+        else:
+            diff_str = ", ".join(f'"{k}": {header_value_formatter(v)}' for k, v in step_headers.items())
+            line = f"            headers = {{{diff_str}}}"
+        return [line, ""], "headers=headers"
 
     def _generate_test_case_imports(
         self,
@@ -1184,6 +1226,7 @@ class TestCaseGenerator:
         severity: str = "NORMAL",
         api_description: str = "",
         param_remarks: dict[str, Any] | None = None,
+        api_headers: dict[str, Any] | None = None,
     ) -> list[str]:
         """生成测试用例的描述部分。
 
@@ -1193,6 +1236,7 @@ class TestCaseGenerator:
             severity: 测试用例严重级别，可选值：NORMAL、CRITICAL、MINOR、MAJOR、BLOCKER
             api_description: 接口名称/描述
             param_remarks: 参数备注字典
+            api_headers: API 文件中的 headers 字典，用于生成类级别 headers 属性
 
         Returns:
             描述语句列表
@@ -1206,6 +1250,17 @@ class TestCaseGenerator:
             content.append(self._generate_allure_description(api_url, api_description, param_remarks))
         content.append("class TestClass:")
         content.append("")
+
+        # 生成类级别 headers 属性（调用时求值，避免 import 时读取环境变量）
+        if api_headers:
+            content.append("    @property")
+            content.append("    def headers(self):")
+            content.append("        return {")
+            for key, value in api_headers.items():
+                content.append(f'            "{key}": {header_value_formatter(value)},')
+            content.append("        }")
+            content.append("")
+
         return content
 
     # ==================== 参数化测试辅助方法 ====================
@@ -1249,7 +1304,7 @@ class TestCaseGenerator:
                 )
             )
             content.extend(self._generate_test_method_body(param_var_name, param_name, other_params, is_combination))
-            content.extend(self._generate_test_method_assertions(function_name, param_var_name))
+            content.extend(self._generate_test_method_assertions(function_name, param_var_name, param_name))
 
         return content
 
@@ -1398,12 +1453,26 @@ class TestCaseGenerator:
             else:
                 content.append(f'            "{key}": {value},')
 
-    def _generate_test_method_assertions(self, function_name: str, param_var_name: str) -> list[str]:
+    @staticmethod
+    def _is_time_param(param_name: str) -> bool:
+        """判断参数是否为时间类参数。
+
+        Args:
+            param_name: 参数名称
+
+        Returns:
+            是否为时间类参数
+        """
+        lower = param_name.lower()
+        return any(kw in lower for kw in ("time", "date", "starttime", "endtime"))
+
+    def _generate_test_method_assertions(self, function_name: str, param_var_name: str, param_name: str = "") -> list[str]:
         """生成测试方法断言部分。
 
         Args:
             function_name: API 函数名称
             param_var_name: 参数变量名（params 或 data）
+            param_name: 当前参数化的参数名，用于生成搜索条件验证断言
 
         Returns:
             断言代码行列表
@@ -1411,10 +1480,26 @@ class TestCaseGenerator:
         ctx = "async with" if self.async_mode else "with"
         status_attr = "r.status" if self.async_mode else "r.status_code"
         json_call = "await r.json()" if self.async_mode else "r.json()"
-        return [
-            f"        {ctx} {function_name}({param_var_name}={param_var_name}) as r:",
+        content = [
+            f"        {ctx} {function_name}({param_var_name}={param_var_name}, headers=self.headers) as r:",
             f"            assert {status_attr} == 200",
             f"            data = {json_call}",
             "            assert data['code'] == 200",
-            "",
         ]
+
+        # 非时间类参数：验证返回数据是否符合搜索条件
+        if param_name and not self._is_time_param(param_name) and "," not in param_name:
+            safe_name = sanitize_param_name(param_name)
+            content.extend([
+                "            # 验证返回数据符合搜索条件",
+                "            resp_data = data.get('data')",
+                "            items = resp_data.get('list', []) if isinstance(resp_data, dict) else []",
+                f"            for item in items:",
+                f"                if isinstance(item, dict):",
+                f"                    for k, v in item.items():",
+                f"                        if k.lower() == '{param_name.lower()}':",
+                f"                            assert str(v) == str({safe_name}), f'字段 {{k}} 值 {{v}} 与搜索条件 {safe_name}={{{safe_name}}} 不一致'",
+            ])
+
+        content.append("")
+        return content

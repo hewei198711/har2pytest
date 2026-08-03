@@ -320,6 +320,26 @@ def parse_api_file(filepath: str) -> dict:
     return result
 
 
+def header_value_formatter(value: Any) -> str:
+    """将 headers 值转换为 Python 字面量字符串。
+
+    f-string 值中的 os.environ[...] 会被转换为 os.environ.get(..., '') 以安全访问，
+    避免在 import 时因环境变量未设置而抛出 KeyError。
+    已带引号的字符串值直接返回，普通字符串包装引号。
+
+    Args:
+        value: headers 值，可能为普通字符串、f-string 字面量或已带引号的字符串。
+
+    Returns:
+        str: 可嵌入 Python 代码的字符串字面量。
+    """
+    if isinstance(value, str) and value.startswith(('"', 'f"')):
+        if value.startswith('f"'):
+            return value.replace("os.environ[", "os.environ.get(").replace("]", ", '')")
+        return value
+    return f'"{value}"'
+
+
 def format_headers_for_python(headers: dict[str, str]) -> str:
     """格式化 headers 字典为 Python 代码字符串。
 
@@ -329,12 +349,6 @@ def format_headers_for_python(headers: dict[str, str]) -> str:
     Returns:
         str: 格式化后的 Python 代码字符串。
     """
-
-    def header_value_formatter(value):
-        if isinstance(value, str) and value.startswith(('"', 'f"')):
-            return value
-        return f'"{value}"'
-
     return format_params_for_python(headers, header_value_formatter, inline=False)
 
 

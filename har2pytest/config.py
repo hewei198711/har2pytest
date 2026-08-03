@@ -42,6 +42,8 @@ class APIConfig:
         "SWAGGER_DOC_URLS": {},
         # 列表查询接口识别关键字
         "LIST_QUERY_KEYWORDS": ["列表"],
+        # 列表查询排除关键字：描述含这些关键字时不使用参数化列表模式（如“详情”）
+        "LIST_QUERY_EXCLUDE_KEYWORDS": [],
         # 状态值提取的额外正则模式（补充内置4种模式）
         "STATE_VALUE_PATTERNS": [],
     }
@@ -227,6 +229,10 @@ class APIConfig:
     @classmethod
     def LIST_QUERY_KEYWORDS(cls) -> list:
         return cls.get_config("LIST_QUERY_KEYWORDS")
+
+    @classmethod
+    def LIST_QUERY_EXCLUDE_KEYWORDS(cls) -> list:
+        return cls.get_config("LIST_QUERY_EXCLUDE_KEYWORDS")
 
     @classmethod
     def STATE_VALUE_PATTERNS(cls) -> list:

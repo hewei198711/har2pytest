@@ -22,6 +22,7 @@ from .utils import (
     format_headers_for_python,
     format_parameter_value,
     format_params_for_python,
+    header_value_formatter,
     parse_api_file,
     write_test_file,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "client",
     "async_client",
     "format_directory",
+    "header_value_formatter",
     "parse_api_file",
     "format_parameter_value",
     "format_headers_for_python",

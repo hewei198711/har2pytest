@@ -49,6 +49,9 @@
         "列表",
         "查询"
     ],
+    "LIST_QUERY_EXCLUDE_KEYWORDS": [
+        "详情"
+    ],
     "STATE_VALUE_PATTERNS": [
         "(-?\\d+)\\s*[:：]",
         {
