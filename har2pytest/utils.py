@@ -147,8 +147,10 @@ async def format_directory(dir_path: str) -> None:
             stderr=asyncio.subprocess.DEVNULL,
         )
         await proc.wait()
-    except Exception:
-        pass  # check --fix 可能没有要修复的问题
+        if proc.returncode != 0:
+            logger.warning(f"ruff check --fix 返回非零退出码: {proc.returncode}（可能未安装 ruff）")
+    except Exception as e:
+        logger.warning(f"ruff check --fix 执行失败: {e}")
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -161,8 +163,10 @@ async def format_directory(dir_path: str) -> None:
             stderr=asyncio.subprocess.DEVNULL,
         )
         await proc.wait()
+        if proc.returncode != 0:
+            logger.warning(f"ruff format 返回非零退出码: {proc.returncode}（可能未安装 ruff）")
     except Exception as e:
-        logger.warning(f"ruff 格式化失败: {e}")
+        logger.warning(f"ruff 格式化执行失败: {e}")
 
 
 # API文件解析缓存
@@ -230,17 +234,22 @@ def parse_api_file(filepath: str) -> dict:
 
         # 提取参数值和备注（params、data 和 files）
         for param_type in ["params", "data", "files"]:
-            # 使用括号计数法正确提取嵌套字典（避免正则 {.*?} 在嵌套结构时截断）
+            # 使用括号计数法正确提取嵌套字典（避免正则 {.*?} 在嵌套结构时截断）；
+            # 同时支持 JSON 数组请求体形式：data = [{...}]（list 以 [ ] 配对计数）
             param_start = content.find(f"{param_type} = {{")
+            open_char, close_char = "{", "}"
+            if param_start == -1:
+                param_start = content.find(f"{param_type} = [")
+                open_char, close_char = "[", "]"
             if param_start != -1:
-                brace_start = content.find("{", param_start)
+                brace_start = content.find(open_char, param_start)
                 if brace_start != -1:
                     brace_count = 1
                     brace_end = brace_start + 1
                     while brace_count > 0 and brace_end < len(content):
-                        if content[brace_end] == "{":
+                        if content[brace_end] == open_char:
                             brace_count += 1
-                        elif content[brace_end] == "}":
+                        elif content[brace_end] == close_char:
                             brace_count -= 1
                         brace_end += 1
                     dict_str = content[param_start:brace_end]
@@ -285,6 +294,8 @@ def parse_api_file(filepath: str) -> dict:
                     params_dict = ast.literal_eval(dict_str)
                     if isinstance(params_dict, dict):
                         result[param_type].update(params_dict)
+                    else:
+                        result[param_type] = params_dict
                     break  # API文件只会有第一个参数类型
                 except Exception as e:
                     logger.error(f"解析 {param_type} 字典失败: {str(e)}")

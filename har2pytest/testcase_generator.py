@@ -1047,7 +1047,11 @@ class TestCaseGenerator:
         if request_info:
             har_query = request_info.get("query_params") or {}
             har_post = request_info.get("post_data") or {}
-            har_values = {**har_post, **har_query}  # HAR 中的参数值
+            # JSON 数组请求体（list）无法与 dict 展开合并，整体作为 HAR 值
+            if isinstance(har_post, list):
+                har_values = har_post if har_post else {}
+            else:
+                har_values = {**har_post, **har_query} if (har_post or har_query) else {}
         else:
             har_values = {}
 
@@ -1062,20 +1066,30 @@ class TestCaseGenerator:
             content.extend(header_lines)
 
         if is_file_upload:
-            # 文件上传请求，使用 files 参数
-            actual_values = {**api_files, **har_values} if har_values else api_files
+            # 文件上传请求，使用 files 参数（list 请求体不会出现在文件上传分支）
+            har_values_dict = har_values if isinstance(har_values, dict) else {}
+            actual_values = {**api_files, **har_values_dict} if har_values_dict else api_files
             files_str = format_params_for_python(actual_values, indent=16)
             content.extend([f"            files = {files_str}", ""])
             content.extend([f"            {ctx} {api_function_name}(files=files, {headers_arg}) as r:"])
         elif api_data:
             # API 定义使用 data 参数，合并 HAR 值和 API 默认值
-            actual_values = {**api_data, **har_values} if har_values else api_data
-            data_str = format_params_for_python(actual_values, indent=16)
+            if isinstance(api_data, dict) and isinstance(har_values, dict):
+                # 最常见：API 默认值与 HAR 值均为 dict，直接合并
+                actual_values = {**api_data, **har_values} if har_values else api_data
+                data_str = format_params_for_python(actual_values, indent=16)
+            elif isinstance(har_values, list):
+                # JSON 数组请求体：HAR 数组优先（无法与 dict 合并）
+                data_str = format_parameter_value(har_values)
+            else:
+                # API 文件 data 本身是数组（如行为采集接口），直接用 API 默认数组
+                data_str = format_parameter_value(api_data)
             content.extend([f"            data = {data_str}", ""])
             content.extend([f"            {ctx} {api_function_name}(data=data, {headers_arg}) as r:"])
         elif api_params:
-            # API 定义使用 params 参数
-            actual_values = {**api_params, **har_values} if har_values else api_params
+            # API 定义使用 params 参数（list 请求体不会出现在 params 分支）
+            har_values_dict = har_values if isinstance(har_values, dict) else {}
+            actual_values = {**api_params, **har_values_dict} if har_values_dict else api_params
             params_str = format_params_for_python(actual_values, indent=16)
             content.extend([f"            params = {params_str}", ""])
             content.extend([f"            {ctx} {api_function_name}(params=params, {headers_arg}) as r:"])

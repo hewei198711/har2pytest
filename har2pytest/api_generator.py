@@ -212,7 +212,7 @@ class APIGenerator:
         return filepath
 
     def _generate_params_string(
-        self, params_dict: dict[str, Any], swagger_info: dict[str, Any] | None = None
+        self, params_dict: dict[str, Any] | list[Any], swagger_info: dict[str, Any] | None = None
     ) -> str:
         """
         生成API文件中的参数字符串
@@ -220,7 +220,8 @@ class APIGenerator:
         将参数字典生成为Python代码字符串，为每个参数添加参数说明
 
         Args:
-            params_dict: 参数字典，如 {"keyword": "TS001", "pageNum": 1}
+            params_dict: 参数字典，如 {"keyword": "TS001", "pageNum": 1}；
+                也可能是 JSON 数组请求体（list），此时直接生成 Python 字面量
             swagger_info: Swagger文档信息，包含description、parameters等
 
         Returns:
@@ -231,15 +232,19 @@ class APIGenerator:
             result = generator.generate_params_string(params)
             # 返回生成的参数字符串
         """
-        if not params_dict:
-            return "{}"
+        if isinstance(params_dict, dict):
+            if not params_dict:
+                return "{}"
 
-        # 直接使用 Swagger 的 parameters 字典（包含 dotted key 如 "payDTO.accountName"），
-        # format_params_for_python 会递归查找嵌套键的注释
-        if swagger_info is None:
-            swagger_info = self.DEFAULT_SWAGGER_INFO
-        comments = swagger_info.get("parameters", {})
-        return format_params_for_python(params_dict, format_parameter_value, comments, inline=False)
+            # 直接使用 Swagger 的 parameters 字典（包含 dotted key 如 "payDTO.accountName"），
+            # format_params_for_python 会递归查找嵌套键的注释
+            if swagger_info is None:
+                swagger_info = self.DEFAULT_SWAGGER_INFO
+            comments = swagger_info.get("parameters", {})
+            return format_params_for_python(params_dict, format_parameter_value, comments, inline=False)
+
+        # 非 dict 请求体（如 JSON 数组 body）直接生成 Python 字面量，无参数备注
+        return format_parameter_value(params_dict) if params_dict else "[]"
 
     def _generate_imports(self, parsed_info: dict[str, Any]) -> list[str]:
         """
@@ -290,6 +295,10 @@ class APIGenerator:
         elif method == "POST":
             if is_need_urlencode and query_params:
                 return "data", query_params
+            elif is_need_urlencode:
+                # content-length=0 的空 body POST 接口（HAR 无参数），生成空 data 占位，
+                # 便于后续手动补充 urlencoded 参数（配合 _handle_http_method 的 urlencode 分支）
+                return "data", {}
             elif post_data:
                 if is_file_upload:
                     return "files", post_data
@@ -321,8 +330,8 @@ class APIGenerator:
 
         param_name, param_data = self._determine_param_info(parsed_info)
 
-        if param_name and param_data:
-            formatted_params = self._generate_params_string(param_data, swagger_info)
+        if param_name:
+            formatted_params = self._generate_params_string(param_data or {}, swagger_info)
             params_section.append(f"{param_name} = {formatted_params}")
             params_section.append("")
 
@@ -484,19 +493,20 @@ class APIGenerator:
 
         function_def.append(f"    {url}")
 
-        # 添加参数说明
+        # 添加参数说明（注意：循环变量用独立名称，避免覆盖上面的 param_name，
+        # 否则后续 _handle_http_method 会误用 swagger 参数名导致生成错误的 data 代码）
         if swagger_info.get("parameters"):
             function_def.append("")
             function_def.append("    参数说明:")
-            for param_name, param_desc in swagger_info["parameters"].items():
-                function_def.append(f"    - {param_name}: {param_desc}")
+            for swagger_param, param_desc in swagger_info["parameters"].items():
+                function_def.append(f"    - {swagger_param}: {param_desc}")
         function_def.append('    """')
         function_def.append("")
 
         if path_params and url_pattern:
             url_with_params = url_pattern
-            for param_name in path_params.keys():
-                url_with_params = url_with_params.replace(f"{{{param_name}}}", f"{{params['{param_name}']}}")
+            for path_param in path_params.keys():
+                url_with_params = url_with_params.replace(f"{{{path_param}}}", f"{{params['{path_param}']}}")
             function_def.append(f'    url = f"{url_with_params}"')
         else:
             function_def.append(f'    url = "{url}"')

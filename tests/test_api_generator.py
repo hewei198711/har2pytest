@@ -225,6 +225,21 @@ def test_generate_params_string_with_swagger_info():
 
 
 @allure.feature("API生成器")
+@allure.story("生成参数字符串")
+@allure.title("测试JSON数组请求体生成")
+def test_generate_params_string_list_body():
+    """JSON 数组请求体（list）应直接生成为 Python 字面量，不触发 dict 专用格式化。"""
+    generator = APIGenerator(output_dir="test_output")
+    params = [{"action": "click", "timestamp": 123}, {"action": "view"}]
+    result = generator._generate_params_string(params)
+    assert result.startswith("[")
+    assert "'action': 'click'" in result or '"action": "click"' in result
+    assert "'timestamp': 123" in result or "123" in result
+    # 空列表处理
+    assert generator._generate_params_string([]) == "[]"
+
+
+@allure.feature("API生成器")
 @allure.story("处理参数")
 @allure.title("测试处理GET请求参数")
 def test_process_parameters_get():
@@ -699,3 +714,82 @@ def test_unified_mode_handle_file_upload():
     assert "build_multipart_data" in content
     assert "MultipartEncoder" not in content
     assert "FormData" not in content
+
+
+@allure.feature("API生成器")
+@allure.story("处理参数")
+@allure.title("测试urlencoded空body接口生成data占位")
+@allure.description(
+    "content-length=0 的空 body POST 接口（HAR 无参数）应生成 data = {} 占位，"
+    "保证 data = urlencode(data) 不会引用未定义变量（修复 UnboundLocalError）。"
+)
+def test_process_parameters_urlencoded_empty_body_placeholder():
+    generator = APIGenerator(output_dir="test_output")
+    parsed_info = {
+        "method": "POST",
+        "path_params": {},
+        "query_params": {},
+        "post_data": None,
+        "is_file_upload": False,
+        "is_need_urlencode": True,
+        "headers": {"content-type": "application/x-www-form-urlencoded"},
+    }
+    result = generator._process_parameters(parsed_info)
+    content = "\n".join(result)
+    assert "data = {}" in content
+    assert "content-type" in content
+
+
+@allure.feature("API生成器")
+@allure.story("生成函数定义")
+@allure.title("测试urlencoded空body接口生成data参数")
+def test_generate_function_definition_urlencoded_empty_body():
+    """content-length=0 的空 body POST 接口应生成 data 参数与 urlencode 分支。"""
+    generator = APIGenerator(output_dir="test_output")
+    parsed_info = {
+        "method": "POST",
+        "url": "/api/empty",
+        "query_params": {},
+        "post_data": None,
+        "is_file_upload": False,
+        "is_need_urlencode": True,
+        "path_params": {},
+        "url_pattern": "/api/empty",
+        "headers": {},
+    }
+    # swagger 参数说明（如 Authorization）不应污染 param_name，也不应丢失
+    swagger_info = {"summary": "", "description": "", "parameters": {"Authorization": "令牌"}}
+    result = generator._generate_function_definition(parsed_info, "api_empty", swagger_info)
+    content = "\n".join(result)
+    assert "def api_empty(data=data, headers=headers)" in content
+    assert "data = urlencode(data)" in content
+    assert "- Authorization: 令牌" in content
+
+
+@allure.feature("API生成器")
+@allure.story("生成函数定义")
+@allure.title("测试swagger参数说明不污染无body接口的param_name")
+@allure.description(
+    "回归测试：docstring 参数说明循环不应覆盖 param_name，"
+    "否则无 body 接口会误走 data 分支生成引用未定义变量的坏代码。"
+)
+def test_generate_function_definition_swagger_params_no_leak():
+    generator = APIGenerator(output_dir="test_output")
+    parsed_info = {
+        "method": "POST",
+        "url": "/api/noop",
+        "query_params": {},
+        "post_data": None,
+        "is_file_upload": False,
+        "is_need_urlencode": False,
+        "path_params": {},
+        "url_pattern": "/api/noop",
+        "headers": {},
+    }
+    swagger_info = {"summary": "", "description": "", "parameters": {"Authorization": "令牌"}}
+    result = generator._generate_function_definition(parsed_info, "api_noop", swagger_info)
+    content = "\n".join(result)
+    # 无 body 接口不应有 data 参数和 data 相关代码
+    assert "def api_noop(headers=headers)" in content
+    assert "client.post(url=url, headers=headers)" in content
+    assert "urlencode(data)" not in content

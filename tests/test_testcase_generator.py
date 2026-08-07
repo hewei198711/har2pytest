@@ -11,6 +11,7 @@ import pytest
 
 from har2pytest.config import APIConfig
 from har2pytest.testcase_generator import TestCaseGenerator
+from har2pytest.utils import clear_api_file_cache
 from har2pytest.utils import format_params_for_python, parse_api_file
 
 
@@ -999,6 +1000,81 @@ def form_post(data=data, headers=headers):
     # 差异项生成局部覆盖
     assert 'headers = {**self.headers, "content-type": "application/x-www-form-urlencoded; charset=UTF-8"}' in result
     assert "form_post(data=data, headers=headers)" in result
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成步骤函数体")
+@allure.title("测试JSON数组请求体生成 data 字面量")
+def test_generate_step_function_body_list_body(tmp_path):
+    """HAR post_data 为 list（JSON 数组 body）时，步骤函数体应生成 data = [...] 而非崩溃。"""
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+    api_file = api_dir / "behavior_collect.py"
+    api_file.write_text(
+        '''
+import os
+
+data = {"app_id": "uc-pc"}
+
+headers = {
+    "channel": "pc",
+    "authorization": f"bearer {os.environ['token']}",
+}
+def behavior_collect(data=data, headers=headers):
+    """
+    行为采集
+    /isomer/datacollect/behaviorCollect
+    """
+    url = "/isomer/datacollect/behaviorCollect"
+    return client.post(url=url, json=data, headers=headers)
+''',
+        encoding="utf-8",
+    )
+
+    generator = TestCaseGenerator(api_dir=str(api_dir))
+    api_info = generator._get_api_file_info(str(api_file))
+
+    # 场景1：HAR post_data 为 list，HAR 数组优先
+    content = []
+    generator._generate_step_function_body(
+        content, "behavior_collect", api_info,
+        {"query_params": {}, "post_data": [{"app_id": "uc-pc", "type": "add_to_cart"}]},
+    )
+    result = "\n".join(content)
+    assert "data = [{'app_id': 'uc-pc', 'type': 'add_to_cart'}]" in result or "data = [{\"app_id\": \"uc-pc\"" in result
+    # 无类级别 headers 时生成完整 headers 字面量
+    assert "behavior_collect(data=data, headers=headers) as r:" in result
+
+    # 场景2：API 文件 data 本身为 list，无 HAR 值时直接用 API 默认数组
+    api_file.write_text(
+        '''
+import os
+
+data = [{"app_id": "uc-pc", "type": "view"}]
+
+headers = {
+    "channel": "pc",
+    "authorization": f"bearer {os.environ['token']}",
+}
+def behavior_collect(data=data, headers=headers):
+    """
+    行为采集
+    /isomer/datacollect/behaviorCollect
+    """
+    url = "/isomer/datacollect/behaviorCollect"
+    return client.post(url=url, json=data, headers=headers)
+''',
+        encoding="utf-8",
+    )
+    # 文件已变化，清理解析缓存
+    clear_api_file_cache()
+    generator._api_file_cache.clear()
+    api_info = generator._get_api_file_info(str(api_file))
+    content = []
+    generator._generate_step_function_body(content, "behavior_collect", api_info)
+    result = "\n".join(content)
+    assert "'type': 'view'" in result or '"type": "view"' in result
+    assert "behavior_collect(data=data, headers=headers) as r:" in result
 
 
 # ==================== _generate_parametrize_values 测试 ====================
