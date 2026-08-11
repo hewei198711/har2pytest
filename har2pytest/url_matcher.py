@@ -181,9 +181,8 @@ class URLMatcher:
                 - function_name: 生成的函数名
                 - has_path_params: 是否包含路径参数
         """
-        cache_key = hash(url)
-        if cache_key in self._match_cache:
-            return self._match_cache[cache_key].copy()
+        if url in self._match_cache:
+            return self._match_cache[url].copy()
 
         result = {
             "original_url": url,
@@ -205,7 +204,7 @@ class URLMatcher:
                 result["path_params"] = params
                 result["has_path_params"] = bool(params)
                 result["function_name"] = self.generate_function_name(pattern)
-                self._match_cache[cache_key] = result.copy()
+                self._match_cache[url] = result.copy()
                 return result.copy()
 
             # 尝试从Swagger匹配
@@ -216,12 +215,12 @@ class URLMatcher:
                     result["path_params"] = params
                     result["has_path_params"] = bool(params)
                     result["function_name"] = self.generate_function_name(pattern)
-                    self._match_cache[cache_key] = result.copy()
+                    self._match_cache[url] = result.copy()
                     return result.copy()
 
         result["pattern"] = url
         result["function_name"] = self.generate_function_name(url)
-        self._match_cache[cache_key] = result.copy()
+        self._match_cache[url] = result.copy()
         return result.copy()
 
     @staticmethod
@@ -242,7 +241,7 @@ class URLMatcher:
 
         for api_file in api_files:
             result = parse_api_file(api_file)
-            file_url = result.get("url")
+            file_url = result.url
             if not file_url:
                 continue
 

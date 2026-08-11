@@ -10,6 +10,7 @@ import allure
 import pytest
 
 from har2pytest.config import APIConfig
+from har2pytest.models import APIFileInfo
 from har2pytest.testcase_generator import TestCaseGenerator
 from har2pytest.utils import clear_api_file_cache
 from har2pytest.utils import format_params_for_python, parse_api_file
@@ -169,7 +170,7 @@ def user_login(data=data, token=token):
     api_file.write_text(test_content, encoding="utf-8")
 
     result = parse_api_file(str(api_file))
-    remarks = result["param_remarks"]
+    remarks = result.param_remarks
     assert remarks.get("username") == "用户名"
     assert remarks.get("password") == "密码"
 
@@ -425,7 +426,7 @@ def user_login(data=data, token=token):
 @allure.title("测试从不存在的API文件提取参数备注")
 def test_parse_api_file_param_remarks_not_found():
     result = parse_api_file("nonexistent.py")
-    remarks = result["param_remarks"]
+    remarks = result.param_remarks
     assert remarks == {}
 
 
@@ -443,7 +444,7 @@ def test_func():
     api_file.write_text(test_content, encoding="utf-8")
 
     result = parse_api_file(str(api_file))
-    remarks = result["param_remarks"]
+    remarks = result.param_remarks
     assert remarks == {}
 
 
@@ -468,7 +469,7 @@ def user_login(data=data, token=token):
     api_file.write_text(test_content, encoding="utf-8")
 
     result = parse_api_file(str(api_file))
-    clean_name = result["function_name"].lstrip("_")
+    clean_name = (result.function_name or "").lstrip("_")
     assert clean_name == "user_login"
 
 
@@ -488,7 +489,7 @@ data = {
     api_file.write_text(test_content, encoding="utf-8")
 
     result = parse_api_file(str(api_file))
-    clean_name = result["function_name"].lstrip("_")
+    clean_name = (result.function_name or "").lstrip("_")
     assert clean_name == "test_no_func"
 
 
@@ -516,7 +517,7 @@ def test_api(headers=headers):
     api_file.write_text(test_content, encoding="utf-8")
 
     result = parse_api_file(str(api_file))
-    headers = result["headers"]
+    headers = result.headers
     assert "custom-header" in headers
 
 
@@ -1768,7 +1769,7 @@ def test_step_function_body_mode(async_mode, expected_keyword, unexpected_keywor
     generator = TestCaseGenerator(api_dir="apis", async_mode=async_mode)
     content = []
     generator._generate_step_function_body(
-        content, "user_login", {"data": {"name": ""}},
+        content, "user_login", APIFileInfo(data={"name": ""}),
         {"query_params": {}, "post_data": {"name": "test"}}
     )
     result = "\n".join(content)

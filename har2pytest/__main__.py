@@ -11,8 +11,7 @@ from .api_generator import APIGenerator
 from .config import APIConfig
 from .har_generator import generate_api_files_from_har
 from .har_parser import HARParser
-from .logger import logger
-from .swagger_handler import SwaggerHandler
+from .logger import logger, setup_logger
 from .testcase_generator import TestCaseGenerator
 
 
@@ -20,7 +19,8 @@ def main():
     """
     主函数 - 支持多种命令行操作模式
     """
-    # 初始化配置（通过 get_config 触发，会自动缓存）
+
+    setup_logger()
     APIConfig.get_config("BASE_URLS")
 
     # 创建主解析器
@@ -204,8 +204,7 @@ async def handle_swagger(args):
     logger.info("-" * 50)
 
     api_generator = APIGenerator(output_dir)
-    swagger_handler = SwaggerHandler(api_generator=api_generator)
-    generated_files = await swagger_handler.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)
+    generated_files = await api_generator.generate_apis_from_swagger(swagger_url, force_overwrite, specific_path)
 
     logger.info("-" * 50)
     logger.info(f"共生成 {len(generated_files)} 个API接口文件")

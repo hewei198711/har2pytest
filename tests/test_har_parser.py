@@ -96,6 +96,84 @@ def test_filter_invalid_params():
 
 
 @allure.feature("HAR解析器")
+@allure.story("过滤无效参数")
+@allure.title("测试过滤JSON数组body中的无效参数")
+def test_filter_invalid_params_list():
+    """验证 _filter_invalid_params 能递归过滤 list 中各元素的无效参数。"""
+    from har2pytest.config import APIConfig
+
+    APIConfig.get_config("INVALID_PARAMS")
+    assert APIConfig._config is not None
+
+    original_invalid_params = APIConfig._config.get("INVALID_PARAMS", set())
+    APIConfig._config["INVALID_PARAMS"] = {"sign", "timestamp"}
+
+    try:
+        parser = HARParser()
+
+        # JSON 数组 body：每个元素都是 dict
+        test_data = [
+            {"productId": 1, "sign": "abc"},
+            {"productId": 2, "sign": "def", "timestamp": "123"},
+        ]
+
+        result = parser._filter_invalid_params(test_data)
+        assert isinstance(result, list)
+        assert len(result) == 2
+        # 第一个元素：sign 被过滤
+        assert result[0] == {"productId": 1}
+        # 第二个元素：sign 和 timestamp 都被过滤
+        assert result[1] == {"productId": 2}
+    finally:
+        APIConfig._config["INVALID_PARAMS"] = original_invalid_params
+
+
+@allure.feature("HAR解析器")
+@allure.story("过滤无效参数")
+@allure.title("测试过滤空列表")
+def test_filter_invalid_params_empty_list():
+    """验证 _filter_invalid_params 对空列表返回空列表。"""
+    parser = HARParser()
+    result = parser._filter_invalid_params([])
+    assert result == []
+
+
+@allure.feature("HAR解析器")
+@allure.story("过滤无效参数")
+@allure.title("测试过滤混合类型列表")
+def test_filter_invalid_params_mixed_list():
+    """验证 _filter_invalid_params 对混合类型列表（含非 dict 元素）的处理。"""
+    from har2pytest.config import APIConfig
+
+    APIConfig.get_config("INVALID_PARAMS")
+    assert APIConfig._config is not None
+
+    original_invalid_params = APIConfig._config.get("INVALID_PARAMS", set())
+    APIConfig._config["INVALID_PARAMS"] = {"sign"}
+
+    try:
+        parser = HARParser()
+
+        # 混合列表：dict、基础类型、嵌套 list
+        test_data = [
+            {"id": 1, "sign": "x"},
+            "plain_string",
+            42,
+            [{"inner": 1, "sign": "y"}],  # 内嵌 list 也被递归过滤
+        ]
+
+        result = parser._filter_invalid_params(test_data)
+        assert isinstance(result, list)
+        assert len(result) == 4
+        assert result[0] == {"id": 1}
+        assert result[1] == "plain_string"
+        assert result[2] == 42
+        assert result[3] == [{"inner": 1}]
+    finally:
+        APIConfig._config["INVALID_PARAMS"] = original_invalid_params
+
+
+@allure.feature("HAR解析器")
 @allure.story("文件不存在处理")
 @allure.title("测试文件不存在的情况")
 def test_file_not_found():
@@ -176,19 +254,6 @@ def test_filter_headers_no_config():
         assert result == test_headers
     finally:
         APIConfig._config["HEADERS_TO_INCLUDE"] = original_headers
-
-
-@allure.feature("HAR解析器")
-@allure.story("过滤Headers-非字典输入")
-@allure.title("测试非字典输入时的处理")
-def test_filter_headers_invalid_input():
-    parser = HARParser()
-
-    result = parser._filter_headers(None)
-    assert result is None
-
-    result = parser._filter_headers("invalid")
-    assert result == "invalid"
 
 
 @allure.feature("HAR解析器")

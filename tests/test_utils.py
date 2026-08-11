@@ -8,6 +8,7 @@ import allure
 
 from har2pytest.utils import (
     _API_FILE_CACHE,
+    deduplicate_values,
     format_parameter_value,
     parse_api_file,
     sanitize_param_name,
@@ -31,8 +32,8 @@ def test_parse_api_file_url():
     try:
         result = parse_api_file("test_url.py")
         assert result is not None
-        assert result["description"] == "用户登录"
-        assert result["url"] == "/user/login"
+        assert result.description == "用户登录"
+        assert result.url == "/user/login"
     finally:
         if os.path.exists("test_url.py"):
             os.remove("test_url.py")
@@ -64,8 +65,8 @@ def user_order_getStoreAgentOrderList(data=data, headers=headers):
     try:
         result = parse_api_file("test_api.py")
         assert result is not None
-        assert result["description"] == "PC店铺查询兑换订单列表"
-        assert result["url"] == "/user/order/getStoreAgentOrderList"
+        assert result.description == "PC店铺查询兑换订单列表"
+        assert result.url == "/user/order/getStoreAgentOrderList"
     finally:
         import os
 
@@ -120,7 +121,7 @@ def user_login(data=data, headers=headers):
     try:
         result = parse_api_file("test_api_headers.py")
         assert result is not None
-        headers = result["headers"]
+        headers = result.headers
         assert "channel" in headers
         assert headers["channel"] == "pc"
         assert "content-type" in headers
@@ -141,3 +142,55 @@ def test_sanitize_param_name():
     assert sanitize_param_name("return") == "return_"
     assert sanitize_param_name("user_id") == "user_id"
     assert sanitize_param_name("from_user") == "from_user"
+
+
+@allure.feature("工具函数")
+@allure.story("值去重")
+@allure.title("测试基本类型去重")
+def test_deduplicate_values_primitives():
+    """验证基本类型值的去重。"""
+    assert deduplicate_values([1, 2, 2, 3]) == [1, 2, 3]
+    assert deduplicate_values(["a", "b", "a"]) == ["a", "b"]
+    assert deduplicate_values([True, False, True]) == [True, False]
+    assert deduplicate_values([None, None, 1]) == [None, 1]
+
+
+@allure.feature("工具函数")
+@allure.story("值去重")
+@allure.title("测试 dict 去重（含键顺序不同）")
+def test_deduplicate_values_dicts():
+    """验证 dict 去重，sort_keys 确保键顺序不影响去重。"""
+    result = deduplicate_values([{"b": 2, "a": 1}, {"a": 1, "b": 2}])
+    assert result == [{"b": 2, "a": 1}]
+
+
+@allure.feature("工具函数")
+@allure.story("值去重")
+@allure.title("测试 list 去重")
+def test_deduplicate_values_lists():
+    """验证 list 去重。"""
+    result = deduplicate_values([[1, 2], [1, 2], [3, 4]])
+    assert result == [[1, 2], [3, 4]]
+
+
+@allure.feature("工具函数")
+@allure.story("值去重")
+@allure.title("测试 raw string 与 JSON 序列化结果不碰撞")
+def test_deduplicate_values_no_cross_type_collision():
+    """验证 raw string 不会与 json.dumps 输出碰撞导致错误去重。"""
+    result = deduplicate_values(['{"a": 1}', {"a": 1}])
+    assert len(result) == 2
+    assert '{"a": 1}' in result
+    assert {"a": 1} in result
+
+
+@allure.feature("工具函数")
+@allure.story("值去重")
+@allure.title("测试嵌套结构去重")
+def test_deduplicate_values_nested():
+    """验证嵌套 list/dict 结构的去重。"""
+    result = deduplicate_values([
+        {"items": [{"b": 2, "a": 1}]},
+        {"items": [{"a": 1, "b": 2}]},
+    ])
+    assert len(result) == 1

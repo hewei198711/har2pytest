@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from dataclasses import replace
 from typing import Any
 
 from .config import APIConfig
 from .har_parser import HARParser
 from .logger import logger
+from .models import APIFileInfo, SwaggerInfo
 from .swagger_handler import SwaggerHandler
 from .url_matcher import URLMatcher
 from .utils import (
@@ -70,18 +72,18 @@ class TestCaseGenerator:
 
     # ==================== API 文件处理相关 ====================
 
-    def _get_api_file_info(self, api_file: str) -> dict[str, Any]:
+    def _get_api_file_info(self, api_file: str) -> APIFileInfo:
         """获取 API 文件信息（带缓存）。
 
         Args:
             api_file: API 文件路径
 
         Returns:
-            API 文件信息字典，包含 function_name、url、description 等字段
+            APIFileInfo: API 文件信息对象
         """
         if api_file not in self._api_file_cache:
             self._api_file_cache[api_file] = parse_api_file(api_file)
-        return self._api_file_cache[api_file].copy()
+        return replace(self._api_file_cache[api_file])
 
     def _get_all_api_files(self) -> list[str]:
         """获取所有 API 文件路径。
@@ -287,19 +289,21 @@ class TestCaseGenerator:
         Returns:
             参数化项列表，每个元素包含参数名、参数值列表和其他参数
         """
-        param_items = []
+        param_items: list[dict[str, Any]] = []
         pagination_params = set(APIConfig.PAGINATION_PARAMS())
+
+        # 预构建完整参数字典
+        other_params_base = dict(api_params)
 
         for param_name, param_value in api_params.items():
             # 跳过分页参数
             if param_name in pagination_params:
                 continue
 
-            # 收集其他参数
-            other_params = {}
-            for name, value in api_params.items():
-                if name != param_name:
-                    other_params[name] = value
+            # 从基础字典中临时移除当前参数，浅拷贝快照后恢复
+            del other_params_base[param_name]
+            other_params = dict(other_params_base)
+            other_params_base[param_name] = param_value
 
             # 检查参数备注中是否有可提取的参数化取值
             if param_name in param_remarks:
@@ -458,10 +462,10 @@ class TestCaseGenerator:
 
                 # 如果指定了 target_url，则只处理匹配的 API
                 if target_url:
-                    if api_info["url"] != target_url:
+                    if api_info.url != target_url:
                         continue
 
-                clean_function_name = api_info["function_name"].lstrip("_")
+                clean_function_name = (api_info.function_name or "").lstrip("_")
                 test_filename = f"test_{clean_function_name}.py"
                 test_filepath = os.path.join(output_dir, test_filename)
 
@@ -523,7 +527,7 @@ class TestCaseGenerator:
 
         output_dir = get_output_dir(self.output_dir, task_id or "")
         api_info = self._get_api_file_info(target_api_file)
-        clean_name = api_info["function_name"]
+        clean_name = api_info.function_name
         test_filename = f"test_{clean_name}.py"
         test_filepath = os.path.join(output_dir, test_filename)
 
@@ -611,11 +615,11 @@ class TestCaseGenerator:
                     return "skipped", None
 
                 api_info = self._get_api_file_info(api_file)
-                if not api_info or not api_info.get("function_name"):
+                if not api_info or not api_info.function_name:
                     logger.warning(f"  [任务跳过] {api_basename} 无法提取 API 信息")
                     return "failed", None
 
-                clean_function_name = api_info["function_name"].lstrip("_")
+                clean_function_name = (api_info.function_name or "").lstrip("_")
                 test_filename = f"test_{clean_function_name}.py"
                 test_filepath = os.path.join(output_dir, test_filename)
 
@@ -625,7 +629,7 @@ class TestCaseGenerator:
                         logger.debug(f"  [任务跳过] {api_basename} 测试文件已存在 (耗时 {elapsed:.2f}s)")
                         return "skipped", None
 
-                api_description = api_info.get("description", "")
+                api_description = api_info.description
                 list_keywords = APIConfig.LIST_QUERY_KEYWORDS()
                 is_list_query = any(kw in api_description for kw in list_keywords) if list_keywords else False
                 # 描述含排除关键字（如“详情”）时，即使命中列表关键字也不使用参数化列表模式
@@ -720,7 +724,7 @@ class TestCaseGenerator:
             参数化测试用例内容字符串，如果生成失败则返回 None
         """
         api_info = self._get_api_file_info(api_file)
-        function_name = api_info["function_name"]
+        function_name = api_info.function_name
 
         if not function_name:
             return None
@@ -730,16 +734,16 @@ class TestCaseGenerator:
 
         # 获取 API 文件中的所有参数（包括 params 和 data）
         api_params = {}
-        if api_info.get("params"):
-            api_params.update(api_info["params"])
-        if api_info.get("data"):
-            api_params.update(api_info["data"])
+        if api_info.params:
+            api_params.update(api_info.params)
+        if api_info.data:
+            api_params.update(api_info.data)
 
         # 构建参数化项
         has_har = har_file_path is not None and os.path.exists(har_file_path)
         param_items = []
         # 从 API 文件参数类型确定调用参数名
-        if api_info.get("data") or api_info.get("files"):
+        if api_info.data or api_info.files:
             param_var_name = "data"
         else:
             param_var_name = "params"
@@ -748,14 +752,14 @@ class TestCaseGenerator:
         if has_har and har_file_path is not None:
             if requests is None:
                 requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
-            _all_params, all_requests_params, _request_method = self._extract_requests_for_url(requests, api_info["url"])
+            _all_params, all_requests_params, _request_method = self._extract_requests_for_url(requests, api_info.url or "")
 
             if all_requests_params:
                 param_items = self.normalize_params_for_parametrization(all_requests_params)
 
         # 只有batch模式（没有HAR文件）才从API文件读取参数
         if not param_items and not has_har:
-            param_items = self._build_param_items_from_api(api_params, api_info["param_remarks"], is_batch_mode=True)
+            param_items = self._build_param_items_from_api(api_params, api_info.param_remarks, is_batch_mode=True)
 
         if not param_items:
             logger.warning(f"API文件 {api_file} 中没有有效的测试参数")
@@ -768,14 +772,14 @@ class TestCaseGenerator:
         content.extend(
             self._generate_test_case_description(
                 story_name, feature_name or "TODO", severity="NORMAL",
-                api_description=api_info["description"], param_remarks=api_info["param_remarks"],
-                api_headers=api_info.get("headers"),
+                api_description=api_info.description, param_remarks=api_info.param_remarks,
+                api_headers=api_info.headers,
             )
         )
 
         content.extend(
             self._generate_parametrized_test_methods(
-                param_items, api_info["description"], function_name, param_var_name, api_info["param_remarks"]
+                param_items, api_info.description, function_name, param_var_name, api_info.param_remarks
             )
         )
 
@@ -819,9 +823,9 @@ class TestCaseGenerator:
         api_headers = None
         if target_api_file:
             api_info = self._get_api_file_info(target_api_file)
-            api_description = api_info.get("description", "")
-            param_remarks = api_info.get("param_remarks")
-            api_headers = api_info.get("headers")
+            api_description = api_info.description
+            param_remarks = api_info.param_remarks
+            api_headers = api_info.headers
             self._class_headers = api_headers or {}
         content.extend(
             self._generate_test_case_description(
@@ -876,12 +880,12 @@ class TestCaseGenerator:
             if api_info:
                 # 构建模拟的请求信息，格式与 HAR 解析结果一致
                 request_info = {
-                    "url": api_info.get("url", ""),
-                    "method": api_info.get("method", "GET"),
-                    "query_params": api_info.get("params", {}),
-                    "post_data": api_info.get("data", {}),
-                    "headers": api_info.get("headers", {}),
-                    "description": api_info.get("description", ""),
+                    "url": api_info.url or "",
+                    "method": "GET",
+                    "query_params": api_info.params,
+                    "post_data": api_info.data,
+                    "headers": api_info.headers,
+                    "description": api_info.description,
                     "api_file": target_api_file,
                 }
                 requests.append(request_info)
@@ -908,7 +912,7 @@ class TestCaseGenerator:
 
             # 提取接口描述和URL
             result = self._get_api_file_info(target_api_file)
-            api_url = result["url"]
+            api_url = result.url
             if api_url:
                 story_name = api_url
 
@@ -924,8 +928,8 @@ class TestCaseGenerator:
             测试方法定义代码行列表
         """
         api_info = self._get_api_file_info(target_api_file)
-        clean_function_name = api_info["function_name"].lstrip("_")
-        api_description = api_info.get("description", clean_function_name)
+        clean_function_name = (api_info.function_name or "").lstrip("_")
+        api_description = api_info.description or clean_function_name
         prefix = "    async def " if self.async_mode else "    def "
         test_function_name = f"{prefix}test_{clean_function_name}(self):"
 
@@ -962,8 +966,8 @@ class TestCaseGenerator:
 
             if matched_api_file:
                 api_info = self._get_api_file_info(matched_api_file)
-                api_function_name = api_info["function_name"]
-                api_description = api_info["description"]
+                api_function_name = api_info.function_name or ""
+                api_description = api_info.description
                 step_name = self._generate_step_function_name(api_function_name, name_counters)
                 step_functions.append(step_name)
 
@@ -1027,7 +1031,7 @@ class TestCaseGenerator:
         self,
         content: list[str],
         api_function_name: str,
-        api_info: dict[str, Any],
+        api_info: APIFileInfo,
         request_info: dict[str, Any] | None = None,
     ) -> None:
         """生成步骤函数体。
@@ -1035,13 +1039,13 @@ class TestCaseGenerator:
         Args:
             content: 内容列表（会被修改）
             api_function_name: API 函数名称
-            api_info: API 信息字典
+            api_info: API 文件信息
             request_info: 请求信息字典（来自HAR文件，可选）
         """
         # 从 API 文件判断参数类型（data/params/files），决定调用格式
-        api_files = api_info.get("files", {})
-        api_data = api_info.get("data", {})
-        api_params = api_info.get("params", {})
+        api_files = api_info.files
+        api_data = api_info.data
+        api_params = api_info.params
 
         # 从 HAR 请求获取参数值（优先），否则从 API 文件获取
         if request_info:
@@ -1061,7 +1065,7 @@ class TestCaseGenerator:
         ctx = "async with" if self.async_mode else "with"
 
         # 步骤 API 的 headers 与类级别 headers 存在差异时，生成局部 headers 覆盖（如额外的 content-type）
-        header_lines, headers_arg = self._build_step_headers_arg(api_info.get("headers") or {})
+        header_lines, headers_arg = self._build_step_headers_arg(api_info.headers)
         if header_lines:
             content.extend(header_lines)
 
@@ -1173,7 +1177,7 @@ class TestCaseGenerator:
             service_imports: dict[str | None, list[str]] = {}
             for api_file in api_files:
                 result = self._get_api_file_info(api_file)
-                func_name = result["function_name"]
+                func_name = result.function_name
                 if func_name:
                     pkg = self._extract_service_package(api_file)
                     if pkg not in service_imports:
@@ -1508,9 +1512,9 @@ class TestCaseGenerator:
                 "            # 验证返回数据符合搜索条件",
                 "            resp_data = data.get('data')",
                 "            items = resp_data.get('list', []) if isinstance(resp_data, dict) else []",
-                f"            for item in items:",
-                f"                if isinstance(item, dict):",
-                f"                    for k, v in item.items():",
+                "            for item in items:",
+                "                if isinstance(item, dict):",
+                "                    for k, v in item.items():",
                 f"                        if k.lower() == '{param_name.lower()}':",
                 f"                            assert str(v) == str({safe_name}), f'字段 {{k}} 值 {{v}} 与搜索条件 {safe_name}={{{safe_name}}} 不一致'",
             ])

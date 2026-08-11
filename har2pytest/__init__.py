@@ -12,7 +12,7 @@ from .api_generator import APIGenerator
 from .client import AsyncClient, AsyncResponseContext, Client, ResponseContext, async_client, client
 from .config import APIConfig
 from .har_parser import HARParser
-from .logger import get_logger, logger
+from .logger import logger, setup_logger
 from .pytest_utils import retry_step
 from .swagger_handler import SwaggerHandler
 from .testcase_generator import TestCaseGenerator
@@ -34,8 +34,8 @@ __all__ = [
     "TestCaseGenerator",
     "SwaggerHandler",
     "URLMatcher",
-    "get_logger",
     "logger",
+    "setup_logger",
     "Client",
     "ResponseContext",
     "AsyncClient",

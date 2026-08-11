@@ -6,6 +6,7 @@ import allure
 import pytest
 
 from har2pytest.api_generator import APIGenerator
+from har2pytest.models import ParsedRequestInfo, SwaggerInfo
 
 
 @allure.feature("API生成器")
@@ -74,9 +75,9 @@ def test_parse_request_info_get():
         "headers": {"Authorization": "Bearer token"},
     }
     result = generator._parse_request_info(request_info)
-    assert result["method"] == "GET"
-    assert result["query_params"] == {"id": 1}
-    assert "Authorization" in result["headers"]
+    assert result.method == "GET"
+    assert result.query_params == {"id": 1}
+    assert "Authorization" in result.headers
 
 
 @allure.feature("API生成器")
@@ -92,8 +93,8 @@ def test_parse_request_info_post():
         "headers": {"content-type": "application/json"},
     }
     result = generator._parse_request_info(request_info)
-    assert result["method"] == "POST"
-    assert result["post_data"] == {"name": "test"}
+    assert result.method == "POST"
+    assert result.post_data == {"name": "test"}
 
 
 @allure.feature("API生成器")
@@ -109,7 +110,7 @@ def test_parse_request_info_file_upload():
         "headers": {"content-type": "multipart/form-data"},
     }
     result = generator._parse_request_info(request_info)
-    assert result["is_file_upload"] is True
+    assert result.is_file_upload is True
 
     # 测试 multipart/form-data 但没有实际文件参数 -> 不是文件上传，使用 data=
     request_info2 = {
@@ -120,8 +121,8 @@ def test_parse_request_info_file_upload():
         "headers": {"content-type": "multipart/form-data"},
     }
     result2 = generator._parse_request_info(request_info2)
-    assert result2["is_file_upload"] is False
-    assert result2["is_json_content"] is False
+    assert result2.is_file_upload is False
+    assert result2.is_json_content is False
 
     # 测试 HAR 中文件上传的 (binary) 占位符 -> 应是文件上传
     request_info3 = {
@@ -132,8 +133,8 @@ def test_parse_request_info_file_upload():
         "headers": {"content-type": "multipart/form-data; boundary=----WebKitFormBoundary33zTNLfGBAtCpQkw"},
     }
     result3 = generator._parse_request_info(request_info3)
-    assert result3["is_file_upload"] is True
-    assert result3["is_json_content"] is False
+    assert result3.is_file_upload is True
+    assert result3.is_json_content is False
 
 
 @allure.feature("API生成器")
@@ -149,7 +150,7 @@ def test_parse_request_info_urlencoded_empty_body():
         "headers": {"content-length": "0"},
     }
     result = generator._parse_request_info(request_info)
-    assert result["is_need_urlencode"] is True
+    assert result.is_need_urlencode is True
 
 
 @allure.feature("API生成器")
@@ -159,7 +160,7 @@ def test_parse_request_info_default_headers():
     generator = APIGenerator(output_dir="test_output")
     request_info = {"method": "GET", "url": "/api/test", "query_params": {}, "post_data": {}, "headers": {}}
     result = generator._parse_request_info(request_info)
-    assert len(result["headers"]) > 0
+    assert len(result.headers) > 0
 
 
 @allure.feature("API生成器")
@@ -167,7 +168,7 @@ def test_parse_request_info_default_headers():
 @allure.title("测试生成普通请求的导入语句")
 def test_generate_imports_normal():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {"is_file_upload": False, "is_need_urlencode": False}
+    parsed_info = ParsedRequestInfo(is_file_upload=False, is_need_urlencode=False)
     imports = generator._generate_imports(parsed_info)
     assert "import os" in imports
     assert "from har2pytest.client import client" in imports
@@ -178,7 +179,7 @@ def test_generate_imports_normal():
 @allure.title("测试生成文件上传的导入语句")
 def test_generate_imports_file_upload():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {"is_file_upload": True, "is_need_urlencode": False}
+    parsed_info = ParsedRequestInfo(is_file_upload=True, is_need_urlencode=False)
     imports = generator._generate_imports(parsed_info)
     assert "from har2pytest.client import client, build_multipart_data" in imports
 
@@ -188,7 +189,7 @@ def test_generate_imports_file_upload():
 @allure.title("测试生成urlencoded的导入语句")
 def test_generate_imports_urlencoded():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {"is_file_upload": False, "is_need_urlencode": True}
+    parsed_info = ParsedRequestInfo(is_file_upload=False, is_need_urlencode=True)
     imports = generator._generate_imports(parsed_info)
     assert "from urllib.parse import urlencode" in imports
 
@@ -219,7 +220,7 @@ def test_generate_params_string_empty():
 def test_generate_params_string_with_swagger_info():
     generator = APIGenerator(output_dir="test_output")
     params = {"id": 1}
-    swagger_info = {"parameters": {"id": "用户ID"}, "description": "", "summary": ""}
+    swagger_info = SwaggerInfo(parameters={"id": "用户ID"})
     result = generator._generate_params_string(params, swagger_info)
     assert "id" in result
 
@@ -244,15 +245,15 @@ def test_generate_params_string_list_body():
 @allure.title("测试处理GET请求参数")
 def test_process_parameters_get():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "GET",
-        "path_params": {},
-        "query_params": {"id": 1},
-        "post_data": {},
-        "is_file_upload": False,
-        "is_need_urlencode": False,
-        "headers": {"Authorization": "Bearer token"},
-    }
+    parsed_info = ParsedRequestInfo(
+        method="GET",
+        path_params={},
+        query_params={"id": 1},
+        post_data={},
+        is_file_upload=False,
+        is_need_urlencode=False,
+        headers={"Authorization": "Bearer token"},
+    )
     result = generator._process_parameters(parsed_info)
     assert any("params =" in line for line in result)
     assert any("headers =" in line for line in result)
@@ -263,15 +264,15 @@ def test_process_parameters_get():
 @allure.title("测试处理POST请求参数")
 def test_process_parameters_post():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "POST",
-        "path_params": {},
-        "query_params": {},
-        "post_data": {"name": "test"},
-        "is_file_upload": False,
-        "is_need_urlencode": False,
-        "headers": {"content-type": "application/json"},
-    }
+    parsed_info = ParsedRequestInfo(
+        method="POST",
+        path_params={},
+        query_params={},
+        post_data={"name": "test"},
+        is_file_upload=False,
+        is_need_urlencode=False,
+        headers={"content-type": "application/json"},
+    )
     result = generator._process_parameters(parsed_info)
     assert any("data =" in line for line in result)
 
@@ -281,15 +282,15 @@ def test_process_parameters_post():
 @allure.title("测试处理urlencoded POST参数")
 def test_process_parameters_urlencoded():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "POST",
-        "path_params": {},
-        "query_params": {"key": "value"},
-        "post_data": {},
-        "is_file_upload": False,
-        "is_need_urlencode": True,
-        "headers": {"content-type": "application/x-www-form-urlencoded"},
-    }
+    parsed_info = ParsedRequestInfo(
+        method="POST",
+        path_params={},
+        query_params={"key": "value"},
+        post_data={},
+        is_file_upload=False,
+        is_need_urlencode=True,
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
     result = generator._process_parameters(parsed_info)
     assert any("content-type" in line for line in result)
 
@@ -299,15 +300,15 @@ def test_process_parameters_urlencoded():
 @allure.title("测试处理路径参数")
 def test_process_parameters_path_params():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "GET",
-        "path_params": {"id": "123"},
-        "query_params": {},
-        "post_data": {},
-        "is_file_upload": False,
-        "is_need_urlencode": False,
-        "headers": {},
-    }
+    parsed_info = ParsedRequestInfo(
+        method="GET",
+        path_params={"id": "123"},
+        query_params={},
+        post_data={},
+        is_file_upload=False,
+        is_need_urlencode=False,
+        headers={},
+    )
     result = generator._process_parameters(parsed_info)
     assert any("params =" in line for line in result)
 
@@ -420,18 +421,18 @@ def test_handle_file_upload_not_dict():
 @allure.title("测试生成GET函数定义")
 def test_generate_function_definition_get():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "GET",
-        "url": "/api/test",
-        "query_params": {"id": 1},
-        "post_data": {},
-        "is_file_upload": False,
-        "is_need_urlencode": False,
-        "path_params": {},
-        "url_pattern": "/api/test",
-        "headers": {},
-    }
-    swagger_info = {"summary": "测试API", "description": "", "parameters": {}}
+    parsed_info = ParsedRequestInfo(
+        method="GET",
+        url="/api/test",
+        query_params={"id": 1},
+        post_data={},
+        is_file_upload=False,
+        is_need_urlencode=False,
+        path_params={},
+        url_pattern="/api/test",
+        headers={},
+    )
+    swagger_info = SwaggerInfo(summary="测试API")
     result = generator._generate_function_definition(parsed_info, "api_test", swagger_info)
     assert any("def api_test" in line for line in result)
 
@@ -441,18 +442,18 @@ def test_generate_function_definition_get():
 @allure.title("测试生成POST函数定义")
 def test_generate_function_definition_post():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "POST",
-        "url": "/api/create",
-        "query_params": {},
-        "post_data": {"name": "test"},
-        "is_file_upload": False,
-        "is_need_urlencode": False,
-        "path_params": {},
-        "url_pattern": "/api/create",
-        "headers": {},
-    }
-    swagger_info = {"description": "创建接口", "parameters": {}, "summary": ""}
+    parsed_info = ParsedRequestInfo(
+        method="POST",
+        url="/api/create",
+        query_params={},
+        post_data={"name": "test"},
+        is_file_upload=False,
+        is_need_urlencode=False,
+        path_params={},
+        url_pattern="/api/create",
+        headers={},
+    )
+    swagger_info = SwaggerInfo(description="创建接口")
     result = generator._generate_function_definition(parsed_info, "api_create", swagger_info)
     assert any("def api_create" in line for line in result)
 
@@ -462,18 +463,18 @@ def test_generate_function_definition_post():
 @allure.title("测试生成带路径参数的函数定义")
 def test_generate_function_definition_with_path_params():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "GET",
-        "url": "/api/user/123",
-        "query_params": {},
-        "post_data": {},
-        "is_file_upload": False,
-        "is_need_urlencode": False,
-        "path_params": {"id": "123"},
-        "url_pattern": "/api/user/{id}",
-        "headers": {},
-    }
-    swagger_info = {"summary": "用户详情", "description": "", "parameters": {}}
+    parsed_info = ParsedRequestInfo(
+        method="GET",
+        url="/api/user/123",
+        query_params={},
+        post_data={},
+        is_file_upload=False,
+        is_need_urlencode=False,
+        path_params={"id": "123"},
+        url_pattern="/api/user/{id}",
+        headers={},
+    )
+    swagger_info = SwaggerInfo(summary="用户详情")
     result = generator._generate_function_definition(parsed_info, "_api_user_detail", swagger_info)
     assert any("url = f" in line for line in result)
 
@@ -483,18 +484,18 @@ def test_generate_function_definition_with_path_params():
 @allure.title("测试生成带摘要的函数定义")
 def test_generate_function_definition_with_summary():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "GET",
-        "url": "/api/test",
-        "query_params": {},
-        "post_data": {},
-        "is_file_upload": False,
-        "is_need_urlencode": False,
-        "path_params": {},
-        "url_pattern": "/api/test",
-        "headers": {},
-    }
-    swagger_info = {"summary": "获取用户列表", "description": "", "parameters": {}}
+    parsed_info = ParsedRequestInfo(
+        method="GET",
+        url="/api/test",
+        query_params={},
+        post_data={},
+        is_file_upload=False,
+        is_need_urlencode=False,
+        path_params={},
+        url_pattern="/api/test",
+        headers={},
+    )
+    swagger_info = SwaggerInfo(summary="获取用户列表")
     result = generator._generate_function_definition(parsed_info, "_api_users", swagger_info)
     assert "获取用户列表" in "\n".join(result)
 
@@ -504,18 +505,18 @@ def test_generate_function_definition_with_summary():
 @allure.title("测试生成带描述的函数定义")
 def test_generate_function_definition_with_description():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "GET",
-        "url": "/api/test",
-        "query_params": {},
-        "post_data": {},
-        "is_file_upload": False,
-        "is_need_urlencode": False,
-        "path_params": {},
-        "url_pattern": "/api/test",
-        "headers": {},
-    }
-    swagger_info = {"summary": "", "description": "获取用户信息", "parameters": {}}
+    parsed_info = ParsedRequestInfo(
+        method="GET",
+        url="/api/test",
+        query_params={},
+        post_data={},
+        is_file_upload=False,
+        is_need_urlencode=False,
+        path_params={},
+        url_pattern="/api/test",
+        headers={},
+    )
+    swagger_info = SwaggerInfo(description="获取用户信息")
     result = generator._generate_function_definition(parsed_info, "_api_users", swagger_info)
     assert "获取用户信息" in "\n".join(result)
 
@@ -525,18 +526,18 @@ def test_generate_function_definition_with_description():
 @allure.title("测试生成带参数说明的函数定义")
 def test_generate_function_definition_with_parameters():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "GET",
-        "url": "/api/test",
-        "query_params": {"id": 1},
-        "post_data": {},
-        "is_file_upload": False,
-        "is_need_urlencode": False,
-        "path_params": {},
-        "url_pattern": "/api/test",
-        "headers": {},
-    }
-    swagger_info = {"summary": "测试", "description": "", "parameters": {"id": "用户ID"}}
+    parsed_info = ParsedRequestInfo(
+        method="GET",
+        url="/api/test",
+        query_params={"id": 1},
+        post_data={},
+        is_file_upload=False,
+        is_need_urlencode=False,
+        path_params={},
+        url_pattern="/api/test",
+        headers={},
+    )
+    swagger_info = SwaggerInfo(summary="测试", parameters={"id": "用户ID"})
     result = generator._generate_function_definition(parsed_info, "api_test", swagger_info)
     content = "\n".join(result)
     assert "用户ID" in content
@@ -547,18 +548,18 @@ def test_generate_function_definition_with_parameters():
 @allure.title("测试生成带参数的函数签名")
 def test_generate_function_definition_with_params():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "POST",
-        "url": "/api/create",
-        "query_params": {},
-        "post_data": {"name": "test"},
-        "is_file_upload": False,
-        "is_need_urlencode": False,
-        "path_params": {},
-        "url_pattern": "/api/create",
-        "headers": {},
-    }
-    swagger_info = {"summary": "", "description": "", "parameters": {}}
+    parsed_info = ParsedRequestInfo(
+        method="POST",
+        url="/api/create",
+        query_params={},
+        post_data={"name": "test"},
+        is_file_upload=False,
+        is_need_urlencode=False,
+        path_params={},
+        url_pattern="/api/create",
+        headers={},
+    )
+    swagger_info = SwaggerInfo()
     result = generator._generate_function_definition(parsed_info, "api_create", swagger_info)
     content = "\n".join(result)
     assert "def api_create(data=data, headers=headers)" in content
@@ -606,7 +607,7 @@ def test_generate_file_content_post():
 def test_generate_file_content_with_swagger_info():
     generator = APIGenerator(output_dir="test_output")
     request_info = {"method": "GET", "url": "/api/test", "query_params": {"id": 1}, "post_data": {}, "headers": {}}
-    swagger_info = {"summary": "获取用户", "description": "", "parameters": {"id": "用户ID"}}
+    swagger_info = SwaggerInfo(summary="获取用户", parameters={"id": "用户ID"})
     content = generator.generate_file_content(request_info, "api_test", swagger_info)
     assert "获取用户" in content
 
@@ -683,7 +684,7 @@ def test_generate_index_file_duplicate_no_append(tmp_path):
 def test_unified_mode_generate_imports():
     """API 文件始终使用 from har2pytest.client import client，不再区分同步/异步。"""
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {"is_file_upload": False, "is_need_urlencode": False}
+    parsed_info = ParsedRequestInfo(is_file_upload=False, is_need_urlencode=False)
     imports = generator._generate_imports(parsed_info)
     assert "from har2pytest.client import client" in imports
     assert "async_client" not in "".join(imports)
@@ -695,7 +696,7 @@ def test_unified_mode_generate_imports():
 def test_unified_mode_file_upload_imports():
     """文件上传导入 client 和 build_multipart_data，运行时自动适配同步/异步。"""
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {"is_file_upload": True, "is_need_urlencode": False}
+    parsed_info = ParsedRequestInfo(is_file_upload=True, is_need_urlencode=False)
     imports = generator._generate_imports(parsed_info)
     assert "from har2pytest.client import client, build_multipart_data" in imports
     assert "from aiohttp import FormData" not in imports
@@ -725,15 +726,15 @@ def test_unified_mode_handle_file_upload():
 )
 def test_process_parameters_urlencoded_empty_body_placeholder():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "POST",
-        "path_params": {},
-        "query_params": {},
-        "post_data": None,
-        "is_file_upload": False,
-        "is_need_urlencode": True,
-        "headers": {"content-type": "application/x-www-form-urlencoded"},
-    }
+    parsed_info = ParsedRequestInfo(
+        method="POST",
+        path_params={},
+        query_params={},
+        post_data=None,
+        is_file_upload=False,
+        is_need_urlencode=True,
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
     result = generator._process_parameters(parsed_info)
     content = "\n".join(result)
     assert "data = {}" in content
@@ -746,19 +747,19 @@ def test_process_parameters_urlencoded_empty_body_placeholder():
 def test_generate_function_definition_urlencoded_empty_body():
     """content-length=0 的空 body POST 接口应生成 data 参数与 urlencode 分支。"""
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "POST",
-        "url": "/api/empty",
-        "query_params": {},
-        "post_data": None,
-        "is_file_upload": False,
-        "is_need_urlencode": True,
-        "path_params": {},
-        "url_pattern": "/api/empty",
-        "headers": {},
-    }
+    parsed_info = ParsedRequestInfo(
+        method="POST",
+        url="/api/empty",
+        query_params={},
+        post_data=None,
+        is_file_upload=False,
+        is_need_urlencode=True,
+        path_params={},
+        url_pattern="/api/empty",
+        headers={},
+    )
     # swagger 参数说明（如 Authorization）不应污染 param_name，也不应丢失
-    swagger_info = {"summary": "", "description": "", "parameters": {"Authorization": "令牌"}}
+    swagger_info = SwaggerInfo(parameters={"Authorization": "令牌"})
     result = generator._generate_function_definition(parsed_info, "api_empty", swagger_info)
     content = "\n".join(result)
     assert "def api_empty(data=data, headers=headers)" in content
@@ -775,18 +776,18 @@ def test_generate_function_definition_urlencoded_empty_body():
 )
 def test_generate_function_definition_swagger_params_no_leak():
     generator = APIGenerator(output_dir="test_output")
-    parsed_info = {
-        "method": "POST",
-        "url": "/api/noop",
-        "query_params": {},
-        "post_data": None,
-        "is_file_upload": False,
-        "is_need_urlencode": False,
-        "path_params": {},
-        "url_pattern": "/api/noop",
-        "headers": {},
-    }
-    swagger_info = {"summary": "", "description": "", "parameters": {"Authorization": "令牌"}}
+    parsed_info = ParsedRequestInfo(
+        method="POST",
+        url="/api/noop",
+        query_params={},
+        post_data=None,
+        is_file_upload=False,
+        is_need_urlencode=False,
+        path_params={},
+        url_pattern="/api/noop",
+        headers={},
+    )
+    swagger_info = SwaggerInfo(parameters={"Authorization": "令牌"})
     result = generator._generate_function_definition(parsed_info, "api_noop", swagger_info)
     content = "\n".join(result)
     # 无 body 接口不应有 data 参数和 data 相关代码

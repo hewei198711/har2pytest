@@ -1,43 +1,48 @@
 """
 日志模块
+
+作为库使用时，默认只添加 NullHandler，不污染调用方的日志配置。
+CLI 入口（__main__.py）会在启动时调用 setup_logger() 激活控制台和文件输出。
 """
 
 import logging
 import os
 
-# 日志文件默认写入当前工作目录，避免在 pip 安装后路径失效
-_log_dir = os.getcwd()
-_log_file = os.path.join(_log_dir, "har2pytest.log")
+# 创建日志记录器，默认添加 NullHandler（库标准做法，避免 "No handler found" 警告）
+logger = logging.getLogger("har2pytest")
+logger.addHandler(logging.NullHandler())
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(_log_file, encoding="utf-8"),
-    ],
+# 格式化器（模块级复用，setup_logger 共用）
+_FORMATTER = logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
 )
 
-# 创建日志记录器
-logger = logging.getLogger("har2pytest")
 
+def setup_logger(level: int = logging.INFO, log_file: str | None = None) -> None:
+    """配置日志记录器，添加控制台和文件输出。
 
-# 导出logger
-def get_logger():
+    仅应在 CLI 入口或应用程序启动时调用一次。
+    重复调用会先清除已有 handler 再重新配置，避免重复输出。
+
+    Args:
+        level: 日志级别，默认 INFO。
+        log_file: 日志文件路径，默认写入当前工作目录下的 har2pytest.log。
     """
-    获取日志记录器
-    """
-    return logger
-
-
-def reset_log_file():
-    """重新设置日志文件路径为当前工作目录。"""
-    global _log_dir, _log_file
-    _log_dir = os.getcwd()
-    _log_file = os.path.join(_log_dir, "har2pytest.log")
+    # 清除已有 handler（包括 NullHandler），避免重复添加
     for handler in list(logger.handlers):
-        if isinstance(handler, logging.FileHandler):
-            handler.close()
-            logger.removeHandler(handler)
-    logger.addHandler(logging.FileHandler(_log_file, encoding="utf-8"))
+        handler.close()
+        logger.removeHandler(handler)
+
+    logger.setLevel(level)
+
+    # 控制台输出
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(_FORMATTER)
+    logger.addHandler(stream_handler)
+
+    # 文件输出
+    if log_file is None:
+        log_file = os.path.join(os.getcwd(), "har2pytest.log")
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setFormatter(_FORMATTER)
+    logger.addHandler(file_handler)

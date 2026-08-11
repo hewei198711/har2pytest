@@ -194,30 +194,33 @@ class HARParser:
         logger.info(f"解析完成，提取到 {len(requests)} 个有效的API请求")
         return requests
 
-    def _filter_invalid_params(self, data: dict[str, Any]) -> dict[str, Any]:
-        """过滤无效参数。
+    def _filter_invalid_params(self, data: Any) -> Any:
+        """过滤无效参数，支持 dict 和 list 类型（JSON 数组 body）。
 
         根据配置中的 INVALID_PARAMS 过滤掉不需要的参数。
+        对 list 类型会递归过滤每个元素。
 
         Args:
-            data: 原始参数字典。
+            data: 原始参数（dict、list 或其他类型）。
 
         Returns:
-            dict[str, Any]: 过滤后的参数字典。
+            过滤后的数据，保持与输入相同的结构化类型。
         """
-        if not isinstance(data, dict):
-            logger.warning(f"期望dict类型，实际收到 {type(data)}，跳过过滤")
-            return data if data else {}
+        if isinstance(data, dict):
+            filtered_data: dict[str, Any] = {}
+            invalid_params = APIConfig.INVALID_PARAMS()
+            for key, value in data.items():
+                if key not in invalid_params:
+                    filtered_data[key] = value
+                else:
+                    logger.debug(f"过滤无效参数: {key} = {value}")
+            return filtered_data
 
-        filtered_data = {}
-        invalid_params = APIConfig.INVALID_PARAMS()
-        for key, value in data.items():
-            if key not in invalid_params:
-                filtered_data[key] = value
-            else:
-                logger.debug(f"过滤无效参数: {key} = {value}")
+        if isinstance(data, list):
+            return [self._filter_invalid_params(item) for item in data]
 
-        return filtered_data
+        logger.warning(f"期望 dict 或 list 类型，实际收到 {type(data)}，跳过过滤")
+        return data if data else {}
 
     def _filter_headers(self, headers: dict[str, str]) -> dict[str, str]:
         """过滤 headers，只保留配置中指定的和必要的 headers。
@@ -228,9 +231,6 @@ class HARParser:
         Returns:
             dict[str, str]: 过滤后的 headers 字典。
         """
-        if not isinstance(headers, dict):
-            return headers
-
         headers_to_include = APIConfig.HEADERS_TO_INCLUDE()
         # 如果没有配置 HEADERS_TO_INCLUDE，返回所有 headers
         if not headers_to_include:

@@ -11,9 +11,11 @@ import os
 import re
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from .logger import logger
+from .models import APIFileInfo
 
 
 def _format_nested(value: Any) -> str:
@@ -80,10 +82,11 @@ def deduplicate_values(values: list[Any]) -> list[Any]:
     Returns:
         list[Any]: 去重后的列表。
     """
-    unique_values = []
-    seen = set()
+    unique_values: list[Any] = []
+    seen: set[str] = set()
     for value in values:
-        key = json.dumps(value, sort_keys=True, ensure_ascii=False) if isinstance(value, (list, dict)) else value
+        # 统一使用 json.dumps 生成 key，避免 raw string 与 JSON 序列化结果碰撞
+        key = json.dumps(value, sort_keys=True, ensure_ascii=False)
         if key not in seen:
             seen.add(key)
             unique_values.append(value)
@@ -178,7 +181,7 @@ def clear_api_file_cache():
     _API_FILE_CACHE.clear()
 
 
-def parse_api_file(filepath: str) -> dict:
+def parse_api_file(filepath: str) -> APIFileInfo:
     """从 API 文件中提取所有信息。
 
     提取函数名、描述、URL、参数备注、请求头和参数值等信息。
@@ -188,33 +191,17 @@ def parse_api_file(filepath: str) -> dict:
         filepath: API 文件路径。
 
     Returns:
-        dict: 包含以下字段的字典：
-            - function_name: 函数名
-            - description: 接口描述
-            - url: 接口 URL
-            - param_remarks: 参数备注字典
-            - headers: 请求头字典
-            - params: 参数值字典
-            - data: data参数字典
-            - files: files参数字典
+        APIFileInfo: 包含 function_name、description、url、param_remarks、
+            headers、params、data、files 的数据对象。
     """
     if filepath in _API_FILE_CACHE:
-        return _API_FILE_CACHE[filepath].copy()
+        return _API_FILE_CACHE[filepath]
 
-    result = {
-        "function_name": None,
-        "description": "",
-        "url": None,
-        "param_remarks": {},
-        "headers": {},
-        "params": {},
-        "data": {},
-        "files": {},
-    }
+    result = APIFileInfo()
 
     try:
         basename = os.path.basename(filepath)
-        result["function_name"] = os.path.splitext(basename)[0]
+        result.function_name = os.path.splitext(basename)[0]
     except Exception as e:
         logger.error(f"从文件路径提取函数名失败 {filepath}: {str(e)}")
 
@@ -229,8 +216,8 @@ def parse_api_file(filepath: str) -> dict:
             docstring_content = docstring_match.group(1)
             lines = [line.strip() for line in docstring_content.split("\n") if line.strip()]
             if lines:
-                result["description"] = lines[0]
-                result["url"] = lines[1]
+                result.description = lines[0]
+                result.url = lines[1]
 
         # 提取参数值和备注（params、data 和 files）
         for param_type in ["params", "data", "files"]:
@@ -277,7 +264,7 @@ def parse_api_file(filepath: str) -> dict:
                         key_name = comment_match.group(1)
                         remark = comment_match.group(2).strip()
                         full_key = ".".join(parent_keys + [key_name]) if parent_keys else key_name
-                        result["param_remarks"][full_key] = remark
+                        result.param_remarks[full_key] = remark
 
                 # 移除行尾注释后解析字典值
                 try:
@@ -293,9 +280,9 @@ def parse_api_file(filepath: str) -> dict:
 
                     params_dict = ast.literal_eval(dict_str)
                     if isinstance(params_dict, dict):
-                        result[param_type].update(params_dict)
+                        getattr(result, param_type).update(params_dict)
                     else:
-                        result[param_type] = params_dict
+                        setattr(result, param_type, params_dict)
                     break  # API文件只会有第一个参数类型
                 except Exception as e:
                     logger.error(f"解析 {param_type} 字典失败: {str(e)}")
@@ -320,14 +307,14 @@ def parse_api_file(filepath: str) -> dict:
             header_pattern = r'"([\w-]+)"\s*:\s*(f"[^"]*"|f\'[^\']*\'|"[^"]*"|\'[^\']*\')'
             for key, value in re.findall(header_pattern, headers_content):
                 if value.startswith('f"') or value.startswith("f'"):
-                    result["headers"][key] = value
+                    result.headers[key] = value
                 else:
-                    result["headers"][key] = value.strip('"').strip("'")
+                    result.headers[key] = value.strip('"').strip("'")
 
     except Exception as e:
         logger.error(f"读取API文件 {filepath} 失败: {str(e)}")
 
-    _API_FILE_CACHE[filepath] = result.copy()
+    _API_FILE_CACHE[filepath] = replace(result)
     return result
 
 

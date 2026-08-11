@@ -5,6 +5,7 @@ import asyncio
 import allure
 
 from har2pytest.swagger_handler import SwaggerHandler
+from har2pytest.models import SwaggerInfo
 
 
 @allure.feature("Swagger处理器")
@@ -25,7 +26,7 @@ def test_find_api_info_in_swagger():
     }
     result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
     assert result is not None
-    assert result["summary"] == "测试API"
+    assert result.summary == "测试API"
 
 
 @allure.feature("Swagger处理器")
@@ -36,7 +37,7 @@ def test_find_api_info_with_basepath():
     swagger_data = {"basePath": "/v1", "paths": {"/api/test": {"get": {"summary": "测试API"}}}}
     result = handler.find_api_info_in_swagger(swagger_data, "/v1/api/test", "GET")
     assert result is not None
-    assert result["summary"] == "测试API"
+    assert result.summary == "测试API"
 
 
 @allure.feature("Swagger处理器")
@@ -177,7 +178,7 @@ def test_find_api_info_path_not_found():
     handler = SwaggerHandler()
     swagger_data = {"paths": {"/api/test": {"get": {}}}}
     result = handler.find_api_info_in_swagger(swagger_data, "/api/notfound", "GET")
-    assert result["summary"] == ""
+    assert result.summary == ""
 
 
 @allure.feature("Swagger处理器")
@@ -196,7 +197,7 @@ def test_find_api_info_method_not_found_but_has_fallback():
 def test_find_api_info_empty_swagger_data():
     handler = SwaggerHandler()
     result = handler.find_api_info_in_swagger({}, "/api/test", "GET")
-    assert result["summary"] == ""
+    assert result.summary == ""
 
 
 @allure.feature("Swagger处理器")
@@ -206,7 +207,7 @@ def test_find_api_info_empty_paths():
     handler = SwaggerHandler()
     swagger_data = {"paths": {}}
     result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
-    assert result["summary"] == ""
+    assert result.summary == ""
 
 
 @allure.feature("Swagger处理器")
@@ -254,7 +255,6 @@ def test_get_default_value_unknown_type():
 def test_swagger_handler_init():
     handler = SwaggerHandler()
     assert handler.swagger_cache == {}
-    assert handler.api_generator is None
 
 
 @allure.feature("Swagger处理器")
@@ -283,7 +283,7 @@ def test_find_api_info_in_swagger_specific_path():
     }
     result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
     assert result is not None
-    assert result["summary"] == "测试API"
+    assert result.summary == "测试API"
 
 
 @allure.feature("Swagger处理器")
@@ -306,7 +306,7 @@ def test_find_api_info_in_swagger_extract_params():
     }
     result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
     assert result is not None
-    assert len(result["parameters"]) == 2
+    assert len(result.parameters) == 2
 
 
 @allure.feature("Swagger处理器")
