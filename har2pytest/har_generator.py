@@ -10,6 +10,7 @@ import traceback
 from .config import APIConfig
 from .har_parser import HARParser
 from .logger import logger
+from .models import ParsedRequestInfo
 from .utils import format_directory
 
 
@@ -49,7 +50,7 @@ async def generate_api_files_from_har(
     logger.info("[并行处理] 开始预取 Swagger 文档...")
     swagger_docs_cache = {}
     for request_info in requests:
-        url = request_info["url"]
+        url = request_info.url
         service_package = APIConfig.determine_service_package(url)
         swagger_url = APIConfig.SWAGGER_DOC_URLS().get(service_package)
         if swagger_url and swagger_url not in swagger_docs_cache:
@@ -60,11 +61,11 @@ async def generate_api_files_from_har(
             )
     logger.info(f"[并行处理] Swagger 文档预取完成，缓存 {len(swagger_docs_cache)} 个文档")
 
-    async def _process_one(request_info: dict) -> str | None:
+    async def _process_one(request_info: ParsedRequestInfo) -> str | None:
         """异步处理单个请求，生成 API 文件。"""
         task_start = time.time()
-        url = request_info.get("url", "")
-        method = request_info.get("method", "")
+        url = request_info.url
+        method = request_info.method
         try:
             logger.debug(f"  [任务开始] {method} {url}")
             service_package = APIConfig.determine_service_package(url)

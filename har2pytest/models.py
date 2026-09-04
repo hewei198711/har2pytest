@@ -34,9 +34,16 @@ class ParsedRequestInfo:
     Attributes:
         method: HTTP 方法（GET/POST）
         url: 接口 URL（模板化或原始 URL）
+        full_url: HAR 中的完整原始 URL
         query_params: URL 查询参数
         post_data: POST 请求体数据
         headers: 请求头字典
+        content_type: 请求体 Content-Type（来自 HAR postData.mimeType）
+        cookies: Cookie 字典
+        response_status: 响应状态码
+        response_content: 响应内容（JSON 解析后的对象或原始文本）
+        response_time: 响应时间（毫秒）
+        server_ip: 服务器 IP 地址
         is_file_upload: 是否为文件上传请求
         is_multipart: 是否为 multipart/form-data 请求
         is_need_urlencode: 是否需要 urlencode 编码
@@ -48,9 +55,16 @@ class ParsedRequestInfo:
 
     method: str = ""
     url: str = ""
+    full_url: str = ""
     query_params: dict[str, Any] = field(default_factory=dict)
     post_data: Any = field(default_factory=dict)
     headers: dict[str, str] = field(default_factory=dict)
+    content_type: str = ""
+    cookies: dict[str, str] = field(default_factory=dict)
+    response_status: int = 0
+    response_content: Any = None
+    response_time: float = 0.0
+    server_ip: str = ""
     is_file_upload: bool = False
     is_multipart: bool = False
     is_need_urlencode: bool = False

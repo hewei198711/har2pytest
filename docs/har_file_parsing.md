@@ -139,24 +139,26 @@ BASE_URLS = [
 
 #### Step 9: 构建请求信息
 
-每个请求最终生成如下结构：
+每个请求最终生成 `ParsedRequestInfo` dataclass 实例（`har2pytest/models.py`），字段如下：
 
 ```python
-request_info = {
-    "method": "GET",              # HTTP 方法
-    "url": "/api/example",        # 清理后的相对 URL
-    "full_url": "https://...",    # 完整 URL
-    "headers": { ... },           # 过滤后的 headers
-    "content_type": "...",        # 内容类型
-    "cookies": { ... },           # Cookie
-    "query_params": { ... },      # 过滤后的查询参数
-    "post_data": { ... },         # 解析后的 POST 数据
-    "response_status": 200,       # 响应状态码
-    "response_content": { ... },  # 响应内容（JSON 解析后）
-    "response_time": 123.45,      # 响应时间（毫秒）
-    "server_ip": "192.168.1.1",   # 服务器 IP
-}
+request_info = ParsedRequestInfo(
+    method="GET",              # HTTP 方法
+    url="/api/example",        # 清理后的相对 URL
+    full_url="https://...",    # 完整 URL
+    headers={ ... },            # 过滤后的 headers
+    content_type="...",        # 内容类型
+    cookies={ ... },            # Cookie
+    query_params={ ... },       # 过滤后的查询参数
+    post_data={ ... },          # 解析后的 POST 数据
+    response_status=200,        # 响应状态码
+    response_content={ ... },   # 响应内容（JSON 解析后）
+    response_time=123.45,       # 响应时间（毫秒）
+    server_ip="192.168.1.1",   # 服务器 IP
+)
 ```
+
+`extract_requests_from_har` 返回 `list[ParsedRequestInfo]`，消费方通过属性访问字段（如 `request.url`、`request.query_params`），替代裸 dict 的下标访问。
 
 ---
 

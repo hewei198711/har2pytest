@@ -74,13 +74,13 @@ class APIGenerator:
 
         return False
 
-    def _parse_request_info(self, request_info: dict[str, Any]) -> ParsedRequestInfo:
+    def _parse_request_info(self, request_info: ParsedRequestInfo) -> ParsedRequestInfo:
         """解析请求信息"""
-        method = request_info["method"].upper()
-        url = request_info["url"]
-        query_params = request_info.get("query_params", {})
-        post_data = request_info.get("post_data", {})
-        raw_headers = request_info.get("headers", {})
+        method = request_info.method.upper()
+        url = request_info.url
+        query_params = request_info.query_params
+        post_data = request_info.post_data
+        raw_headers = request_info.headers
 
         headers = dict(raw_headers)
         required_headers = APIConfig.REQUIRED_HEADERS()
@@ -117,14 +117,19 @@ class APIGenerator:
             elif not content_type:
                 is_json_content = bool(post_data)
 
-        is_need_urlencode = method == "POST" and content_length == "0" and not post_data
+        # POST 且无有效请求体时按 application/x-www-form-urlencoded 处理：
+        # - content-length=0 的空 body POST（HAR 无参数），生成空 data 占位便于手动补充表单参数
+        # - body 为空 JSON（{}）但 URL 带 query 参数（如 ?orderNo=xxx），query 参数作为表单数据 urlencode 传参
+        is_need_urlencode = (
+            method == "POST" and not post_data and not is_multipart and (content_length == "0" or bool(query_params))
+        )
 
-        # 清理 headers：移除 content-length 和 multipart 时的 content-type
+        # 清理 headers：移除 content-length 和 content-type
+        # content-type 由各分支按需重新设置：urlencode 在 _process_parameters 中统一添加，
+        # multipart/文件上传在函数体内动态设置，json/data 由 requests 自动处理
         for key in list(headers.keys()):
             kl = key.lower()
-            if kl == "content-length":
-                del headers[key]
-            elif not is_need_urlencode and kl == "content-type":
+            if kl in ("content-length", "content-type"):
                 del headers[key]
 
         # 使用统一的URL匹配器（swagger_data已在外部设置）
@@ -147,7 +152,7 @@ class APIGenerator:
 
     async def generate_api_file(
         self,
-        request_info: dict[str, Any],
+        request_info: ParsedRequestInfo,
         force_overwrite: bool = False,
         swagger_info: SwaggerInfo | None = None,
         swagger_doc: dict[str, Any] | None = None,
@@ -155,13 +160,13 @@ class APIGenerator:
         """生成API文件（异步）
 
         Args:
-            request_info: 请求信息字典
+            request_info: 解析后的请求信息
             force_overwrite: 是否强制覆盖已存在的文件
             swagger_info: Swagger API 信息（summary、description、parameters）
             swagger_doc: 预取的 Swagger 完整文档，传入后跳过内部获取，避免并行竞态条件
         """
-        method = request_info["method"].upper()
-        url = request_info["url"]
+        method = request_info.method.upper()
+        url = request_info.url
 
         service_package = APIConfig.determine_service_package(url)
         # 如果已传入swagger_info，不需要获取Swagger文档
@@ -189,8 +194,8 @@ class APIGenerator:
         else:
             parsed_info = self._parse_request_info(request_info)
             # 保留 swagger_handler 中提取的路径参数
-            if "path_params" in request_info and request_info["path_params"]:
-                parsed_info.path_params = request_info["path_params"]
+            if request_info.path_params:
+                parsed_info.path_params = request_info.path_params
             function_name = parsed_info.function_name
             url_pattern = parsed_info.url_pattern or url
 
@@ -283,9 +288,7 @@ class APIGenerator:
         imports.append("")
         return imports
 
-    def _determine_param_info(
-        self, parsed_info: ParsedRequestInfo
-    ) -> tuple[str | None, dict[str, Any] | None]:
+    def _determine_param_info(self, parsed_info: ParsedRequestInfo) -> tuple[str | None, dict[str, Any] | None]:
         """根据解析后的请求信息确定参数名和参数数据，用于 _process_parameters 和 _generate_function_definition 共用。"""
         method = parsed_info.method
         path_params = parsed_info.path_params
@@ -309,12 +312,18 @@ class APIGenerator:
                 if is_file_upload:
                     return "files", post_data
                 else:
+                    if isinstance(post_data, dict) and query_params:
+                        # body 为 dict 时合并 URL query 参数，避免参数丢失（post 覆盖同名 query）
+                        merged_data = dict(query_params)
+                        merged_data.update(post_data)
+                        return "data", merged_data
                     return "data", post_data
+            elif query_params:
+                # POST 空 body 但带 query 参数（如 ?orderNo=xxx），并入 data 生成，避免参数丢失
+                return "data", query_params
         return None, None
 
-    def _process_parameters(
-        self, parsed_info: ParsedRequestInfo, swagger_info: SwaggerInfo | None = None
-    ) -> list[str]:
+    def _process_parameters(self, parsed_info: ParsedRequestInfo, swagger_info: SwaggerInfo | None = None) -> list[str]:
         """
         处理参数
 
@@ -534,7 +543,7 @@ class APIGenerator:
 
     def generate_file_content(
         self,
-        request_info: dict[str, Any],
+        request_info: ParsedRequestInfo,
         function_name: str,
         swagger_info: SwaggerInfo | None = None,
         parsed_info: ParsedRequestInfo | None = None,
@@ -545,22 +554,21 @@ class APIGenerator:
         根据请求信息和函数名生成API文件内容
 
         Args:
-            request_info: 请求信息字典，包含method、url、query_params、post_data、headers等
+            request_info: 解析后的请求信息，包含 method、url、query_params、post_data、headers 等
             function_name: 函数名
             swagger_info: Swagger文档信息，包含description、parameters等
-            parsed_info: 预解析的请求信息字典，如果为None则内部会解析
+            parsed_info: 预解析的请求信息，如果为 None 则内部会解析
 
         Returns:
             str: 生成的文件内容
 
         Example:
-            request_info = {
-                "method": "POST",
-                "url": "/mobile/trade/orderCommit",
-                "query_params": {},
-                "post_data": {"productId": "123"},
-                "headers": {"content-type": "application/json"}
-            }
+            request_info = ParsedRequestInfo(
+                method="POST",
+                url="/mobile/trade/orderCommit",
+                post_data={"productId": "123"},
+                headers={"content-type": "application/json"},
+            )
             content = generator.generate_file_content(request_info, "_mobile_trade_orderCommit")
             # 返回生成的文件内容
         """
@@ -737,13 +745,13 @@ class APIGenerator:
                     logger.debug(f"  [任务开始] {method.upper()} {full_path}")
 
                     # 构建请求信息
-                    request_info = {
-                        "method": method.upper(),
-                        "url": full_path,
-                        "query_params": {},
-                        "post_data": {},
-                        "headers": dict(APIConfig.REQUIRED_HEADERS()),
-                    }
+                    request_info = ParsedRequestInfo(
+                        method=method.upper(),
+                        url=full_path,
+                        query_params={},
+                        post_data={},
+                        headers=dict(APIConfig.REQUIRED_HEADERS()),
+                    )
 
                     # 提取参数
                     parameters = method_data.get("parameters", [])
@@ -756,9 +764,9 @@ class APIGenerator:
                         param_descriptions,
                     ) = self.swagger_handler._extract_params_from_swagger(parameters, swagger_data)
 
-                    request_info["query_params"] = query_params
-                    request_info["post_data"] = post_data
-                    request_info["path_params"] = path_params
+                    request_info.query_params = query_params
+                    request_info.post_data = post_data
+                    request_info.path_params = path_params
 
                     # 提取API信息（包括描述和参数说明）
                     swagger_info = SwaggerInfo(
@@ -769,17 +777,13 @@ class APIGenerator:
 
                     # 判断是否需要urlencode
                     if method.upper() == "POST" and has_query_param and not post_data and not has_body_param:
-                        request_info["headers"]["content-length"] = "0"
+                        request_info.headers["content-length"] = "0"
 
                     # 生成API文件
-                    filepath = await self.generate_api_file(
-                        request_info, force_overwrite, swagger_info
-                    )
+                    filepath = await self.generate_api_file(request_info, force_overwrite, swagger_info)
                     elapsed = time.time() - task_start
                     if filepath:
-                        logger.debug(
-                            f"  [任务完成] {method.upper()} {full_path} → {filepath} (耗时 {elapsed:.2f}s)"
-                        )
+                        logger.debug(f"  [任务完成] {method.upper()} {full_path} → {filepath} (耗时 {elapsed:.2f}s)")
                     else:
                         logger.debug(f"  [任务跳过] {method.upper()} {full_path} (耗时 {elapsed:.2f}s)")
                     return filepath

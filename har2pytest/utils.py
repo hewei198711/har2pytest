@@ -15,7 +15,7 @@ from dataclasses import replace
 from typing import Any
 
 from .logger import logger
-from .models import APIFileInfo
+from .models import APIFileInfo, ParsedRequestInfo
 
 
 def _format_nested(value: Any) -> str:
@@ -129,6 +129,8 @@ async def format_directory(dir_path: str) -> None:
 
     对整个目录运行 ruff check --fix 和 ruff format，
     比逐个文件格式化效率更高。
+    使用 --no-respect-gitignore，避免输出目录（如 apis/、testcases/）
+    位于 .gitignore 时 ruff 跳过全部文件导致格式化被静默忽略。
 
     Args:
         dir_path: 要格式化的目录路径（必须存在）。
@@ -145,6 +147,10 @@ async def format_directory(dir_path: str) -> None:
             "ruff",
             "check",
             "--fix",
+            # 生成代码在 import 前设置 client，E402 为固有结构，忽略避免误报
+            "--ignore",
+            "E402",
+            "--no-respect-gitignore",
             dir_path,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
@@ -161,6 +167,7 @@ async def format_directory(dir_path: str) -> None:
             "-m",
             "ruff",
             "format",
+            "--no-respect-gitignore",
             dir_path,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
@@ -417,23 +424,23 @@ def format_params_for_python(
     return "{\n" + "\n".join(items) + "\n" + closing_brace_indent + "}"
 
 
-def merge_request_params(request_info: dict[str, Any]) -> dict[str, Any]:
+def merge_request_params(request_info: ParsedRequestInfo) -> dict[str, Any]:
     """合并请求中的 query_params 和 post_data。
 
     Args:
-        request_info: 请求信息字典，包含 query_params 和 post_data
+        request_info: 解析后的请求信息，包含 query_params 和 post_data
 
     Returns:
         dict: 合并后的参数字典
     """
     params = {}
-    if request_info.get("query_params"):
-        params.update(request_info["query_params"])
-    if request_info.get("post_data"):
-        if isinstance(request_info["post_data"], dict):
-            params.update(request_info["post_data"])
+    if request_info.query_params:
+        params.update(request_info.query_params)
+    if request_info.post_data:
+        if isinstance(request_info.post_data, dict):
+            params.update(request_info.post_data)
         else:
-            logger.debug(f"post_data不是字典类型，跳过合并: {type(request_info['post_data'])}")
+            logger.debug(f"post_data不是字典类型，跳过合并: {type(request_info.post_data)}")
     return params
 
 

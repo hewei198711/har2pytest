@@ -67,13 +67,13 @@ def test_check_api_exists_service_package_dir(tmp_path):
 @allure.title("测试解析GET请求信息")
 def test_parse_request_info_get():
     generator = APIGenerator(output_dir="test_output")
-    request_info = {
-        "method": "GET",
-        "url": "/api/test",
-        "query_params": {"id": 1},
-        "post_data": {},
-        "headers": {"Authorization": "Bearer token"},
-    }
+    request_info = ParsedRequestInfo(
+        method="GET",
+        url="/api/test",
+        query_params={"id": 1},
+        post_data={},
+        headers={"Authorization": "Bearer token"},
+    )
     result = generator._parse_request_info(request_info)
     assert result.method == "GET"
     assert result.query_params == {"id": 1}
@@ -85,13 +85,13 @@ def test_parse_request_info_get():
 @allure.title("测试解析POST请求信息")
 def test_parse_request_info_post():
     generator = APIGenerator(output_dir="test_output")
-    request_info = {
-        "method": "POST",
-        "url": "/api/create",
-        "query_params": {},
-        "post_data": {"name": "test"},
-        "headers": {"content-type": "application/json"},
-    }
+    request_info = ParsedRequestInfo(
+        method="POST",
+        url="/api/create",
+        query_params={},
+        post_data={"name": "test"},
+        headers={"content-type": "application/json"},
+    )
     result = generator._parse_request_info(request_info)
     assert result.method == "POST"
     assert result.post_data == {"name": "test"}
@@ -102,36 +102,36 @@ def test_parse_request_info_post():
 @allure.title("测试解析文件上传请求信息")
 def test_parse_request_info_file_upload():
     generator = APIGenerator(output_dir="test_output")
-    request_info = {
-        "method": "POST",
-        "url": "/api/upload",
-        "query_params": {},
-        "post_data": {"file": "@test.txt"},
-        "headers": {"content-type": "multipart/form-data"},
-    }
+    request_info = ParsedRequestInfo(
+        method="POST",
+        url="/api/upload",
+        query_params={},
+        post_data={"file": "@test.txt"},
+        headers={"content-type": "multipart/form-data"},
+    )
     result = generator._parse_request_info(request_info)
     assert result.is_file_upload is True
 
     # 测试 multipart/form-data 但没有实际文件参数 -> 不是文件上传，使用 data=
-    request_info2 = {
-        "method": "POST",
-        "url": "/api/form",
-        "query_params": {},
-        "post_data": {"orderNo": "SG001", "remarks": "test"},
-        "headers": {"content-type": "multipart/form-data"},
-    }
+    request_info2 = ParsedRequestInfo(
+        method="POST",
+        url="/api/form",
+        query_params={},
+        post_data={"orderNo": "SG001", "remarks": "test"},
+        headers={"content-type": "multipart/form-data"},
+    )
     result2 = generator._parse_request_info(request_info2)
     assert result2.is_file_upload is False
     assert result2.is_json_content is False
 
     # 测试 HAR 中文件上传的 (binary) 占位符 -> 应是文件上传
-    request_info3 = {
-        "method": "POST",
-        "url": "/api/storage/upload",
-        "query_params": {},
-        "post_data": {"storageType": "PublicCloud", "clientKey": "mall-center-product", "file": "(binary)"},
-        "headers": {"content-type": "multipart/form-data; boundary=----WebKitFormBoundary33zTNLfGBAtCpQkw"},
-    }
+    request_info3 = ParsedRequestInfo(
+        method="POST",
+        url="/api/storage/upload",
+        query_params={},
+        post_data={"storageType": "PublicCloud", "clientKey": "mall-center-product", "file": "(binary)"},
+        headers={"content-type": "multipart/form-data; boundary=----WebKitFormBoundary33zTNLfGBAtCpQkw"},
+    )
     result3 = generator._parse_request_info(request_info3)
     assert result3.is_file_upload is True
     assert result3.is_json_content is False
@@ -142,13 +142,33 @@ def test_parse_request_info_file_upload():
 @allure.title("测试解析urlencoded请求信息")
 def test_parse_request_info_urlencoded_empty_body():
     generator = APIGenerator(output_dir="test_output")
-    request_info = {
-        "method": "POST",
-        "url": "/api/submit",
-        "query_params": {},
-        "post_data": {},
-        "headers": {"content-length": "0"},
-    }
+    request_info = ParsedRequestInfo(
+        method="POST",
+        url="/api/submit",
+        query_params={},
+        post_data={},
+        headers={"content-length": "0"},
+    )
+    result = generator._parse_request_info(request_info)
+    assert result.is_need_urlencode is True
+
+
+@allure.feature("API生成器")
+@allure.story("解析请求信息")
+@allure.title("测试POST空JSON body带query参数时判定为urlencode")
+@allure.description(
+    "POST 接口 body 为空 JSON（{}）但 URL 带 query 参数（如 ?orderNo=xxx）时，"
+    "应按 application/x-www-form-urlencoded 处理（query 参数作为表单数据 urlencode 传参）。"
+)
+def test_parse_request_info_post_empty_json_body_with_query_urlencode():
+    generator = APIGenerator(output_dir="test_output")
+    request_info = ParsedRequestInfo(
+        method="POST",
+        url="/mobile/web/order/as/upgradeOrderVerify",
+        query_params={"orderNo": "SG014000260817001801"},
+        post_data={},
+        headers={"content-type": "application/json;charset=UTF-8", "content-length": "2"},
+    )
     result = generator._parse_request_info(request_info)
     assert result.is_need_urlencode is True
 
@@ -158,7 +178,7 @@ def test_parse_request_info_urlencoded_empty_body():
 @allure.title("测试请求信息默认补充headers")
 def test_parse_request_info_default_headers():
     generator = APIGenerator(output_dir="test_output")
-    request_info = {"method": "GET", "url": "/api/test", "query_params": {}, "post_data": {}, "headers": {}}
+    request_info = ParsedRequestInfo(method="GET", url="/api/test", query_params={}, post_data={}, headers={})
     result = generator._parse_request_info(request_info)
     assert len(result.headers) > 0
 
@@ -570,13 +590,13 @@ def test_generate_function_definition_with_params():
 @allure.title("测试生成GET请求的完整文件内容")
 def test_generate_file_content_get():
     generator = APIGenerator(output_dir="test_output")
-    request_info = {
-        "method": "GET",
-        "url": "/api/test",
-        "query_params": {"id": 1},
-        "post_data": {},
-        "headers": {"Authorization": "Bearer token"},
-    }
+    request_info = ParsedRequestInfo(
+        method="GET",
+        url="/api/test",
+        query_params={"id": 1},
+        post_data={},
+        headers={"Authorization": "Bearer token"},
+    )
     content = generator.generate_file_content(request_info, "api_test")
     assert "import os" in content  # headers 模板使用 os.environ，始终需要 import os
     assert "def api_test" in content
@@ -588,13 +608,13 @@ def test_generate_file_content_get():
 @allure.title("测试生成POST请求的完整文件内容")
 def test_generate_file_content_post():
     generator = APIGenerator(output_dir="test_output")
-    request_info = {
-        "method": "POST",
-        "url": "/api/create",
-        "query_params": {},
-        "post_data": {"name": "test"},
-        "headers": {"content-type": "application/json"},
-    }
+    request_info = ParsedRequestInfo(
+        method="POST",
+        url="/api/create",
+        query_params={},
+        post_data={"name": "test"},
+        headers={"content-type": "application/json"},
+    )
     content = generator.generate_file_content(request_info, "api_create")
     assert "import os" in content  # headers 模板使用 os.environ，始终需要 import os
     assert "def api_create" in content
@@ -606,7 +626,7 @@ def test_generate_file_content_post():
 @allure.title("测试带Swagger信息生成文件内容")
 def test_generate_file_content_with_swagger_info():
     generator = APIGenerator(output_dir="test_output")
-    request_info = {"method": "GET", "url": "/api/test", "query_params": {"id": 1}, "post_data": {}, "headers": {}}
+    request_info = ParsedRequestInfo(method="GET", url="/api/test", query_params={"id": 1}, post_data={}, headers={})
     swagger_info = SwaggerInfo(summary="获取用户", parameters={"id": "用户ID"})
     content = generator.generate_file_content(request_info, "api_test", swagger_info)
     assert "获取用户" in content
@@ -771,8 +791,7 @@ def test_generate_function_definition_urlencoded_empty_body():
 @allure.story("生成函数定义")
 @allure.title("测试swagger参数说明不污染无body接口的param_name")
 @allure.description(
-    "回归测试：docstring 参数说明循环不应覆盖 param_name，"
-    "否则无 body 接口会误走 data 分支生成引用未定义变量的坏代码。"
+    "回归测试：docstring 参数说明循环不应覆盖 param_name，否则无 body 接口会误走 data 分支生成引用未定义变量的坏代码。"
 )
 def test_generate_function_definition_swagger_params_no_leak():
     generator = APIGenerator(output_dir="test_output")
@@ -794,3 +813,76 @@ def test_generate_function_definition_swagger_params_no_leak():
     assert "def api_noop(headers=headers)" in content
     assert "client.post(url=url, headers=headers)" in content
     assert "urlencode(data)" not in content
+
+
+@allure.feature("API生成器")
+@allure.story("处理参数")
+@allure.title("测试POST空body带query参数时参数并入data")
+@allure.description(
+    "POST 接口 body 为空 JSON（{}）但 URL 带 query 参数（如 ?orderNo=xxx）时，"
+    "参数应并入 data 生成，避免函数签名和调用完全丢失参数。"
+)
+def test_determine_param_info_post_empty_body_with_query():
+    generator = APIGenerator(output_dir="test_output")
+    parsed_info = ParsedRequestInfo(
+        method="POST",
+        url="/mobile/web/order/as/upgradeOrderVerify",
+        query_params={"orderNo": "SG014000260817001801"},
+        post_data={},
+        is_need_urlencode=True,
+        headers={"content-type": "application/json"},
+    )
+    param_name, param_data = generator._determine_param_info(parsed_info)
+    assert param_name == "data"
+    assert param_data == {"orderNo": "SG014000260817001801"}
+
+
+@allure.feature("API生成器")
+@allure.story("生成函数定义")
+@allure.title("测试POST空body带query参数时生成urlencode传参")
+@allure.description(
+    "POST 接口 body 为空 JSON（{}）但 URL 带 query 参数时，应生成 data 参数、urlencode 编码"
+    "和 client.post(data=data) 调用（application/x-www-form-urlencoded 传参）。"
+)
+def test_generate_function_definition_post_query_as_data():
+    generator = APIGenerator(output_dir="test_output")
+    parsed_info = ParsedRequestInfo(
+        method="POST",
+        url="/mobile/web/order/as/upgradeOrderVerify",
+        query_params={"orderNo": "SG014000260817001801"},
+        post_data={},
+        is_file_upload=False,
+        is_need_urlencode=True,
+        is_json_content=False,
+        path_params={},
+        url_pattern="/mobile/web/order/as/upgradeOrderVerify",
+        headers={"content-type": "application/json"},
+    )
+    swagger_info = SwaggerInfo(parameters={"orderNo": "orderNo"})
+    # 端到端验证：文件内容 = 参数定义(_process_parameters) + 函数定义(_generate_function_definition)
+    content = generator.generate_file_content(parsed_info, "api_verify", swagger_info, parsed_info)
+    assert "def api_verify(data=data, headers=headers)" in content
+    assert '"orderNo": "SG014000260817001801"' in content
+    assert "from urllib.parse import urlencode" in content
+    assert "data = urlencode(data) # application/x-www-form-urlencoded传参需要特殊处理" in content
+    assert "client.post(url=url, data=data, headers=headers)" in content
+
+
+@allure.feature("API生成器")
+@allure.story("处理参数")
+@allure.title("测试POST body与query参数合并")
+@allure.description(
+    "POST 接口 body 为 dict 且 URL 带 query 参数时，两者应合并进 data（post 覆盖同名 query），避免 URL query 参数丢失。"
+)
+def test_determine_param_info_post_merge_body_and_query():
+    generator = APIGenerator(output_dir="test_output")
+    parsed_info = ParsedRequestInfo(
+        method="POST",
+        url="/api/create",
+        query_params={"source": "pc", "page": "1"},
+        post_data={"name": "test"},
+        headers={},
+    )
+    param_name, param_data = generator._determine_param_info(parsed_info)
+    assert param_name == "data"
+    assert param_data == {"source": "pc", "page": "1", "name": "test"}

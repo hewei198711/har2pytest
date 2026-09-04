@@ -3,17 +3,16 @@
 """
 
 import asyncio
-import os
 import json
+import os
 
 import allure
 import pytest
 
 from har2pytest.config import APIConfig
-from har2pytest.models import APIFileInfo
+from har2pytest.models import APIFileInfo, ParsedRequestInfo
 from har2pytest.testcase_generator import TestCaseGenerator
-from har2pytest.utils import clear_api_file_cache
-from har2pytest.utils import format_params_for_python, parse_api_file
+from har2pytest.utils import clear_api_file_cache, format_params_for_python, parse_api_file
 
 
 @allure.feature("测试用例生成器")
@@ -1039,7 +1038,7 @@ def behavior_collect(data=data, headers=headers):
     content = []
     generator._generate_step_function_body(
         content, "behavior_collect", api_info,
-        {"query_params": {}, "post_data": [{"app_id": "uc-pc", "type": "add_to_cart"}]},
+        ParsedRequestInfo(query_params={}, post_data=[{"app_id": "uc-pc", "type": "add_to_cart"}]),
     )
     result = "\n".join(content)
     assert "data = [{'app_id': 'uc-pc', 'type': 'add_to_cart'}]" in result or "data = [{\"app_id\": \"uc-pc\"" in result
@@ -1770,7 +1769,7 @@ def test_step_function_body_mode(async_mode, expected_keyword, unexpected_keywor
     content = []
     generator._generate_step_function_body(
         content, "user_login", APIFileInfo(data={"name": ""}),
-        {"query_params": {}, "post_data": {"name": "test"}}
+        ParsedRequestInfo(query_params={}, post_data={"name": "test"})
     )
     result = "\n".join(content)
     assert f"{expected_keyword} user_login(data=data, headers=self.headers) as r:" in result

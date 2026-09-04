@@ -4,7 +4,6 @@
 
 import json
 import logging
-import os
 
 import allure
 
@@ -14,7 +13,7 @@ from har2pytest.har_parser import HARParser
 @allure.feature("HAR解析器")
 @allure.story("提取请求信息")
 @allure.title("测试从HAR文件提取请求信息")
-def test_extract_requests_from_har():
+def test_extract_requests_from_har(tmp_path):
     from har2pytest.config import APIConfig
 
     APIConfig.get_config("BASE_URLS")
@@ -44,22 +43,19 @@ def test_extract_requests_from_har():
         }
     }
 
-    with open("test.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
     try:
         parser = HARParser()
-        requests = parser.extract_requests_from_har("test.har")
+        requests = parser.extract_requests_from_har(str(har_path))
 
         assert len(requests) == 1
-        assert requests[0]["method"] == "POST"
-        assert requests[0]["url"] == "/user/login"
-        assert requests[0]["response_status"] == 200
+        assert requests[0].method == "POST"
+        assert requests[0].url == "/user/login"
+        assert requests[0].response_status == 200
     finally:
         APIConfig._config["BASE_URLS"] = original_base_urls
-
-        if os.path.exists("test.har"):
-            os.remove("test.har")
 
 
 @allure.feature("HAR解析器")
@@ -185,17 +181,13 @@ def test_file_not_found():
 @allure.feature("HAR解析器")
 @allure.story("无效JSON处理")
 @allure.title("测试无效JSON的情况")
-def test_invalid_json():
-    with open("invalid.har", "w", encoding="utf-8") as f:
-        f.write("invalid json")
+def test_invalid_json(tmp_path):
+    invalid_path = tmp_path / "invalid.har"
+    invalid_path.write_text("invalid json", encoding="utf-8")
 
-    try:
-        parser = HARParser()
-        requests = parser.extract_requests_from_har("invalid.har")
-        assert len(requests) == 0
-    finally:
-        if os.path.exists("invalid.har"):
-            os.remove("invalid.har")
+    parser = HARParser()
+    requests = parser.extract_requests_from_har(str(invalid_path))
+    assert len(requests) == 0
 
 
 @allure.feature("HAR解析器")
@@ -259,7 +251,7 @@ def test_filter_headers_no_config():
 @allure.feature("HAR解析器")
 @allure.story("打印API摘要")
 @allure.title("测试打印API摘要功能")
-def test_print_api_summary(caplog):
+def test_print_api_summary(tmp_path, caplog):
     caplog.set_level(logging.INFO)
     test_har = {
         "log": {
@@ -275,43 +267,35 @@ def test_print_api_summary(caplog):
         }
     }
 
-    with open("test_summary.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_summary.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        parser = HARParser()
-        parser.print_api_summary("test_summary.har")
-        log_output = "\n".join([r.message for r in caplog.records])
-        assert "共发现" in log_output or "个API请求" in log_output
-    finally:
-        if os.path.exists("test_summary.har"):
-            os.remove("test_summary.har")
+    parser = HARParser()
+    parser.print_api_summary(str(har_path))
+    log_output = "\n".join([r.message for r in caplog.records])
+    assert "共发现" in log_output or "个API请求" in log_output
 
 
 @allure.feature("HAR解析器")
 @allure.story("打印API摘要-空请求")
 @allure.title("测试空请求时的摘要打印")
-def test_print_api_summary_empty(caplog):
+def test_print_api_summary_empty(tmp_path, caplog):
     caplog.set_level(logging.INFO)
     test_har = {"log": {"entries": []}}
 
-    with open("test_empty.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_empty.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        parser = HARParser()
-        parser.print_api_summary("test_empty.har")
-        log_output = "\n".join([r.message for r in caplog.records])
-        assert "共发现" in log_output or "没有找到" in log_output
-    finally:
-        if os.path.exists("test_empty.har"):
-            os.remove("test_empty.har")
+    parser = HARParser()
+    parser.print_api_summary(str(har_path))
+    log_output = "\n".join([r.message for r in caplog.records])
+    assert "共发现" in log_output or "没有找到" in log_output
 
 
 @allure.feature("HAR解析器")
 @allure.story("Multipart/form-data处理")
 @allure.title("测试multipart/form-data类型的POST数据解析")
-def test_multipart_form_data():
+def test_multipart_form_data(tmp_path):
     test_har = {
         "log": {
             "entries": [
@@ -335,24 +319,20 @@ def test_multipart_form_data():
         }
     }
 
-    with open("test_multipart.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_multipart.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        parser = HARParser()
-        requests = parser.extract_requests_from_har("test_multipart.har")
+    parser = HARParser()
+    requests = parser.extract_requests_from_har(str(har_path))
 
-        assert len(requests) == 1
-        assert requests[0]["post_data"] == {"file": "test.txt", "name": "test"}
-    finally:
-        if os.path.exists("test_multipart.har"):
-            os.remove("test_multipart.har")
+    assert len(requests) == 1
+    assert requests[0].post_data == {"file": "test.txt", "name": "test"}
 
 
 @allure.feature("HAR解析器")
 @allure.story("application/x-www-form-urlencoded处理")
 @allure.title("测试application/x-www-form-urlencoded类型的POST数据解析")
-def test_form_urlencoded_data():
+def test_form_urlencoded_data(tmp_path):
     test_har = {
         "log": {
             "entries": [
@@ -374,24 +354,20 @@ def test_form_urlencoded_data():
         }
     }
 
-    with open("test_form_urlencoded.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_form_urlencoded.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        parser = HARParser()
-        requests = parser.extract_requests_from_har("test_form_urlencoded.har")
+    parser = HARParser()
+    requests = parser.extract_requests_from_har(str(har_path))
 
-        assert len(requests) == 1
-        assert requests[0]["post_data"] == {"username": "testuser", "password": "123456", "remember": "true"}
-    finally:
-        if os.path.exists("test_form_urlencoded.har"):
-            os.remove("test_form_urlencoded.har")
+    assert len(requests) == 1
+    assert requests[0].post_data == {"username": "testuser", "password": "123456", "remember": "true"}
 
 
 @allure.feature("HAR解析器")
 @allure.story("application/x-www-form-urlencoded处理")
 @allure.title("测试urlencoded带URL编码字符的解析")
-def test_form_urlencoded_with_encoded_chars():
+def test_form_urlencoded_with_encoded_chars(tmp_path):
     test_har = {
         "log": {
             "entries": [
@@ -413,24 +389,20 @@ def test_form_urlencoded_with_encoded_chars():
         }
     }
 
-    with open("test_form_urlencoded2.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_form_urlencoded2.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        parser = HARParser()
-        requests = parser.extract_requests_from_har("test_form_urlencoded2.har")
+    parser = HARParser()
+    requests = parser.extract_requests_from_har(str(har_path))
 
-        assert len(requests) == 1
-        assert requests[0]["post_data"] == {"keyword": "测试", "page": "1", "size": "10"}
-    finally:
-        if os.path.exists("test_form_urlencoded2.har"):
-            os.remove("test_form_urlencoded2.har")
+    assert len(requests) == 1
+    assert requests[0].post_data == {"keyword": "测试", "page": "1", "size": "10"}
 
 
 @allure.feature("HAR解析器")
 @allure.story("application/x-www-form-urlencoded处理")
 @allure.title("测试urlencoded空数据的解析")
-def test_form_urlencoded_empty():
+def test_form_urlencoded_empty(tmp_path):
     test_har = {
         "log": {
             "entries": [
@@ -452,24 +424,20 @@ def test_form_urlencoded_empty():
         }
     }
 
-    with open("test_form_urlencoded3.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_form_urlencoded3.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        parser = HARParser()
-        requests = parser.extract_requests_from_har("test_form_urlencoded3.har")
+    parser = HARParser()
+    requests = parser.extract_requests_from_har(str(har_path))
 
-        assert len(requests) == 1
-        assert requests[0]["post_data"] == {}
-    finally:
-        if os.path.exists("test_form_urlencoded3.har"):
-            os.remove("test_form_urlencoded3.har")
+    assert len(requests) == 1
+    assert requests[0].post_data == {}
 
 
 @allure.feature("HAR解析器")
 @allure.story("Kill URLs过滤")
 @allure.title("测试kill_urls过滤功能")
-def test_kill_urls_filter():
+def test_kill_urls_filter(tmp_path):
     test_har = {
         "log": {
             "entries": [
@@ -489,24 +457,20 @@ def test_kill_urls_filter():
         }
     }
 
-    with open("test_kill_urls.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_kill_urls.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        parser = HARParser(kill_urls=["health"])
-        requests = parser.extract_requests_from_har("test_kill_urls.har")
+    parser = HARParser(kill_urls=["health"])
+    requests = parser.extract_requests_from_har(str(har_path))
 
-        assert len(requests) == 1
-        assert "/user/list" in requests[0]["url"]
-    finally:
-        if os.path.exists("test_kill_urls.har"):
-            os.remove("test_kill_urls.har")
+    assert len(requests) == 1
+    assert "/user/list" in requests[0].url
 
 
 @allure.feature("HAR解析器")
 @allure.story("重复URL过滤")
 @allure.title("测试重复URL过滤功能")
-def test_duplicate_url_filter():
+def test_duplicate_url_filter(tmp_path):
     test_har = {
         "log": {
             "entries": [
@@ -526,25 +490,21 @@ def test_duplicate_url_filter():
         }
     }
 
-    with open("test_duplicate.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_duplicate.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        parser = HARParser()
-        requests = parser.extract_requests_from_har("test_duplicate.har")
-        assert len(requests) == 1
+    parser = HARParser()
+    requests = parser.extract_requests_from_har(str(har_path))
+    assert len(requests) == 1
 
-        requests = parser.extract_requests_from_har("test_duplicate.har", filter_duplicate_url=False)
-        assert len(requests) == 2
-    finally:
-        if os.path.exists("test_duplicate.har"):
-            os.remove("test_duplicate.har")
+    requests = parser.extract_requests_from_har(str(har_path), filter_duplicate_url=False)
+    assert len(requests) == 2
 
 
 @allure.feature("HAR解析器")
 @allure.story("Origin Header作为base URL")
 @allure.title("测试当没有配置base_urls时使用origin header")
-def test_origin_as_base_url():
+def test_origin_as_base_url(tmp_path):
     test_har = {
         "log": {
             "entries": [
@@ -563,24 +523,20 @@ def test_origin_as_base_url():
         }
     }
 
-    with open("test_origin.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_origin.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        parser = HARParser(base_urls=[])
-        requests = parser.extract_requests_from_har("test_origin.har")
+    parser = HARParser(base_urls=[])
+    requests = parser.extract_requests_from_har(str(har_path))
 
-        assert len(requests) == 1
-        assert requests[0]["url"] == "/api/user/login"
-    finally:
-        if os.path.exists("test_origin.har"):
-            os.remove("test_origin.har")
+    assert len(requests) == 1
+    assert requests[0].url == "/api/user/login"
 
 
 @allure.feature("HAR解析器")
 @allure.story("响应内容解析")
 @allure.title("测试响应内容解析")
-def test_response_content_parsing():
+def test_response_content_parsing(tmp_path):
     test_har = {
         "log": {
             "entries": [
@@ -600,16 +556,12 @@ def test_response_content_parsing():
         }
     }
 
-    with open("test_response.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_response.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        parser = HARParser()
-        requests = parser.extract_requests_from_har("test_response.har")
+    parser = HARParser()
+    requests = parser.extract_requests_from_har(str(har_path))
 
-        assert len(requests) == 2
-        assert requests[0]["response_content"] == {"code": 0, "data": "success"}
-        assert requests[1]["response_content"] == "plain text response"
-    finally:
-        if os.path.exists("test_response.har"):
-            os.remove("test_response.har")
+    assert len(requests) == 2
+    assert requests[0].response_content == {"code": 0, "data": "success"}
+    assert requests[1].response_content == "plain text response"

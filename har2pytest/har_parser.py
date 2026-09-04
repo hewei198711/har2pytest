@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, unquote
 
 from .config import APIConfig
 from .logger import logger
+from .models import ParsedRequestInfo
 from .url_matcher import URLMatcher
 
 
@@ -28,7 +29,7 @@ class HARParser:
         self.base_urls = base_urls if base_urls is not None else APIConfig.BASE_URLS()
         self.kill_urls = kill_urls if kill_urls is not None else APIConfig.KILL_URLS()
 
-    def extract_requests_from_har(self, har_file_path: str, filter_duplicate_url: bool = True) -> list[dict[str, Any]]:
+    def extract_requests_from_har(self, har_file_path: str, filter_duplicate_url: bool = True) -> list[ParsedRequestInfo]:
         """从 HAR 文件中提取请求信息。
 
         Args:
@@ -36,19 +37,7 @@ class HARParser:
             filter_duplicate_url: 是否过滤重复的 URL（默认 True）。
 
         Returns:
-            list[dict[str, Any]]: 包含请求信息的字典列表。每个字典包含以下字段：
-                - method: HTTP 方法
-                - url: 清理后的 URL
-                - full_url: 完整的 URL
-                - headers: 请求头
-                - content_type: 内容类型
-                - cookies: Cookie 字典
-                - query_params: 查询参数
-                - post_data: POST 数据
-                - response_status: 响应状态码
-                - response_content: 响应内容
-                - response_time: 响应时间（毫秒）
-                - server_ip: 服务器 IP 地址
+            list[ParsedRequestInfo]: 解析后的请求信息列表，包含请求头、参数、响应等字段。
         """
         try:
             with open(har_file_path, encoding="utf-8") as f:
@@ -167,24 +156,24 @@ class HARParser:
                     # 无 base_urls 也无 origin，仍需去掉查询参数
                     clean_url = URLMatcher.normalize_url(full_url)
 
-            request_info = {
-                "method": request.get("method", "GET"),
-                "url": clean_url,
-                "full_url": full_url,
-                "headers": headers,
-                "content_type": content_type,
-                "cookies": {c.get("name", ""): c.get("value", "") for c in request.get("cookies", [])},
-                "query_params": query_params,
-                "post_data": post_data,
-                "response_status": response.get("status", 0),
-                "response_content": response_content,
-                "response_time": entry.get("time", 0),
-                "server_ip": entry.get("serverIPAddress", ""),
-            }
+            request_info = ParsedRequestInfo(
+                method=request.get("method", "GET"),
+                url=clean_url,
+                full_url=full_url,
+                headers=headers,
+                content_type=content_type,
+                cookies={c.get("name", ""): c.get("value", "") for c in request.get("cookies", [])},
+                query_params=query_params,
+                post_data=post_data,
+                response_status=response.get("status", 0),
+                response_content=response_content,
+                response_time=entry.get("time", 0),
+                server_ip=entry.get("serverIPAddress", ""),
+            )
 
             # 过滤重复 URL
             if filter_duplicate_url:
-                url_key = f"{request_info['method']}:{clean_url}"
+                url_key = f"{request_info.method}:{clean_url}"
                 if url_key in seen_urls:
                     continue
                 seen_urls.add(url_key)
@@ -277,15 +266,15 @@ class HARParser:
             logger.info("没有找到有效的API请求")
             return
 
-        success_count = sum(1 for req in requests if 200 <= req["response_status"] < 300)
+        success_count = sum(1 for req in requests if 200 <= req.response_status < 300)
         error_count = len(requests) - success_count
-        avg_time = sum(req["response_time"] for req in requests) / len(requests)
+        avg_time = sum(req.response_time for req in requests) / len(requests)
 
         for i, req in enumerate(requests, 1):
-            status = req["response_status"]
-            time = req["response_time"]
-            url = req["url"][:80]
-            method = req["method"]
+            status = req.response_status
+            time = req.response_time
+            url = req.url[:80]
+            method = req.method
 
             logger.info(f"{i:2d}. {method:6s} {status:3d} {time:8.2f}ms {url}")
 

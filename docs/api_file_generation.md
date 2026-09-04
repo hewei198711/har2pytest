@@ -87,14 +87,15 @@ flowchart TD
 解析请求信息的核心步骤：
 
 ```
-输入: request_info（method, url, query_params, post_data, headers）
+输入: request_info（ParsedRequestInfo: method, url, query_params, post_data, headers）
  └─ 处理 headers：
  │     - 保留 APIConfig.HEADERS_TO_INCLUDE 中定义的字段
  │     - 补充 APIConfig.REQUIRED_HEADERS 中的默认字段
  │
  └─ 检测上传类型：
  │     - content-type 含 "multipart/form-data" → is_file_upload = True
- │     - content-length=0 且无 post_data → is_need_urlencode = True
+ │     - POST 且无有效请求体（content-length=0，或空 JSON body 带 query 参数）
+ │       → is_need_urlencode = True（application/x-www-form-urlencoded 传参）
  │
  └─ URL 匹配：
        - URLMatcher 识别路径参数模式（如 /user/{id}/detail）

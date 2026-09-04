@@ -9,7 +9,7 @@ from typing import Any
 from .config import APIConfig
 from .har_parser import HARParser
 from .logger import logger
-from .models import APIFileInfo, SwaggerInfo
+from .models import APIFileInfo, ParsedRequestInfo
 from .swagger_handler import SwaggerHandler
 from .url_matcher import URLMatcher
 from .utils import (
@@ -158,7 +158,7 @@ class TestCaseGenerator:
         self.url_matcher.swagger_data = swagger_doc
 
     async def match_api_files_for_har(
-        self, har_file_path: str, requests: list[dict[str, Any]] | None = None
+        self, har_file_path: str, requests: list[ParsedRequestInfo] | None = None
     ) -> list[str]:
         """根据 HAR 文件查找对应的 API 文件。
 
@@ -175,7 +175,7 @@ class TestCaseGenerator:
         # 预处理URL映射
         request_url_map = {}
         for request in requests:
-            request_url = request["url"]
+            request_url = request.url
             await self._prepare_url_matcher(request_url)
             url_info = self.url_matcher.get_url_info(request_url)
             request_url_map[request_url] = url_info["pattern"] or request_url
@@ -384,7 +384,7 @@ class TestCaseGenerator:
         return merged_result
 
     def _extract_requests_for_url(
-        self, requests: list[dict[str, Any]], api_url: str
+        self, requests: list[ParsedRequestInfo], api_url: str
     ) -> tuple[set[str], list[dict[str, Any]], str | None]:
         """提取指定 URL 的请求参数。
 
@@ -404,7 +404,7 @@ class TestCaseGenerator:
         normalized_api_url = URLMatcher.normalize_url(api_url)
 
         for req in requests:
-            normalized_req_url = URLMatcher.normalize_url(req["url"])
+            normalized_req_url = URLMatcher.normalize_url(req.url)
 
             if normalized_req_url == normalized_api_url:
                 # 直接合并 query_params 和 post_data
@@ -417,7 +417,7 @@ class TestCaseGenerator:
                             all_params.add(param_name)
 
                 # 获取最后一个匹配请求的方法
-                request_method = req.get("method", "GET")
+                request_method = req.method or "GET"
 
         logger.info(f"提取到的参数: {all_params}")
         logger.info(f"提取到的请求参数: {all_requests_params}")
@@ -707,7 +707,7 @@ class TestCaseGenerator:
         har_file_path: str | None,
         api_file: str,
         task_id: str | None,
-        requests: list[dict[str, Any]] | None = None,
+        requests: list[ParsedRequestInfo] | None = None,
     ) -> str | None:
         """生成参数化列表测试用例内容（list_query 模式）。
 
@@ -791,7 +791,7 @@ class TestCaseGenerator:
         api_files: list[str],
         task_id: str | None = None,
         target_api_file: str | None = None,
-        requests: list[dict[str, Any]] | None = None,
+        requests: list[ParsedRequestInfo] | None = None,
     ) -> str:
         """生成复杂场景流程测试用例内容（complex_scenario 模式）。
 
@@ -856,7 +856,7 @@ class TestCaseGenerator:
 
     def _get_requests_from_source(
         self, har_file_path: str | None, api_files: list[str], target_api_file: str | None
-    ) -> list[dict[str, Any]]:
+    ) -> list[ParsedRequestInfo]:
         """从 HAR 文件或 API 文件获取请求信息。
 
         优先从 HAR 文件获取，如果 HAR 文件不存在或为空，则从 API 文件构建请求信息。
@@ -879,15 +879,13 @@ class TestCaseGenerator:
             api_info = self._get_api_file_info(target_api_file)
             if api_info:
                 # 构建模拟的请求信息，格式与 HAR 解析结果一致
-                request_info = {
-                    "url": api_info.url or "",
-                    "method": "GET",
-                    "query_params": api_info.params,
-                    "post_data": api_info.data,
-                    "headers": api_info.headers,
-                    "description": api_info.description,
-                    "api_file": target_api_file,
-                }
+                request_info = ParsedRequestInfo(
+                    url=api_info.url or "",
+                    method="GET",
+                    query_params=api_info.params,
+                    post_data=api_info.data,
+                    headers=api_info.headers,
+                )
                 requests.append(request_info)
 
         return requests
@@ -943,7 +941,7 @@ class TestCaseGenerator:
         ]
 
     def _generate_scenario_step_functions(
-        self, content: list[str], requests: list[dict[str, Any]], api_files: list[str]
+        self, content: list[str], requests: list[ParsedRequestInfo], api_files: list[str]
     ) -> list[str]:
         """生成场景测试步骤函数。
 
@@ -959,7 +957,7 @@ class TestCaseGenerator:
         name_counters = {}
 
         for i, request_info in enumerate(requests):
-            url = request_info["url"]
+            url = request_info.url
 
             # 使用 URLMatcher 查找匹配的 API 文件
             matched_api_file = URLMatcher.find_matching_api_file(url, api_files)
@@ -1032,7 +1030,7 @@ class TestCaseGenerator:
         content: list[str],
         api_function_name: str,
         api_info: APIFileInfo,
-        request_info: dict[str, Any] | None = None,
+        request_info: ParsedRequestInfo | None = None,
     ) -> None:
         """生成步骤函数体。
 
@@ -1040,7 +1038,7 @@ class TestCaseGenerator:
             content: 内容列表（会被修改）
             api_function_name: API 函数名称
             api_info: API 文件信息
-            request_info: 请求信息字典（来自HAR文件，可选）
+            request_info: 解析后的请求信息（来自HAR文件，可选）
         """
         # 从 API 文件判断参数类型（data/params/files），决定调用格式
         api_files = api_info.files
@@ -1049,8 +1047,8 @@ class TestCaseGenerator:
 
         # 从 HAR 请求获取参数值（优先），否则从 API 文件获取
         if request_info:
-            har_query = request_info.get("query_params") or {}
-            har_post = request_info.get("post_data") or {}
+            har_query = request_info.query_params or {}
+            har_post = request_info.post_data or {}
             # JSON 数组请求体（list）无法与 dict 展开合并，整体作为 HAR 值
             if isinstance(har_post, list):
                 har_values = har_post if har_post else {}

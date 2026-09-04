@@ -5,7 +5,6 @@ import asyncio
 import allure
 
 from har2pytest.swagger_handler import SwaggerHandler
-from har2pytest.models import SwaggerInfo
 
 
 @allure.feature("Swagger处理器")

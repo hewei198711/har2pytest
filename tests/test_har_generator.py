@@ -4,7 +4,6 @@
 
 import asyncio
 import json
-import os
 from unittest.mock import AsyncMock, MagicMock
 
 import allure
@@ -15,7 +14,7 @@ from har2pytest.har_generator import generate_api_files_from_har
 @allure.feature("HAR生成器")
 @allure.story("生成API文件")
 @allure.title("测试从HAR文件生成API文件")
-def test_generate_api_files_from_har():
+def test_generate_api_files_from_har(tmp_path):
     test_har = {
         "log": {
             "entries": [
@@ -34,52 +33,40 @@ def test_generate_api_files_from_har():
         }
     }
 
-    with open("test_har_generator.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_har_generator.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        mock_api_generator = MagicMock()
-        mock_api_generator.generate_api_file = AsyncMock(return_value="api/_user_login.py")
+    mock_api_generator = MagicMock()
+    mock_api_generator.generate_api_file = AsyncMock(return_value="api/_user_login.py")
 
-        generated_files = asyncio.run(
-            generate_api_files_from_har("test_har_generator.har", api_generator=mock_api_generator)
-        )
+    generated_files = asyncio.run(generate_api_files_from_har(str(har_path), api_generator=mock_api_generator))
 
-        assert len(generated_files) == 1
-        assert generated_files[0] == "api/_user_login.py"
-        mock_api_generator.generate_api_file.assert_called_once()
-    finally:
-        if os.path.exists("test_har_generator.har"):
-            os.remove("test_har_generator.har")
+    assert len(generated_files) == 1
+    assert generated_files[0] == "api/_user_login.py"
+    mock_api_generator.generate_api_file.assert_called_once()
 
 
 @allure.feature("HAR生成器")
 @allure.story("空HAR文件")
 @allure.title("测试空HAR文件的情况")
-def test_generate_api_files_from_empty_har():
+def test_generate_api_files_from_empty_har(tmp_path):
     test_har = {"log": {"entries": []}}
 
-    with open("test_empty_har.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_empty_har.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        mock_api_generator = MagicMock()
-        mock_api_generator.generate_api_file = AsyncMock(return_value=None)
+    mock_api_generator = MagicMock()
+    mock_api_generator.generate_api_file = AsyncMock(return_value=None)
 
-        generated_files = asyncio.run(
-            generate_api_files_from_har("test_empty_har.har", api_generator=mock_api_generator)
-        )
+    generated_files = asyncio.run(generate_api_files_from_har(str(har_path), api_generator=mock_api_generator))
 
-        assert len(generated_files) == 0
-    finally:
-        if os.path.exists("test_empty_har.har"):
-            os.remove("test_empty_har.har")
+    assert len(generated_files) == 0
 
 
 @allure.feature("HAR生成器")
 @allure.story("生成API文件失败")
 @allure.title("测试生成API文件失败的情况")
-def test_generate_api_files_failure():
+def test_generate_api_files_failure(tmp_path):
     test_har = {
         "log": {
             "entries": [
@@ -93,19 +80,15 @@ def test_generate_api_files_failure():
         }
     }
 
-    with open("test_failure.har", "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
+    har_path = tmp_path / "test_failure.har"
+    har_path.write_text(json.dumps(test_har, ensure_ascii=False), encoding="utf-8")
 
-    try:
-        mock_api_generator = MagicMock()
-        mock_api_generator.generate_api_file = AsyncMock(side_effect=Exception("生成失败"))
+    mock_api_generator = MagicMock()
+    mock_api_generator.generate_api_file = AsyncMock(side_effect=Exception("生成失败"))
 
-        generated_files = asyncio.run(generate_api_files_from_har("test_failure.har", api_generator=mock_api_generator))
+    generated_files = asyncio.run(generate_api_files_from_har(str(har_path), api_generator=mock_api_generator))
 
-        assert len(generated_files) == 0
-    finally:
-        if os.path.exists("test_failure.har"):
-            os.remove("test_failure.har")
+    assert len(generated_files) == 0
 
 
 @allure.feature("HAR生成器")
@@ -115,8 +98,6 @@ def test_generate_api_files_nonexistent_har():
     mock_api_generator = MagicMock()
     mock_api_generator.generate_api_file = AsyncMock(return_value=None)
 
-    generated_files = asyncio.run(
-        generate_api_files_from_har("nonexistent.har", api_generator=mock_api_generator)
-    )
+    generated_files = asyncio.run(generate_api_files_from_har("nonexistent.har", api_generator=mock_api_generator))
 
     assert len(generated_files) == 0

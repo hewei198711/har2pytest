@@ -1,11 +1,10 @@
 """pytest 测试工具函数"""
 
-import logging
 from collections.abc import Callable
 
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
-logger = logging.getLogger(__name__)
+from .logger import logger
 
 
 def retry_step(counts: int = 2, times: int = 20) -> Callable:

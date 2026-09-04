@@ -91,9 +91,7 @@ def main():
         har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
         """,
     )
-    tc_parser.add_argument(
-        "har_file", nargs="?", default="api_request.har", help="HAR文件路径（默认 api_request.har）"
-    )
+    tc_parser.add_argument("har_file", nargs="?", default="api_request.har", help="HAR文件路径（默认 api_request.har）")
     tc_parser.add_argument(
         "--pattern",
         default="list_query",
@@ -104,10 +102,15 @@ def main():
     tc_parser.add_argument("--url", "-u", help="目标接口URL（可选，指定后只生成该接口的测试用例）")
     tc_parser.add_argument("--output", "-o", default="testcases", help="输出目录")
     tc_parser.add_argument("--api-dir", default="apis", help="API文件目录")
-    tc_parser.add_argument("--api-files", default="api_request.har", help="指定API文件或HAR文件（batch模式使用，多个文件用逗号分隔）")
+    tc_parser.add_argument(
+        "--api-files", default="api_request.har", help="指定API文件或HAR文件（batch模式使用，多个文件用逗号分隔）"
+    )
     tc_parser.add_argument("--overwrite", action="store_true", help="强制覆盖已存在的测试用例文件")
     tc_parser.add_argument(
-        "--async", dest="async_mode", action="store_true", help="生成异步模式测试代码（使用 async/await + async_client）"
+        "--async",
+        dest="async_mode",
+        action="store_true",
+        help="生成异步模式测试代码（使用 async/await + async_client）",
     )
 
     # swagger 子命令
@@ -138,9 +141,9 @@ def main():
     # 解析参数
     args = parser.parse_args()
 
-    # 如果没有指定命令，默认使用 api 命令
+    # 如果没有指定命令，默认使用 api 命令（需重新解析以填充 api 子命令的参数）
     if args.command is None:
-        args.command = "api"
+        args = parser.parse_args(["api"])
 
     # 执行对应的命令
     if args.command == "api":

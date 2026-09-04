@@ -43,7 +43,7 @@ def test_default_config():
 @allure.feature("配置管理")
 @allure.story("配置文件加载")
 @allure.title("测试配置文件加载")
-def test_config_file_loading():
+def test_config_file_loading(tmp_path):
     test_config = {
         "BASE_URLS": ["https://test.example.com/api"],
         "DEFAULT_API_DIR": "test_api",
@@ -52,11 +52,11 @@ def test_config_file_loading():
         "SWAGGER_DOC_URLS": {"test_service": "https://test.example.com/swagger"},
     }
 
-    with open("test_config.json", "w", encoding="utf-8") as f:
-        json.dump(test_config, f)
+    config_path = tmp_path / "test_config.json"
+    config_path.write_text(json.dumps(test_config, ensure_ascii=False), encoding="utf-8")
 
     try:
-        os.environ["HAR2PYTEST_CONFIG"] = "test_config.json"
+        os.environ["HAR2PYTEST_CONFIG"] = str(config_path)
 
         APIConfig._config = None
         config, config_file_exists = APIConfig._load_config()
@@ -68,8 +68,6 @@ def test_config_file_loading():
     finally:
         if "HAR2PYTEST_CONFIG" in os.environ:
             del os.environ["HAR2PYTEST_CONFIG"]
-        if os.path.exists("test_config.json"):
-            os.remove("test_config.json")
         APIConfig._config = None
         APIConfig._load_config()
 
@@ -138,7 +136,7 @@ def test_state_value_patterns():
 @allure.feature("配置管理")
 @allure.story("默认配置值")
 @allure.title("测试默认 LIST_QUERY_KEYWORDS 和 STATE_VALUE_PATTERNS")
-def test_default_list_query_and_state_patterns():
+def test_default_list_query_and_state_patterns(tmp_path):
     """测试无配置文件时 LIST_QUERY_KEYWORDS 和 STATE_VALUE_PATTERNS 的默认值"""
     # 创建最小配置文件，满足必需配置项校验
     minimal_config = {
@@ -146,13 +144,13 @@ def test_default_list_query_and_state_patterns():
         "SERVICE_MAPPING": {"test": "test_service"},
         "SWAGGER_DOC_URLS": {"test_service": "https://test.example.com/swagger"},
     }
-    with open("test_minimal_config.json", "w", encoding="utf-8") as f:
-        json.dump(minimal_config, f)
+    config_path = tmp_path / "test_minimal_config.json"
+    config_path.write_text(json.dumps(minimal_config, ensure_ascii=False), encoding="utf-8")
 
     original_config = os.environ.get("HAR2PYTEST_CONFIG")
 
     try:
-        os.environ["HAR2PYTEST_CONFIG"] = "test_minimal_config.json"
+        os.environ["HAR2PYTEST_CONFIG"] = str(config_path)
         APIConfig._config = None
         APIConfig._load_config()
 
@@ -169,8 +167,6 @@ def test_default_list_query_and_state_patterns():
         else:
             if "HAR2PYTEST_CONFIG" in os.environ:
                 del os.environ["HAR2PYTEST_CONFIG"]
-        if os.path.exists("test_minimal_config.json"):
-            os.remove("test_minimal_config.json")
         APIConfig._config = None
 
 
