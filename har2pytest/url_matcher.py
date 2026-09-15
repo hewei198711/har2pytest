@@ -25,20 +25,10 @@ class URLMatcher:
             swagger_data: Swagger 文档数据，用于 URL 模板匹配（可选）。
         """
         self.swagger_data = swagger_data
-        self._path_params_cache = {}
-        # 缓存匹配结果
-        self._match_cache = {}
-
-    def _has_numeric_path_segment(self, url: str) -> bool:
-        """检查 URL 中是否包含数字路径参数。
-
-        Args:
-            url: 要检查的 URL。
-
-        Returns:
-            bool: 如果 URL 中包含纯数字段或含3个以上数字的段则返回 True，否则返回 False。
-        """
-        return bool(re.search(r"\/(\d+|[^\/]*\d{2,}[^\/]*)(\/|$)", url))
+        # Swagger 路径模板匹配缓存（键为 swagger:url）
+        self._swagger_match_cache: dict[str, tuple] = {}
+        # URL 信息缓存（get_url_info，键为原始 url）
+        self._url_info_cache: dict[str, dict[str, Any]] = {}
 
     @staticmethod
     def match_url_pattern(url: str, pattern: str) -> tuple[bool, dict[str, str]]:
@@ -96,8 +86,8 @@ class URLMatcher:
                 提取的路径参数字典、路径部分列表。如果未匹配到则返回 (None, {}, [])。
         """
         cache_key = f"swagger:{url}"
-        if cache_key in self._match_cache:
-            return self._match_cache[cache_key]
+        if cache_key in self._swagger_match_cache:
+            return self._swagger_match_cache[cache_key]
 
         if not self.swagger_data or "paths" not in self.swagger_data:
             return None, {}, []
@@ -105,19 +95,34 @@ class URLMatcher:
         base_path = self.swagger_data.get("basePath", "")
         search_url = self.remove_base_path(url, base_path)
 
-        # 获取所有带参数的路径模板
         paths = self.swagger_data["paths"]
+
+        # 文档 paths 的键可能已包含 basePath（springfox 常见：basePath=/admin 且键为 /admin/xxx），
+        # 也可能不含；两种形态都要尝试，否则"键含 basePath"的文档永远匹配不到模板。
+        url_variants = [search_url] if search_url == url else [search_url, url]
+
+        # 先看是否存在“具体路径精确命中”：/mobile/returnOrder/page 这类实际存在的路径
+        # 不应被 /mobile/returnOrder/{id} 这类通配模板抢走（否则会生成错误 URL/函数名）
+        for variant in url_variants:
+            if variant in paths:
+                full_path = self._ensure_base_path(variant, base_path)
+                result = (full_path, {}, self._extract_path_parts(variant, variant))
+                self._swagger_match_cache[cache_key] = result
+                return result
+
+        # 获取所有带参数的路径模板
         param_paths = [path for path in paths.keys() if "{" in path and "}" in path]
 
         for swagger_path in param_paths:
-            matched, path_params = self.match_url_pattern(search_url, swagger_path)
-            if matched:
-                full_path = self._add_base_path(swagger_path, base_path)
-                result_parts = self._extract_path_parts(search_url, swagger_path)
-                result = (full_path, path_params, result_parts)
-                self._match_cache[cache_key] = result
-                logger.debug(f"从Swagger文档中匹配到路径模板: {swagger_path}")
-                return result
+            for variant in url_variants:
+                matched, path_params = self.match_url_pattern(variant, swagger_path)
+                if matched:
+                    full_path = self._ensure_base_path(swagger_path, base_path)
+                    result_parts = self._extract_path_parts(variant, swagger_path)
+                    result = (full_path, path_params, result_parts)
+                    self._swagger_match_cache[cache_key] = result
+                    logger.debug(f"从Swagger文档中匹配到路径模板: {swagger_path}")
+                    return result
 
         return None, {}, []
 
@@ -144,6 +149,14 @@ class URLMatcher:
 
         if "?" in clean_url:
             clean_url = clean_url.split("?")[0]
+
+        # 绝对 URL（含 scheme://host）未匹配任何 base_url 时，只保留 path+query 部分，
+        # 避免拼出 "/https://host/..." 这样的垃圾相对路径
+        if not clean_url.startswith("/") and "://" in clean_url:
+            scheme_sep = clean_url.index("://")
+            rest = clean_url[scheme_sep + 3 :]
+            slash = rest.find("/")
+            clean_url = rest[slash:] if slash != -1 else "/"
 
         if not clean_url.startswith("/"):
             clean_url = "/" + clean_url
@@ -181,46 +194,34 @@ class URLMatcher:
                 - function_name: 生成的函数名
                 - has_path_params: 是否包含路径参数
         """
-        if url in self._match_cache:
-            return self._match_cache[url].copy()
+        if url in self._url_info_cache:
+            return self._url_info_cache[url].copy()
 
+        # 尝试从配置匹配（无论是否含数字：非数字路径参数值也能命中模板）
+        path_urls = APIConfig.PATH_URLS()
+        pattern, params = self.extract_url_template(url, path_urls)
+        if pattern:
+            return self._finalize(url, pattern, params)
+
+        # 尝试从Swagger匹配（仅在已加载 swagger_data 时执行；命中即用）
+        if self.swagger_data:
+            pattern, params, _ = self.match_with_swagger(url)
+            if pattern:
+                return self._finalize(url, pattern, params)
+
+        # 兜底：无模板命中，原样作为 pattern
+        return self._finalize(url, url, {})
+
+    def _finalize(self, url: str, pattern: str, params: dict[str, Any]) -> dict[str, Any]:
+        """填充 URL 信息结果、写缓存并返回拷贝。"""
         result = {
             "original_url": url,
-            "pattern": None,
-            "path_params": {},
-            "function_name": None,
-            "has_path_params": False,
+            "pattern": pattern,
+            "path_params": params,
+            "function_name": self.generate_function_name(pattern),
+            "has_path_params": bool(params),
         }
-
-        has_braces = "{" in url and "}" in url
-        has_numeric = self._has_numeric_path_segment(url)
-
-        if has_numeric or has_braces:
-            # 尝试从配置匹配
-            path_urls = APIConfig.PATH_URLS()
-            pattern, params = self.extract_url_template(url, path_urls)
-            if pattern:
-                result["pattern"] = pattern
-                result["path_params"] = params
-                result["has_path_params"] = bool(params)
-                result["function_name"] = self.generate_function_name(pattern)
-                self._match_cache[url] = result.copy()
-                return result.copy()
-
-            # 尝试从Swagger匹配
-            if self.swagger_data:
-                pattern, params, _ = self.match_with_swagger(url)
-                if pattern:
-                    result["pattern"] = pattern
-                    result["path_params"] = params
-                    result["has_path_params"] = bool(params)
-                    result["function_name"] = self.generate_function_name(pattern)
-                    self._match_cache[url] = result.copy()
-                    return result.copy()
-
-        result["pattern"] = url
-        result["function_name"] = self.generate_function_name(url)
-        self._match_cache[url] = result.copy()
+        self._url_info_cache[url] = result.copy()
         return result.copy()
 
     @staticmethod
@@ -240,7 +241,11 @@ class URLMatcher:
         transformed_url = request_url_map.get(request_url, request_url) if request_url_map else request_url
 
         for api_file in api_files:
-            result = parse_api_file(api_file)
+            try:
+                result = parse_api_file(api_file)
+            except ValueError:
+                # 候选文件缺元数据时无法参与匹配：跳过，交由后续真正读取目标文件时再报错
+                continue
             file_url = result.url
             if not file_url:
                 continue
@@ -283,19 +288,24 @@ class URLMatcher:
         return url
 
     @staticmethod
-    def _add_base_path(path: str, base_path: str) -> str:
-        """添加 basePath 前缀。
+    def _ensure_base_path(path: str, base_path: str) -> str:
+        """确保路径带 basePath 前缀（已带则不重复添加）。
+
+        文档 paths 的键可能已包含 basePath，此时不能再拼一次前缀。
 
         Args:
-            path: 路径。
-            base_path: 要添加的基础路径前缀。
+            path: 路径（可能已含 basePath）。
+            base_path: 文档的 basePath。
 
         Returns:
-            str: 添加前缀后的完整路径。
+            str: 带 basePath 前缀的路径。
         """
         if not base_path or base_path == "/":
             return path
-        return base_path.rstrip("/") + "/" + path.lstrip("/")
+        prefix = base_path.rstrip("/")
+        if path == prefix or path.startswith(prefix + "/"):
+            return path
+        return prefix + "/" + path.lstrip("/")
 
     @staticmethod
     def _extract_path_parts(url: str, pattern: str) -> list[str]:

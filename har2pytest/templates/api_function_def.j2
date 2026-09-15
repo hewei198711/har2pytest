@@ -1,0 +1,12 @@
+def {{ function_name }}({{ func_params }}):
+    """
+    {{ doc_first }}
+    {{ doc_url }}
+{% if param_docs %}
+    参数说明:
+{% for p, d in param_docs %}    - {{ p }}: {{ d }}
+{% endfor %}{% endif %}    """
+
+    {{ url_code }}
+{% for line in body_lines %}{{ line }}
+{% endfor %}

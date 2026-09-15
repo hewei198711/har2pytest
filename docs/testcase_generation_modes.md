@@ -120,6 +120,8 @@ flowchart TD
  └─ 返回 [{param_name: values, other_params: {...}}, ...]
 ```
 
+> **回退机制**：若参数化模式无可用参数（所有参数均无法提取有效值），会回退调用 `generate_scenario_test_content()` 生成场景测试；场景模式也无内容时才最终跳过。
+
 #### Step 6: `_generate_parametrized_test_methods()`
 
 ```
@@ -328,9 +330,18 @@ class TestClass:
 
 ### 用途
 
-无需 HAR 文件，直接从 API 文件批量生成测试用例。也支持传入 HAR 文件，自动从 HAR 中提取接口并匹配对应的 API 文件。根据 API 描述的字段自动判断生成模式：
-- `"列表"` 在描述中 → parametrized_list 模式（带 `@pytest.mark.parametrize`）
-- 否则 → complex_scenario 模式（带 `@allure.step`）
+无需 HAR 文件，直接从 API 文件批量生成测试用例。也支持传入 HAR 文件，自动从 HAR 中提取接口并匹配对应的 API 文件。单接口生成模式的决策统一由
+`_resolve_testcase_mode()` 完成，优先级：
+
+1. **`TESTCASE_PROFILES` 配置命中且显式指定 `mode`**（推荐，见下文“模式配置化”）；
+2. `mode=auto`/未配置 → 回落描述关键字启发式（`"列表"` 在描述中 → parametrized_list，否则 complex_scenario，可配排除关键字）。
+
+### 模式配置化（TESTCASE_PROFILES）
+
+在 `har2pytest_config.json` 中按 URL 显式指定模式，消除“靠中文描述关键字判定”的脆弱点。
+字段说明、示例与优先级见 [配置参考 → 测试模式配置](configuration.md#测试模式配置testcase_profiles)，
+此处不再重复；命中逻辑为：精确路径 / `{param}` 模板 / 末尾 `*` 通配 均可命中，
+`mode=auto`（或缺省）时回落上面的关键字启发式，`keywords`/`exclude_keywords` 可覆盖全局默认。
 
 ### 输入类型
 
@@ -351,11 +362,11 @@ flowchart TD
     C --> D{overwrite?}
     D -->|否| E{测试文件已存在?}
     E -->|是| F["跳过 skipped++"]
-    D -->|是| G{"api_description<br/>含 `列表` 关键字?"}
+    D -->|是| G["_resolve_testcase_mode<br/>TESTCASE_PROFILES / 关键字启发式"]
     E -->|否| G
-    G -->|是| H["generate_parametrized_test_content<br/>har_file_path=None"]
-    G -->|否| I["generate_scenario_test_content<br/>har_file_path=None"]
-    H --> J["await write_test_file"]
+    G -->|parametrized| H["generate_parametrized_test_content<br/>har_file_path 可选"]
+    G -->|scenario| I["generate_scenario_test_content<br/>har_file_path 可选"]
+    H --> J["write_test_file 同步写入<br/>（任务间并行调度）"]
     I --> J
     J --> K["汇总结果"]
 ```
@@ -373,35 +384,35 @@ flowchart TD
  └─ output_dir = get_output_dir(self.output_dir, task_id)
  └─ 异步并行处理（asyncio.gather）:
       ├─ 每个 api_file 独立任务 process_single():
-      │    ├─ 检查文件是否存在 → "failed"
+      │    ├─ 检查文件是否存在 → "skipped"
       │    ├─ _get_api_file_info() → 检查 function_name → "failed"
       │    ├─ 若 overwrite=False 且测试文件已存在 → "skipped"
-      │    ├─ 判断模式:
-      │    │    ├─ "列表" in description → parametrized_list
-    │    │    │    └─ generate_parametrized_test_content(None, api_file, task_id)
-    │    │    └─ 其他 → complex_scenario
-    │    │         └─ generate_scenario_test_content(None, [api_file], task_id, api_file)
-      │    └─ await write_test_file() → 异步写入 → "generated"
+      │    ├─ 判断模式: _resolve_testcase_mode(api_file)
+      │    │    ├─ parametrized → generate_parametrized_test_content(har_file_path, api_file, task_id)
+      │    │    └─ scenario → generate_scenario_test_content(har_file_path, [api_file], task_id, api_file)
+      │    │    有 HAR 时其请求驱动参数提取；无 HAR 自动回落从 API 文件提取
+      │    └─ write_test_file() 同步写入（任务间并行调度）→ "generated"
       └─ 汇总所有结果 → {total, skipped, generated, failed, generated_files}
  └─ await format_directory(output_dir) → 批量 ruff 格式化
  └─ 返回结果字典
 ```
 
-> **异步并行说明**：所有 API 文件通过 `asyncio.gather` 并发处理，文件写入（`write_test_file`）并行执行。生成完毕后对整个输出目录进行一次性 ruff 格式化。
+> **异步并行说明**：所有 API 文件通过 `asyncio.gather` 并发处理；`write_test_file` 为同步写盘，由任务并行调度，真正的异步批量格式化在全部写完后由 `format_directory` 执行。
 
 #### 与模式一/二的关键区别
 
-在 batch 模式下 HAR 文件固定为 `None`，因此：
+batch 模式单独运行时没有单份 HAR 作为整个批量任务的输入；传入 HAR 文件时
+其请求会先匹配对应 API 文件并驱动参数提取，无 HAR 时参数来源回落 API 文件：
 
 | 组件 | parametrized_list(batch) | complex_scenario(batch) |
 |------|------------------------|------------------------|
-| **参数来源** | `_build_param_items_from_api(api_params, ..., is_batch_mode=True)` | `_get_requests_from_source(None, ...)` → 从 API 文件构建 |
+| **参数来源** | HAR（传入时）→ `_extract_requests_for_url`；无 HAR → `_build_param_items_from_api(api_params, ..., is_batch_mode=True)` | HAR（传入时）→ 提取请求；无 HAR → `_get_requests_from_source(None, ...)` 从 API 文件构建 |
 | **API 参数处理** | 包含空值参数（`is_batch_mode=True`） | 直接使用 API 文件的 params/data |
 | **导入语句** | `import pytest`（单函数） | 不导入 pytest（多函数） |
 | **severity** | NORMAL | CRITICAL |
 | **测试方法** | `@pytest.mark.parametrize` 参数化方法 | `@allure.step` 嵌套步骤函数 |
 | **headers** | 默认 headers | 从 API 文件提取自定义 headers |
-| **写入方式** | `await write_test_file()` 异步并行 | `await write_test_file()` 异步并行 |
+| **写入方式** | `write_test_file()` 同步写盘（任务并行） | `write_test_file()` 同步写盘（任务并行） |
 
 ### 生成的测试用例示例（列表模式 batch）
 
@@ -439,7 +450,7 @@ class TestClass:
 | **输入** | HAR + API 文件 | HAR + API 文件 | API 文件列表/目录 或 HAR 文件 |
 | **参数来源** | HAR 请求 | HAR 请求（按业务流程顺序） | API 文件定义 |
 | **是否需要 HAR** | 是 | 是 | 否（支持 HAR 输入） |
-| **输出** | 单文件 | 单文件 | 多文件（每 API 一个） |
+| **输出** | 每匹配 API 一个文件（CLI 传 `--url` 时为一个） | 单文件 | 多文件（每 API 一个） |
 | **overwrite 参数** | 跳过已存在文件 | 返回 None 跳过 | 跳过已存在文件 |
 | **测试框架** | pytest + allure | pytest + allure | pytest + allure |
 | **参数化** | `@pytest.mark.parametrize` | 无参数化 | 列表接口有 |
@@ -460,7 +471,7 @@ class TestClass:
 | `_get_all_api_files()` | 扫描 API 目录 | parametrized_list, scenario |
 | `_extract_service_package()` | 从路径提取服务包名 | 所有模式 |
 | `_is_valid_param()` | 判断参数值有效性 | 所有模式 |
-| `_parse_state_values()` | 从备注解析状态枚举值 | batch |
+| `_parse_state_values()` | 从备注解析状态枚举值 | 所有模式 |
 | `_generate_test_case_imports()` | 生成导入语句 | 所有模式 |
 | `_generate_test_case_description()` | 生成 allure 描述 | 所有模式 |
 | `_generate_step_function_body()` | 生成步骤函数体 | scenario |

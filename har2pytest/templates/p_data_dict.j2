@@ -1,0 +1,4 @@
+{% if is_combination %}{% for key, safe in param_pairs %}            "{{ key }}": {{ safe }},
+{% endfor %}{% else %}            "{{ param_name }}": {{ param_safe }},
+{% endif %}{% for key, value_text in other_items %}            "{{ key }}": {{ value_text }},
+{% endfor %}

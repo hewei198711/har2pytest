@@ -1,6 +1,48 @@
+"""测试 har2pytest.url_matcher.URLMatcher 中 URL 模式匹配、API 文件查找、URL 规范化、函数名生成、URL 模板提取、Swagger 匹配与路径参数提取的功能与边界。"""
+
+import json
+
 import allure
 
+from har2pytest.config import APIConfig
 from har2pytest.url_matcher import URLMatcher
+
+# ==================== 辅助函数 ====================
+
+
+def _write_api_file(tmp_path, url, filename="user_info.py"):
+    """在 tmp_path/apis 下写入一个最小 API 文件及其旁车元数据，返回文件路径。
+
+    供 find_matching_api_file 各测试复用写盘样板。函数名取自文件名（不含 .py），
+    url 同时写入 docstring 与 .api.json 元数据（parse_api_file 以元数据为准）。
+    """
+    api_dir = tmp_path / "apis"
+    api_dir.mkdir(exist_ok=True)
+    api_file = api_dir / filename
+    func_name = filename[: -len(".py")]
+    api_file.write_text(
+        f'''def {func_name}(data=data, token=token):
+    """
+    {func_name}
+    {url}
+    """
+    url = "{url}"
+    headers = {{}}
+    return client.get(url=url, headers=headers, params=data)
+''',
+        encoding="utf-8",
+    )
+    meta = {
+        "function_name": func_name,
+        "url": url,
+        "description": func_name,
+        "method": "GET",
+    }
+    (api_dir / f"{filename[:-3]}.api.json").write_text(json.dumps(meta), encoding="utf-8")
+    return api_file
+
+
+# ==================== URL模式匹配测试 ====================
 
 
 class TestMatchUrlPattern:
@@ -89,26 +131,15 @@ class TestMatchUrlPattern:
         assert params == {}
 
 
+# ==================== 查找匹配API文件测试 ====================
+
+
 class TestFindMatchingApiFile:
     @allure.feature("URL匹配器")
     @allure.story("查找匹配API文件")
     @allure.title("测试直接相等匹配")
     def test_exact_match(self, tmp_path):
-        api_dir = tmp_path / "apis"
-        api_dir.mkdir()
-
-        api_file = api_dir / "user_info.py"
-        with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def user_info(data=data, token=token):
-    """
-    用户信息
-    /api/user/info
-    """
-    url = "/api/user/info"
-    headers = {}
-    return client.get(url=url, headers=headers, params=data)
-''')
-
+        api_file = _write_api_file(tmp_path, "/api/user/info")
         result = URLMatcher.find_matching_api_file("/api/user/info", [str(api_file)])
         assert result == str(api_file)
 
@@ -116,21 +147,7 @@ class TestFindMatchingApiFile:
     @allure.story("查找匹配API文件")
     @allure.title("测试路径参数模式匹配")
     def test_path_param_pattern_match(self, tmp_path):
-        api_dir = tmp_path / "apis"
-        api_dir.mkdir()
-
-        api_file = api_dir / "user_info.py"
-        with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def user_info(data=data, token=token):
-    """
-    用户信息
-    /api/user/{userId}/info
-    """
-    url = "/api/user/{userId}/info"
-    headers = {}
-    return client.get(url=url, headers=headers, params=data)
-''')
-
+        api_file = _write_api_file(tmp_path, "/api/user/{userId}/info")
         result = URLMatcher.find_matching_api_file("/api/user/123/info", [str(api_file)])
         assert result == str(api_file)
 
@@ -138,20 +155,7 @@ class TestFindMatchingApiFile:
     @allure.story("查找匹配API文件")
     @allure.title("测试转换后URL匹配")
     def test_transformed_url_match(self, tmp_path):
-        api_dir = tmp_path / "apis"
-        api_dir.mkdir()
-
-        api_file = api_dir / "user_info.py"
-        with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def user_info(data=data, token=token):
-    """
-    用户信息
-    /api/user/{userId}/info
-    """
-    url = "/api/user/{userId}/info"
-    headers = {}
-    return client.get(url=url, headers=headers, params=data)
-''')
+        api_file = _write_api_file(tmp_path, "/api/user/{userId}/info")
 
         request_url_map = {"/api/user/123/info": "/api/user/{userId}/info"}
 
@@ -162,20 +166,7 @@ class TestFindMatchingApiFile:
     @allure.story("查找匹配API文件")
     @allure.title("测试无匹配文件")
     def test_no_matching_file(self, tmp_path):
-        api_dir = tmp_path / "apis"
-        api_dir.mkdir()
-
-        api_file = api_dir / "user_info.py"
-        with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def user_info(data=data, token=token):
-    """
-    用户信息
-    /api/user/info
-    """
-    url = "/api/user/info"
-    headers = {}
-    return client.get(url=url, headers=headers, params=data)
-''')
+        api_file = _write_api_file(tmp_path, "/api/user/info")
 
         result = URLMatcher.find_matching_api_file("/api/order/list", [str(api_file)])
         assert result is None
@@ -184,56 +175,20 @@ class TestFindMatchingApiFile:
     @allure.story("查找匹配API文件")
     @allure.title("测试多个API文件时的匹配优先级")
     def test_multiple_api_files_priority(self, tmp_path):
-        api_dir = tmp_path / "apis"
-        api_dir.mkdir()
-
-        api_file1 = api_dir / "user_info.py"
-        with open(api_file1, "w", encoding="utf-8") as f:
-            f.write('''def user_info(data=data, token=token):
-    """
-    用户信息
-    /api/user/info
-    """
-    url = "/api/user/info"
-    headers = {}
-    return client.get(url=url, headers=headers, params=data)
-''')
-
-        api_file2 = api_dir / "user_info_param.py"
-        with open(api_file2, "w", encoding="utf-8") as f:
-            f.write('''def user_info_param(data=data, token=token):
-    """
-    用户信息带参数
-    /api/user/{userId}/info
-    """
-    url = "/api/user/{userId}/info"
-    headers = {}
-    return client.get(url=url, headers=headers, params=data)
-''')
+        api_file1 = _write_api_file(tmp_path, "/api/user/info", filename="user_info.py")
+        api_file2 = _write_api_file(tmp_path, "/api/user/{userId}/info", filename="user_info_param.py")
 
         result = URLMatcher.find_matching_api_file("/api/user/info", [str(api_file1), str(api_file2)])
         assert result == str(api_file1)
 
     @allure.feature("URL匹配器")
     @allure.story("查找匹配API文件")
-    @allure.title("测试完整URL匹配（已清理前缀）")
+    @allure.title("测试完整URL前缀归一化匹配")
     def test_full_url_with_base_url_stripped(self, tmp_path):
-        api_dir = tmp_path / "apis"
-        api_dir.mkdir()
+        # 请求 URL 带 scheme://host 前缀：应经 normalize_url 归一化（去除前缀）后命中 API 文件
+        api_file = _write_api_file(tmp_path, "/api/user/info")
 
-        api_file = api_dir / "user_info.py"
-        with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def user_info(data=data, token=token):
-    """
-    用户信息
-    /api/user/{userId}/info
-    """
-    url = "/api/user/{userId}/info"
-    headers = {}
-    return client.get(url=url, headers=headers, params=data)
-''')
-
-        result = URLMatcher.find_matching_api_file("/api/user/123/info", [str(api_file)])
+        result = URLMatcher.find_matching_api_file("https://example.com/api/user/info", [str(api_file)])
         assert result == str(api_file)
 
     @allure.feature("URL匹配器")
@@ -242,41 +197,6 @@ class TestFindMatchingApiFile:
     def test_empty_api_files_list(self):
         result = URLMatcher.find_matching_api_file("/api/user/info", [])
         assert result is None
-
-
-# ==================== _has_numeric_path_segment 测试 ====================
-
-
-class TestHasNumericPathSegment:
-    @allure.feature("URL匹配器")
-    @allure.story("数字路径段检测")
-    @allure.title("测试包含纯数字路径段")
-    def test_pure_numeric_segment(self):
-        matcher = URLMatcher()
-        assert matcher._has_numeric_path_segment("/api/user/123/info") is True
-        assert matcher._has_numeric_path_segment("/order/45678") is True
-
-    @allure.feature("URL匹配器")
-    @allure.story("数字路径段检测")
-    @allure.title("测试包含3位以上数字的路径段")
-    def test_long_numeric_segment(self):
-        matcher = URLMatcher()
-        assert matcher._has_numeric_path_segment("/api/product/abc123def") is True
-
-    @allure.feature("URL匹配器")
-    @allure.story("数字路径段检测")
-    @allure.title("测试无数字路径段")
-    def test_no_numeric_segment(self):
-        matcher = URLMatcher()
-        assert matcher._has_numeric_path_segment("/api/user/info") is False
-        assert matcher._has_numeric_path_segment("/api/user/list") is False
-
-    @allure.feature("URL匹配器")
-    @allure.story("数字路径段检测")
-    @allure.title("测试短数字路径段（仅1位数字不匹配）")
-    def test_short_numeric_segment(self):
-        matcher = URLMatcher()
-        assert matcher._has_numeric_path_segment("/api/ab1") is False
 
 
 # ==================== normalize_url 测试 ====================
@@ -318,6 +238,18 @@ class TestNormalizeUrl:
     def test_no_base_url(self):
         result = URLMatcher.normalize_url("/api/user/list")
         assert result == "/api/user/list"
+
+    @allure.feature("URL匹配器")
+    @allure.story("URL规范化")
+    @allure.title("测试绝对URL无匹配base_url时仅保留path部分")
+    def test_absolute_url_no_base_match(self):
+        # 绝对 URL 未匹配任何 base_url，应只保留 path 部分
+        result = URLMatcher.normalize_url("https://other.com/api/user/list")
+        assert result == "/api/user/list"
+
+        # 绝对 URL 仅 host 无 path，应回落到 "/"
+        result2 = URLMatcher.normalize_url("https://other.com")
+        assert result2 == "/"
 
 
 # ==================== generate_function_name 测试 ====================
@@ -404,16 +336,27 @@ class TestGetUrlInfo:
     def test_url_with_braces(self):
         matcher = URLMatcher()
         result = matcher.get_url_info("/api/user/{userId}/info")
+        # 无配置/无 Swagger 命中时，花括号 URL 按字面值回落：pattern=原URL、不提取路径参数
+        assert result["original_url"] == "/api/user/{userId}/info"
+        assert result["pattern"] == "/api/user/{userId}/info"
+        assert result["path_params"] == {}
         assert result["has_path_params"] is False
-        assert result["function_name"] is not None
+        assert result["function_name"] == "api_user_userId_info"
 
     @allure.feature("URL匹配器")
     @allure.story("获取URL信息")
     @allure.title("测试带数字路径的URL（从配置匹配）")
-    def test_url_with_numeric_path(self):
+    def test_url_with_numeric_path(self, monkeypatch):
+        # PATH_URLS 配置了路径模板后，数值路径 URL 应命中模板并提取路径参数
+        if APIConfig._config is None:
+            APIConfig._config = APIConfig._load_config()
+        monkeypatch.setitem(APIConfig._config, "PATH_URLS", ["/api/user/{userId}/info"])
         matcher = URLMatcher()
         result = matcher.get_url_info("/api/user/12345/info")
         assert result["original_url"] == "/api/user/12345/info"
+        assert result["pattern"] == "/api/user/{userId}/info"
+        assert result["path_params"] == {"userId": "12345"}
+        assert result["has_path_params"] is True
 
     @allure.feature("URL匹配器")
     @allure.story("获取URL信息")
@@ -423,6 +366,8 @@ class TestGetUrlInfo:
         result1 = matcher.get_url_info("/api/user/login")
         result2 = matcher.get_url_info("/api/user/login")
         assert result1 == result2
+        # 第二次调用命中 _url_info_cache，缓存只保留一条
+        assert len(matcher._url_info_cache) == 1
 
 
 # ==================== remove_base_path 测试 ====================
@@ -455,32 +400,6 @@ class TestRemoveBasePath:
     @allure.title("测试不匹配的基础路径")
     def test_non_matching_base_path(self):
         result = URLMatcher.remove_base_path("/api/user/login", "/v2")
-        assert result == "/api/user/login"
-
-
-# ==================== _add_base_path 测试 ====================
-
-
-class TestAddBasePath:
-    @allure.feature("URL匹配器")
-    @allure.story("添加基础路径")
-    @allure.title("测试添加基础路径")
-    def test_add_base_path(self):
-        result = URLMatcher._add_base_path("/api/user/login", "/swagger")
-        assert result == "/swagger/api/user/login"
-
-    @allure.feature("URL匹配器")
-    @allure.story("添加基础路径")
-    @allure.title("测试空基础路径")
-    def test_empty_base_path(self):
-        result = URLMatcher._add_base_path("/api/user/login", "")
-        assert result == "/api/user/login"
-
-    @allure.feature("URL匹配器")
-    @allure.story("添加基础路径")
-    @allure.title("测试根路径基础路径")
-    def test_root_base_path(self):
-        result = URLMatcher._add_base_path("/api/user/login", "/")
         assert result == "/api/user/login"
 
 
@@ -568,6 +487,8 @@ class TestMatchWithSwagger:
         result1 = matcher.match_with_swagger("/user/123/info")
         result2 = matcher.match_with_swagger("/user/123/info")
         assert result1 == result2
+        # 第二次调用命中 _swagger_match_cache，缓存只保留一条
+        assert len(matcher._swagger_match_cache) == 1
 
 
 # ==================== find_matching_api_file 边缘测试 ====================
@@ -578,24 +499,11 @@ class TestFindMatchingApiFileEdge:
     @allure.story("查找匹配API文件-边缘")
     @allure.title("测试URL标准化匹配")
     def test_normalized_url_match(self, tmp_path):
-        api_dir = tmp_path / "apis"
-        api_dir.mkdir()
+        api_file = _write_api_file(tmp_path, "/api/user/info")
 
-        api_file = api_dir / "user_info.py"
-        with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def user_info(data=data, token=token):
-    """
-    用户信息
-    /api/user/info
-    """
-    url = "/api/user/info"
-    headers = {}
-    return client.get(url=url, headers=headers, params=data)
-''')
-
-        # 带查询参数的URL应该匹配到标准化的API文件URL
-        result = URLMatcher.find_matching_api_file("api/user/info", [str(api_file)])
-        assert result is not None
+        # 带查询参数、无前导斜杠的请求 URL 应标准化（去 query、补斜杠）后命中 API 文件
+        result = URLMatcher.find_matching_api_file("api/user/info?page=1&size=10", [str(api_file)])
+        assert result == str(api_file)
 
     @allure.feature("URL匹配器")
     @allure.story("查找匹配API文件-边缘")
@@ -605,15 +513,91 @@ class TestFindMatchingApiFileEdge:
         api_dir.mkdir()
 
         api_file = api_dir / "no_url.py"
-        with open(api_file, "w", encoding="utf-8") as f:
-            f.write('''def no_url(data=data, token=token):
+        api_file.write_text(
+            '''def no_url(data=data, token=token):
     """
     无URL
     """
     url = None
     headers = {}
     return client.get(url=url, headers=headers, params=data)
-''')
+''',
+            encoding="utf-8",
+        )
 
         result = URLMatcher.find_matching_api_file("/api/user/info", [str(api_file)])
         assert result is None
+
+    @allure.feature("URL匹配器")
+    @allure.story("查找匹配API文件-边缘")
+    @allure.title("测试反向模式匹配命中API文件")
+    def test_reverse_pattern_match(self, tmp_path):
+        # 请求 URL 为模板形式，API 文件 URL 为具体值：反向 match_url_pattern(file_url, request_url) 命中
+        api_file = _write_api_file(tmp_path, "/api/user/123/info", filename="user_123_info.py")
+        result = URLMatcher.find_matching_api_file("/api/user/{userId}/info", [str(api_file)])
+        assert result == str(api_file)
+
+
+@allure.feature("URL匹配器")
+@allure.story("Swagger模板匹配")
+@allure.title("测试 paths 键已含 basePath 时模板匹配仍然生效")
+def test_template_match_when_paths_include_basepath():
+    matcher = URLMatcher()
+    matcher.swagger_data = {
+        "basePath": "/admin",
+        "paths": {
+            "/admin/x/page": {"get": {}},
+            "/admin/x/{id}": {"get": {}},
+        },
+    }
+
+    # 具体取值应命中模板并提取路径参数（修复前 pattern 退化成原 URL、参数丢失）
+    templated = matcher.get_url_info("/admin/x/12345")
+    assert templated["pattern"] == "/admin/x/{id}"
+    assert templated["path_params"] == {"id": "12345"}
+    assert templated["function_name"] == "admin_x_id"
+
+    # 文档里存在的具体路径仍精确命中，且不会被重复加 basePath
+    exact = matcher.get_url_info("/admin/x/page")
+    assert exact["pattern"] == "/admin/x/page"
+    assert exact["path_params"] == {}
+    assert "admin/admin" not in exact["pattern"]
+
+
+@allure.feature("URL匹配器")
+@allure.story("Swagger模板匹配")
+@allure.title("测试 paths 键不含 basePath 与含 basePath 结果一致")
+def test_template_match_basepath_shapes_equivalent():
+    results = []
+    for paths in ({"/x/{id}": {"get": {}}}, {"/admin/x/{id}": {"get": {}}}):
+        matcher = URLMatcher()
+        matcher.swagger_data = {"basePath": "/admin", "paths": paths}
+        info = matcher.get_url_info("/admin/x/12345")
+        results.append((info["pattern"], info["path_params"], info["function_name"]))
+
+    assert results[0] == results[1]
+    assert results[0] == ("/admin/x/{id}", {"id": "12345"}, "admin_x_id")
+
+
+@allure.feature("URL匹配器")
+@allure.story("Swagger模板匹配")
+@allure.title("测试具体路径优先精确命中而非被通配模板劫持")
+def test_exact_path_wins_over_wildcard_template():
+    matcher = URLMatcher()
+    matcher.swagger_data = {
+        "basePath": "/appStore",
+        "paths": {
+            "/mobile/returnOrder/page": {"get": {}},
+            "/mobile/returnOrder/{id}": {"get": {}},
+        },
+    }
+
+    exact = matcher.get_url_info("/appStore/mobile/returnOrder/page")
+    assert exact["pattern"] == "/appStore/mobile/returnOrder/page"
+    assert exact["path_params"] == {}
+    assert exact["function_name"] == "appStore_mobile_returnOrder_page"
+
+    # 具体取值（文档里没有该键）仍应命中模板并提取路径参数
+    templated = matcher.get_url_info("/appStore/mobile/returnOrder/12345")
+    assert templated["pattern"] == "/appStore/mobile/returnOrder/{id}"
+    assert templated["path_params"] == {"id": "12345"}

@@ -1,0 +1,18 @@
+{% if async_mode %}        async with {{ function_name }}({{ param_var }}={{ param_var }}, headers=self.headers) as r:
+            assert r.status == 200
+            data = await r.json()
+            assert data['code'] == 200
+{% else %}        with {{ function_name }}({{ param_var }}={{ param_var }}, headers=self.headers) as r:
+            assert r.status_code == 200
+            data = r.json()
+            assert data['code'] == 200
+{% endif %}{% if search_enabled %}
+            # 验证返回数据符合搜索条件
+            resp_data = data.get('data')
+            items = resp_data.get('list', []) if isinstance(resp_data, dict) else []
+            for item in items:
+                if isinstance(item, dict):
+                    for k, v in item.items():
+                        if k.lower() == '{{ search_param }}':
+                            {{ verify_assert }}
+{% endif %}

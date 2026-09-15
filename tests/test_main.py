@@ -1,6 +1,4 @@
-"""
-测试 __main__.py 模块（CLI 入口）
-"""
+"""测试 har2pytest.__main__ 模块中 CLI 命令分发、参数校验与各处理函数的功能与边界。"""
 
 import logging
 import sys
@@ -11,6 +9,8 @@ import allure
 import pytest
 
 import har2pytest.__main__ as main_module
+
+# ==================== 辅助函数 ====================
 
 
 def _mock_cli_env(monkeypatch, tmp_path, argv):
@@ -35,6 +35,9 @@ def _tc_args(**overrides):
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
+
+
+# ==================== main() 命令分发测试 ====================
 
 
 @allure.feature("CLI入口")
@@ -178,12 +181,16 @@ async def test_handle_testcase_batch_missing_api_files(caplog):
     assert "必须指定 --api-files 参数" in caplog.text
 
 
+# ==================== handle_testcase 成功场景测试 ====================
+
+
 @allure.feature("CLI入口")
 @allure.story("testcase命令处理")
 @allure.title("测试list_query模式成功生成测试用例")
 async def test_handle_testcase_list_query_success(monkeypatch, caplog):
     caplog.set_level(logging.INFO, logger="har2pytest")
     generator_instance = MagicMock()
+    generator_instance.swagger_handler.close = AsyncMock()
     generator_instance.generate_parametrized_list_testcases = AsyncMock(return_value=["test_user_list.py"])
     monkeypatch.setattr(main_module, "TestCaseGenerator", MagicMock(return_value=generator_instance))
 
@@ -202,6 +209,7 @@ async def test_handle_testcase_list_query_success(monkeypatch, caplog):
 async def test_handle_testcase_list_query_no_files(monkeypatch, caplog):
     caplog.set_level(logging.INFO, logger="har2pytest")
     generator_instance = MagicMock()
+    generator_instance.swagger_handler.close = AsyncMock()
     generator_instance.generate_parametrized_list_testcases = AsyncMock(return_value=[])
     monkeypatch.setattr(main_module, "TestCaseGenerator", MagicMock(return_value=generator_instance))
 
@@ -212,10 +220,83 @@ async def test_handle_testcase_list_query_no_files(monkeypatch, caplog):
 
 
 @allure.feature("CLI入口")
+@allure.story("testcase参数校验")
+@allure.title("测试--mark非合法标识符时拒绝执行")
+async def test_handle_testcase_invalid_mark(caplog):
+    caplog.set_level(logging.ERROR, logger="har2pytest")
+
+    result = await main_module.handle_testcase(_tc_args(mark="2025-01-01", url="/api/test"))
+
+    assert result is None
+    assert "--mark 必须是合法的 Python 标识符" in caplog.text
+
+
+@allure.feature("CLI入口")
+@allure.story("testcase命令处理")
+@allure.title("测试complex_scenario模式成功生成测试用例")
+async def test_handle_testcase_complex_success(monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="har2pytest")
+    generator_instance = MagicMock()
+    generator_instance.swagger_handler.close = AsyncMock()
+    generator_instance.generate_scenario_testcase = AsyncMock(return_value="testcases/test_login.py")
+    monkeypatch.setattr(main_module, "TestCaseGenerator", MagicMock(return_value=generator_instance))
+
+    args = _tc_args(pattern="complex_scenario", url="/api/login", mark="test_4295")
+    await main_module.handle_testcase(args)
+
+    generator_instance.generate_scenario_testcase.assert_awaited_once_with(
+        "api_request.har", "/api/login", "test_4295", overwrite=False
+    )
+    assert "成功生成测试用例文件" in caplog.text
+
+
+@allure.feature("CLI入口")
+@allure.story("testcase命令处理")
+@allure.title("测试complex_scenario模式未生成文件时提示")
+async def test_handle_testcase_complex_no_files(monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="har2pytest")
+    generator_instance = MagicMock()
+    generator_instance.swagger_handler.close = AsyncMock()
+    generator_instance.generate_scenario_testcase = AsyncMock(return_value=None)
+    monkeypatch.setattr(main_module, "TestCaseGenerator", MagicMock(return_value=generator_instance))
+
+    args = _tc_args(pattern="complex_scenario", url="/api/login")
+    await main_module.handle_testcase(args)
+
+    assert "未生成新的测试用例文件" in caplog.text
+
+
+@allure.feature("CLI入口")
+@allure.story("testcase命令处理")
+@allure.title("测试batch模式成功批量生成测试用例")
+async def test_handle_testcase_batch_success(monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="har2pytest")
+    generator_instance = MagicMock()
+    generator_instance.swagger_handler.close = AsyncMock()
+    generator_instance.generate_batch_testcases = AsyncMock(
+        return_value={"total": 2, "skipped": 0, "generated": 2, "failed": 0, "generated_files": ["a.py", "b.py"]}
+    )
+    monkeypatch.setattr(main_module, "TestCaseGenerator", MagicMock(return_value=generator_instance))
+
+    args = _tc_args(pattern="batch", api_files="api1.py,api2.py", mark="test_4295")
+    await main_module.handle_testcase(args)
+
+    generator_instance.generate_batch_testcases.assert_awaited_once_with(
+        ["api1.py", "api2.py"], "test_4295", overwrite=False, har_file_path=None
+    )
+    assert "总API文件数: 2" in caplog.text
+    assert "成功生成: 2" in caplog.text
+
+
+# ==================== handle_* 命令处理函数测试 ====================
+
+
+@allure.feature("CLI入口")
 @allure.story("命令处理函数")
 @allure.title("测试handle_api生成API文件")
 async def test_handle_api(monkeypatch, tmp_path):
     api_generator = MagicMock()
+    api_generator.swagger_handler.close = AsyncMock()
     monkeypatch.setattr(main_module, "APIGenerator", MagicMock(return_value=api_generator))
     monkeypatch.setattr(
         main_module,
@@ -250,6 +331,7 @@ def test_handle_summary(monkeypatch):
 @allure.title("测试handle_swagger生成API文件")
 async def test_handle_swagger(monkeypatch, tmp_path):
     api_generator = MagicMock()
+    api_generator.swagger_handler.close = AsyncMock()
     api_generator.generate_apis_from_swagger = AsyncMock(return_value=[])
     monkeypatch.setattr(main_module, "APIGenerator", MagicMock(return_value=api_generator))
 
@@ -271,6 +353,7 @@ async def test_handle_swagger(monkeypatch, tmp_path):
 @allure.title("测试handle_swagger生成文件后生成索引")
 async def test_handle_swagger_with_files(monkeypatch, tmp_path):
     api_generator = MagicMock()
+    api_generator.swagger_handler.close = AsyncMock()
     api_generator.generate_apis_from_swagger = AsyncMock(return_value=["apis/swagger_api.py"])
     monkeypatch.setattr(main_module, "APIGenerator", MagicMock(return_value=api_generator))
 

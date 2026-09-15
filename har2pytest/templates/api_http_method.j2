@@ -1,0 +1,16 @@
+{% if method == "GET" %}{% if has_params %}    return client.get(url=url, params=params, headers=headers)
+{% else %}    return client.get(url=url, headers=headers)
+{% endif %}{% elif method == "POST" %}{% if has_data %}{% if is_urlencode %}    data = urlencode(data) # application/x-www-form-urlencoded传参需要特殊处理
+
+    return client.post(url=url, data=data, headers=headers)
+{% elif is_json_content %}    return client.post(url=url, json=data, headers=headers)
+{% else %}    return client.post(url=url, data=data, headers=headers)
+{% endif %}{% else %}    return client.post(url=url, headers=headers)
+{% endif %}{% elif method in ("PUT", "PATCH", "DELETE") %}{% set client_call = "client." + method.lower() %}{% if has_data %}{% if is_urlencode %}    data = urlencode(data) # application/x-www-form-urlencoded传参需要特殊处理
+
+    return {{ client_call }}(url=url, data=data, headers=headers)
+{% elif is_json_content %}    return {{ client_call }}(url=url, json=data, headers=headers)
+{% else %}    return {{ client_call }}(url=url, data=data, headers=headers)
+{% endif %}{% elif has_params %}    return {{ client_call }}(url=url, params=params, headers=headers)
+{% else %}    return {{ client_call }}(url=url, headers=headers)
+{% endif %}{% endif %}

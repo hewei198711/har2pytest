@@ -1,0 +1,5 @@
+    # 构建 multipart/form-data 请求
+    m, content_type = build_form_data(data)
+    if content_type:
+        headers["content-type"] = content_type
+    return client.post(url=url, data=m, headers=headers)

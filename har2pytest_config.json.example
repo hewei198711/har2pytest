@@ -46,11 +46,15 @@
         "pageSize"
     ],
     "LIST_QUERY_KEYWORDS": [
-        "列表",
-        "查询"
+        "列表"
     ],
     "LIST_QUERY_EXCLUDE_KEYWORDS": [
         "详情"
+    ],
+    "TESTCASE_PROFILES": [
+        { "url": "/mgmt/order/orderList", "mode": "list_query" },
+        { "url": "/mgmt/order/{orderNo}", "mode": "complex_scenario" },
+        { "url": "/mall/order/*", "mode": "auto", "keywords": ["列表"], "exclude_keywords": ["详情"] }
     ],
     "STATE_VALUE_PATTERNS": [
         "(-?\\d+)\\s*[:：]",

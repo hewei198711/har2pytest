@@ -1,0 +1,11 @@
+@allure.severity(Severity.{{ severity }})
+@allure.feature('{{ service_package }}')
+@allure.story('{{ api_url }}')
+{% if description %}{{ description }}
+{% endif %}class TestClass:
+
+    @property
+    def headers(self):
+        return {
+{% for key, value in header_items %}            "{{ key }}": {{ value }},
+{% endfor %}        }

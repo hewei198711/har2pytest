@@ -28,11 +28,11 @@
     "timestamp"
   ],
   "HEADERS_TO_INCLUDE": {
-    "authorization": "f\"bearer {os.environ['token']}\"",
+    "authorization": "f\"token {os.environ['token']}\"",
     "content-type": "application/json;charset=UTF-8"
   },
   "REQUIRED_HEADERS": {
-    "authorization": "f\"bearer {os.environ['token']}\""
+    "authorization": "f\"token {os.environ['token']}\""
   },
   "PAGINATION_PARAMS": [
     "pageNum",

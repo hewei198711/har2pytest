@@ -10,6 +10,7 @@
 | [HAR 文件解析](har_file_parsing.md) | HAR 解析规则与参数过滤 |
 | [Swagger 文档解析](swagger_document_parsing.md) | Swagger 文档获取与参数提取 |
 | [测试用例生成模式](testcase_generation_modes.md) | list_query / complex_scenario / batch 三种模式详解 |
+| [配置参考](configuration.md) | 全部配置项集中索引 |
 
 ## 相关链接
 

@@ -44,6 +44,13 @@ class APIConfig:
         "LIST_QUERY_KEYWORDS": ["列表"],
         # 列表查询排除关键字：描述含这些关键字时不使用参数化列表模式（如“详情”）
         "LIST_QUERY_EXCLUDE_KEYWORDS": [],
+        # 单接口测试模式配置（TESTCASE_PROFILES）：
+        # 按 URL 显式指定生成模式，消除依赖中文关键字/命令行选项的脆弱判定。
+        # 每条: {"url": "/mgmt/order/orderList", "mode": "auto|list_query|complex_scenario",
+        #        "keywords": [...], "exclude_keywords": [...]}
+        #  - mode=auto（缺省）时回落关键字启发式；keywords/exclude_keywords 可覆盖全局默认
+        #  - url 支持精确路径、{param} 模板或末尾通配 *（如 "/mgmt/order/*"）
+        "TESTCASE_PROFILES": [],
         # 状态值提取的额外正则模式（补充内置4种模式）
         "STATE_VALUE_PATTERNS": [],
     }
@@ -51,7 +58,7 @@ class APIConfig:
     # 初始化配置
     _config: dict | None = None
     _config_warned = False
-    _config_file_exists = False
+    _service_mapping_lower: dict[str, str] = {}
 
     @classmethod
     def _load_config(cls):
@@ -61,10 +68,9 @@ class APIConfig:
         如果未设置则使用当前目录下的 har2pytest_config.json。
 
         Returns:
-            tuple[dict, bool]: 返回配置字典和配置文件是否存在的标志。
+            dict: 返回配置字典。
         """
         config = copy.deepcopy(cls._default_config)
-        config_file_exists = False
 
         # 尝试从环境变量读取配置文件路径
         config_file = os.environ.get("HAR2PYTEST_CONFIG")
@@ -72,20 +78,20 @@ class APIConfig:
             # 默认配置文件路径
             config_file = os.path.join(os.getcwd(), "har2pytest_config.json")
 
+        # 一次性检查物理存在，后续复用（避免多次 os.path.exists）
+        config_file_present = os.path.exists(config_file)
         logger.debug(f"配置文件路径: {config_file}")
-        logger.debug(f"配置文件是否存在: {os.path.exists(config_file)}")
+        logger.debug(f"配置文件是否存在: {config_file_present}")
 
         # 尝试从配置文件读取
-        if os.path.exists(config_file):
-            config_file_exists = True
+        if config_file_present:
             try:
                 with open(config_file, encoding="utf-8") as f:
                     user_config = json.load(f)
                     config.update(user_config)
                     logger.debug(f"成功加载配置文件，DEFAULT_API_DIR: {config.get('DEFAULT_API_DIR')}")
             except Exception as e:
-                # 配置文件读取失败，使用默认配置
-                config_file_exists = False
+                # 配置文件读取失败（损坏/格式错误）：保留已读入的默认配置，交由必需项校验报错
                 logger.warning(f"配置文件 {config_file} 读取失败: {str(e)}，将使用默认配置")
         else:
             # 配置文件不存在，使用默认配置
@@ -107,32 +113,41 @@ class APIConfig:
                 "    }"
             )
 
-        # 校验必需配置项
-        required_configs = [
-            ("BASE_URLS", "基础URL列表"),
-            ("TESTCASE_DIR", "测试用例目录"),
-            ("SERVICE_MAPPING", "服务映射配置"),
-            ("DEFAULT_API_DIR", "默认API文件目录"),
-            ("SWAGGER_DOC_URLS", "Swagger文档URL配置"),
-        ]
+        # 校验必需配置项：仅当"配置文件存在但内容缺失/读取失败"时强制报错；
+        # 完全没有配置文件时放行默认值并提示用户创建（见 _warn_missing_config）
+        if not config_file_present:
+            if config.get("SERVICE_MAPPING") is None:
+                config["SERVICE_MAPPING"] = {}
+        else:
+            required_configs = [
+                ("BASE_URLS", "基础URL列表"),
+                ("TESTCASE_DIR", "测试用例目录"),
+                ("SERVICE_MAPPING", "服务映射配置"),
+                ("DEFAULT_API_DIR", "默认API文件目录"),
+                ("SWAGGER_DOC_URLS", "Swagger文档URL配置"),
+            ]
 
-        missing_configs = []
-        for key, description in required_configs:
-            if config.get(key) is None:
-                missing_configs.append(f"- {key} ({description})")
+            missing_configs = []
+            for key, description in required_configs:
+                if config.get(key) is None:
+                    missing_configs.append(f"- {key} ({description})")
 
-        if missing_configs:
-            raise ValueError(
-                "配置文件缺少必需配置项，请在配置文件中添加以下配置：\n"
-                + "\n".join(missing_configs)
-                + "\n\n请参考配置文件示例：har2pytest_config.json.example"
-            )
+            if missing_configs:
+                raise ValueError(
+                    "配置文件缺少必需配置项，请在配置文件中添加以下配置：\n"
+                    + "\n".join(missing_configs)
+                    + "\n\n请参考配置文件示例：har2pytest_config.json.example"
+                )
 
-        # 当配置文件不存在时，提示用户创建配置文件
-        if not config_file_exists:
+        # 当配置文件物理不存在时，提示用户创建配置文件
+        if not config_file_present:
             cls._warn_missing_config()
 
-        return config, config_file_exists
+        # 预计算 SERVICE_MAPPING 的小写键映射，供 determine_service_package O(1) 查找
+        service_mapping = config.get("SERVICE_MAPPING") or {}
+        cls._service_mapping_lower = {k.lower(): v for k, v in service_mapping.items()}
+
+        return config
 
     @classmethod
     def _warn_missing_config(cls):
@@ -145,12 +160,13 @@ class APIConfig:
             return
 
         cls._config_warned = True
-        logger.warning("=" * 60)
-        logger.warning("配置文件 har2pytest_config.json 不存在，使用默认配置")
-        logger.warning("=" * 60)
-        logger.warning("如需自定义配置，请创建 har2pytest_config.json 文件")
-        logger.warning("配置示例:")
-        logger.warning("""{
+        logger.warning(
+            "=" * 60 + "\n"
+            "配置文件 har2pytest_config.json 不存在，使用默认配置\n"
+            "=" * 60 + "\n"
+            "如需自定义配置，请创建 har2pytest_config.json 文件\n"
+            "配置示例:\n"
+            """{
     "BASE_URLS": ["https://api.example.com"],
     "SERVICE_MAPPING": {
         "mobile": "mobile_application",
@@ -163,8 +179,8 @@ class APIConfig:
         "center_application": "https://api.example.com/swagger/center-application"
     },
     "INVALID_PARAMS": ["sign", "token"]
-}""")
-        logger.warning("=" * 60)
+}""" + "\n" + "=" * 60
+        )
 
     @classmethod
     def get_config(cls, key: str) -> Any:
@@ -177,10 +193,16 @@ class APIConfig:
             Any: 配置项的值，如果不存在则返回 None。
         """
         if cls._config is None:
-            cls._config, cls._config_file_exists = cls._load_config()
+            cls._config = cls._load_config()
 
         value = cls._config.get(key)
         return value
+
+    # ------------------------------------------------------------------
+    # 配置访问器：get_config 是唯一加载入口，下面的 classmethod 只是带类型的
+    # 便捷别名（供 IDE 补全/类型检查）。刻意保留而非用 setattr 动态生成，
+    # 以保证调用点的属性解析与类型推断不退化。
+    # ------------------------------------------------------------------
 
     @classmethod
     def BASE_URLS(cls) -> list:
@@ -239,6 +261,10 @@ class APIConfig:
         return cls.get_config("STATE_VALUE_PATTERNS")
 
     @classmethod
+    def TESTCASE_PROFILES(cls) -> list[dict]:
+        return cls.get_config("TESTCASE_PROFILES")
+
+    @classmethod
     def determine_service_package(cls, url: str | None) -> str:
         """根据 URL 判断所属的微服务包。
 
@@ -257,7 +283,7 @@ class APIConfig:
         """
 
         # 处理 None 或空字符串
-        if url is None or not url:
+        if not url:
             return cls.DEFAULT_API_DIR()
 
         # 从URL中提取第一个路径段
@@ -266,11 +292,5 @@ class APIConfig:
             return cls.DEFAULT_API_DIR()
 
         first_segment = match.group(1).lower()
-        # 从SERVICE_MAPPING中查找对应的服务包（不区分大小写）
-        service_mapping = cls.SERVICE_MAPPING()
-        for key, value in service_mapping.items():
-            if key.lower() == first_segment:
-                return value
-
-        # 默认服务包
-        return cls.DEFAULT_API_DIR()
+        # 从预计算的小写键映射中 O(1) 查找对应的服务包
+        return cls._service_mapping_lower.get(first_segment, cls.DEFAULT_API_DIR())

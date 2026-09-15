@@ -1,6 +1,4 @@
-"""
-测试 pytest_utils.py 模块
-"""
+"""测试 har2pytest.pytest_utils 模块中 retry_step 重试装饰器的同步/异步重试、异常类型过滤与日志输出的功能与边界。"""
 
 import logging
 
@@ -8,6 +6,8 @@ import allure
 import pytest
 
 from har2pytest.pytest_utils import retry_step
+
+# ==================== retry_step 重试装饰器测试 ====================
 
 
 @allure.feature("pytest工具函数")
@@ -36,7 +36,8 @@ def test_retry_step_sync_success_after_retry(caplog):
 @allure.feature("pytest工具函数")
 @allure.story("重试装饰器")
 @allure.title("测试同步函数一直失败时按次数重试并抛出异常")
-def test_retry_step_sync_fail_always():
+def test_retry_step_sync_fail_always(caplog):
+    caplog.set_level(logging.WARNING, logger="har2pytest")
     attempts = []
 
     @retry_step(counts=3, times=0)
@@ -48,6 +49,8 @@ def test_retry_step_sync_fail_always():
         always_fail()
     # 总执行次数 = counts（含首次）
     assert len(attempts) == 3
+    # 最后一次失败时日志提示“重试次数已用完”
+    assert "重试次数已用完" in caplog.text
 
 
 @allure.feature("pytest工具函数")

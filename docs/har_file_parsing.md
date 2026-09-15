@@ -46,7 +46,7 @@ flowchart TD
 
 #### Step 2: 过滤非 API 请求
 
-仅保留 `_resourceType === "xhr"` 或 `"fetch"` 的条目，过滤掉以下资源类型的请求：
+仅保留 `_resourceType` 为 `"xhr"` 或 `"fetch"` 的条目；若 HAR 条目缺少 `_resourceType` 字段，默认按 `"xhr"` 保留（兼容无该字段的抓包）。过滤掉以下资源类型的请求：
 
 | 资源类型 | 处理方式 |
 |---------|---------|
@@ -63,7 +63,7 @@ flowchart TD
 
 #### Step 3: 过滤无效 URL
 
-检查 URL 是否包含 `KILL_URLS` 中的关键字（默认空列表，需在配置文件中自定义）：
+检查 URL 是否包含 `KILL_URLS` 中的关键字。`KILL_URLS` **默认是空列表**（不过滤），下面只是配置示例：
 
 ```python
 KILL_URLS = [
@@ -85,7 +85,8 @@ KILL_URLS = [
 
 #### Step 4: 过滤 Headers
 
-仅保留配置 `HEADERS_TO_INCLUDE` 中定义的 headers 和以下必要的 headers：
+仅保留配置 `HEADERS_TO_INCLUDE` 中定义的 headers 和以下必要的 headers。
+**当 `HEADERS_TO_INCLUDE` 为空时（默认值即空 `{}`），不做过滤，保留全部 headers**：
 
 | Header | 说明 |
 |--------|------|
@@ -97,13 +98,15 @@ KILL_URLS = [
 
 #### Step 5: 过滤无效参数
 
-使用 `INVALID_PARAMS` 配置过滤掉以下参数（默认空列表，需在配置文件中自定义）：
+使用 `INVALID_PARAMS` 配置过滤掉无效参数。`INVALID_PARAMS` **默认是空列表**，下面只是配置示例：
 
 ```python
 INVALID_PARAMS = ["rnd", "timestamp", "_", "t", "callback", "jsonp"]
 ```
 
 这些参数通常是前端框架或工具自动添加的，对 API 测试无实际意义。
+过滤会**递归**进入嵌套的 dict/list（JSON body 内的同名字段同样被移除），
+标量值（字符串/数字/布尔/None）原样保留。
 
 #### Step 6: 解析 POST 数据
 
@@ -114,6 +117,8 @@ INVALID_PARAMS = ["rnd", "timestamp", "_", "t", "callback", "jsonp"]
 | `application/json` | `json.loads(postData.text)` | `{"pageNum": 1, "pageSize": 10}` |
 | `multipart/form-data` | 遍历 `postData.params` | `{"file": "...", "name": "..."}` |
 | `application/x-www-form-urlencoded` | `parse_qs(postData.text)` | `{"pageNum": "1", "pageSize": "10"}` |
+
+> **不支持的 Content-Type**：若 `postData` 存在但 `content-type` 不属于以上三种，该请求会被跳过并输出警告日志。
 
 #### Step 7: 提取 URL 相对路径
 
@@ -145,9 +150,9 @@ BASE_URLS = [
 request_info = ParsedRequestInfo(
     method="GET",              # HTTP 方法
     url="/api/example",        # 清理后的相对 URL
-    full_url="https://...",    # 完整 URL
+    full_url="https://...",    # 完整原始 URL
     headers={ ... },            # 过滤后的 headers
-    content_type="...",        # 内容类型
+    content_type="...",        # 内容类型（来自 postData.mimeType）
     cookies={ ... },            # Cookie
     query_params={ ... },       # 过滤后的查询参数
     post_data={ ... },          # 解析后的 POST 数据
@@ -155,6 +160,13 @@ request_info = ParsedRequestInfo(
     response_content={ ... },   # 响应内容（JSON 解析后）
     response_time=123.45,       # 响应时间（毫秒）
     server_ip="192.168.1.1",   # 服务器 IP
+    is_file_upload=False,       # 是否文件上传（api_generator 阶段填充）
+    is_multipart=False,         # 是否 multipart 请求
+    is_need_urlencode=False,    # 是否需 urlencode
+    is_json_content=False,      # 是否 JSON 请求体
+    path_params={ ... },        # 路径参数（URL 匹配后填充）
+    url_pattern=None,           # 匹配到的 URL 模板
+    function_name="...",        # 生成的函数名
 )
 ```
 
@@ -209,7 +221,21 @@ HAR 文件的 JSON 结构如下所示：
 
 ## URL 路径参数识别
 
-### 方式 1：通过 Swagger 文档匹配
+`get_url_info()` 按以下优先级依次尝试，命中即返回：
+
+### 方式 1：通过配置中的 PATH_URLS 匹配（优先）
+
+```python
+PATH_URLS = [
+    "/mobile/returnOrder/{id}",
+    "/invt/order/{orderId}/detail",
+    "/order/product/{productId}/sku/{skuId}",
+]
+```
+
+将请求 URL 逐个与配置中的模板进行匹配，成功则提取路径参数并生成 `f-string` 格式 URL 模板。
+
+### 方式 2：通过 Swagger 文档匹配
 
 ```
 完整 URL: /mobile/returnOrder/12345
@@ -222,25 +248,13 @@ URL 模板: /mobile/returnOrder/{params['id']}
 
 流程：
 1. 获取服务对应的 Swagger 文档数据
-2. 将请求 URL 与 Swagger 中所有 paths 逐一匹配
-3. 成功匹配 → 提取路径参数 → 生成 `f-string` 格式 URL 模板
-4. 匹配失败 → 回退到方式 2
+2. 先精确匹配 paths 中的键（避免具体路径被模板抢走）
+3. 再与带 `{param}` 的路径模板逐一匹配
+4. 匹配成功 → 提取路径参数 → 生成 `f-string` 格式 URL 模板
 
-### 方式 2：通过配置中的 PATH_URLS 匹配
+### 兜底：无模板命中
 
-```python
-PATH_URLS = [
-    "/mobile/returnOrder/{id}",
-    "/invt/order/{orderId}/detail",
-    "/order/product/{productId}/sku/{skuId}",
-]
-```
-
-将请求 URL 逐个与配置中的模板模式进行匹配，成功则提取路径参数。
-
-### 方式 3：数字路径段启发式识别
-
-当以上两种方式都未匹配到路径参数时，通过正则检查 URL 中是否包含数字路径段（如 `/order/123/detail`），如果存在则作为路径参数候选进行处理。
+以上两种方式均未匹配时，URL 原样作为 pattern，无路径参数，函数名由 URL 直接生成。
 
 ---
 
@@ -261,16 +275,3 @@ HAR文件: api_request.har
 --------------------------------------------------------------------------------
 统计: 成功 13 个, 失败 2 个, 平均响应时间 234.56ms
 ```
-
----
-
-## 配置项
-
-| 配置项 | 用途 | 示例值 |
-|--------|------|--------|
-| `BASE_URLS` | 从完整 URL 提取相对路径 | `["https://api.example.com"]` |
-| `KILL_URLS` | 过滤不需要的 URL | `[".js", ".css", ".png"]` |
-| `INVALID_PARAMS` | 过滤无用参数 | `["rnd", "timestamp", "_"]` |
-| `HEADERS_TO_INCLUDE` | 保留的 headers | `{"authorization": "...", "channel": "pc"}` |
-| `REQUIRED_HEADERS` | 必要的 headers | `{"authorization": "..."}` |
-| `PATH_URLS` | URL 模板配置 | `["/order/{id}/detail"]` |

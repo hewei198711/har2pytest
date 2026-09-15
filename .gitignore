@@ -20,6 +20,13 @@ build/
 site/
 htmlcov/
 
+# 本地临时目录（pytest basetemp / 下载缓存等）
+.tmp/
+.tmp_dl/
+.tmp_probe/
+.pytest_tmp/
+pt_tmp_probe/
+
 har2pytest_config.json
 apis/*
 async_apis/*

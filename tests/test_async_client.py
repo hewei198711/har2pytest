@@ -1,6 +1,4 @@
-"""
-测试 async_client.py 模块
-"""
+"""测试 har2pytest.client 模块中 AsyncClient / AsyncResponseContext 的功能与边界。"""
 
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -12,7 +10,43 @@ from har2pytest.client import AsyncClient, AsyncResponseContext, async_client
 from har2pytest.logger import logger
 
 
-@allure.feature("异步客户端")
+# ==================== Fixtures ====================
+
+
+@pytest.fixture
+def mock_response():
+    """构造默认的异步 mock 响应对象（200 OK + JSON）。"""
+    resp = AsyncMock()
+    resp.status = 200
+    resp.headers = {"Content-Type": "application/json"}
+    resp.json = AsyncMock(return_value={"code": 200})
+    resp.raise_for_status = MagicMock()
+    resp.release = AsyncMock()
+    resp.text = AsyncMock(return_value='{"code": 200}')
+    return resp
+
+
+@pytest.fixture
+def mock_session(mock_response):
+    """构造异步 mock session，request 返回 mock_response。"""
+    session = AsyncMock()
+    session.request = AsyncMock(return_value=mock_response)
+    session.closed = False
+    session.headers = {}
+    return session
+
+
+@pytest.fixture
+def async_client_with_mock(mock_session, mock_response):
+    """已注入 mock session 的 AsyncClient，同时返回 (client, mock_response)。"""
+    ac = AsyncClient(base_url="https://example.com")
+    ac._session = mock_session
+    return ac, mock_response
+
+
+# ==================== 初始化测试 ====================
+
+
 @allure.story("初始化")
 @allure.title("测试 AsyncClient 初始化")
 def test_async_client_init():
@@ -20,6 +54,9 @@ def test_async_client_init():
     assert client.base_url == "https://example.com"
     assert client.default_timeout == 15
     assert client._session is None
+
+
+# ==================== HTTP 方法上下文创建测试 ====================
 
 
 @allure.feature("异步客户端")
@@ -56,32 +93,41 @@ def test_async_client_put_returns_context():
 
 
 @allure.feature("异步客户端")
+@allure.story("DELETE请求")
+@allure.title("测试 AsyncClient.delete 返回 AsyncResponseContext")
+def test_async_client_delete_returns_context():
+    client = AsyncClient(base_url="https://example.com")
+    ctx = client.delete("/api/resource/1")
+    assert isinstance(ctx, AsyncResponseContext)
+    assert ctx._method == "DELETE"
+    assert ctx._url == "/api/resource/1"
+
+
+@allure.feature("异步客户端")
+@allure.story("PATCH请求")
+@allure.title("测试 AsyncClient.patch 返回 AsyncResponseContext")
+def test_async_client_patch_returns_context():
+    client = AsyncClient(base_url="https://example.com")
+    ctx = client.patch("/api/resource/1", json={"name": "updated"})
+    assert isinstance(ctx, AsyncResponseContext)
+    assert ctx._method == "PATCH"
+    assert ctx._url == "/api/resource/1"
+
+
+# ==================== 请求执行测试 ====================
+
+
+@allure.feature("异步客户端")
 @allure.story("请求执行")
 @allure.title("测试 AsyncResponseContext 成功发起 GET 请求")
-@pytest.mark.asyncio
-async def test_async_response_context_get_success():
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json = AsyncMock(return_value={"code": 200, "data": {}})
-    mock_response.raise_for_status = MagicMock()
-    mock_response.release = AsyncMock()
-    mock_response.text = AsyncMock(return_value='{"code": 200, "data": {}}')
-
-    mock_session = AsyncMock()
-    mock_session.request = AsyncMock(return_value=mock_response)
-    mock_session.closed = False
-    mock_session.headers = {}
-
-    client = AsyncClient(base_url="https://example.com")
-    client._session = mock_session
-
-    ctx = client.get("/api/test", params={"key": "value"})
+async def test_async_response_context_get_success(async_client_with_mock):
+    ac, mock_resp = async_client_with_mock
+    ctx = ac.get("/api/test", params={"key": "value"})
     response = await ctx.__aenter__()
 
-    assert response is mock_response
-    mock_session.request.assert_called_once()
-    call_args = mock_session.request.call_args
+    assert response is mock_resp
+    ac._session.request.assert_called_once()
+    call_args = ac._session.request.call_args
     assert call_args[0][0] == "GET"
     assert call_args[0][1] == "https://example.com/api/test"
 
@@ -89,30 +135,14 @@ async def test_async_response_context_get_success():
 @allure.feature("异步客户端")
 @allure.story("请求执行")
 @allure.title("测试 AsyncResponseContext 成功发起 POST 请求（JSON body）")
-@pytest.mark.asyncio
-async def test_async_response_context_post_json():
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json = AsyncMock(return_value={"code": 200})
-    mock_response.raise_for_status = MagicMock()
-    mock_response.release = AsyncMock()
-    mock_response.text = AsyncMock(return_value='{"code": 200}')
-
-    mock_session = AsyncMock()
-    mock_session.request = AsyncMock(return_value=mock_response)
-    mock_session.closed = False
-    mock_session.headers = {}
-
-    client = AsyncClient(base_url="https://example.com")
-    client._session = mock_session
-
-    ctx = client.post("/api/create", json={"name": "test"})
+async def test_async_response_context_post_json(async_client_with_mock):
+    ac, mock_resp = async_client_with_mock
+    ctx = ac.post("/api/create", json={"name": "test"})
     response = await ctx.__aenter__()
 
-    assert response is mock_response
-    mock_session.request.assert_called_once()
-    call_args = mock_session.request.call_args
+    assert response is mock_resp
+    ac._session.request.assert_called_once()
+    call_args = ac._session.request.call_args
     assert call_args[0][0] == "POST"
     assert call_args[0][1] == "https://example.com/api/create"
 
@@ -120,55 +150,29 @@ async def test_async_response_context_post_json():
 @allure.feature("异步客户端")
 @allure.story("请求执行")
 @allure.title("测试 AsyncResponseContext 使用 async with 语法")
-@pytest.mark.asyncio
-async def test_async_response_context_async_with():
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json = AsyncMock(return_value={"code": 200})
-    mock_response.raise_for_status = MagicMock()
-    mock_response.release = AsyncMock()
-    mock_response.text = AsyncMock(return_value='{"code": 200}')
-
-    mock_session = AsyncMock()
-    mock_session.request = AsyncMock(return_value=mock_response)
-    mock_session.closed = False
-    mock_session.headers = {}
-
-    client = AsyncClient(base_url="https://example.com")
-    client._session = mock_session
-
-    async with client.get("/api/test") as r:
+async def test_async_response_context_async_with(async_client_with_mock):
+    ac, mock_resp = async_client_with_mock
+    async with ac.get("/api/test") as r:
         assert r.status == 200
         data = await r.json()
         assert data["code"] == 200
 
-    mock_response.release.assert_called_once()
+    mock_resp.release.assert_called_once()
+
+
+# ==================== 断言失败处理测试 ====================
 
 
 @allure.feature("异步客户端")
 @allure.story("断言失败处理")
 @allure.title("测试断言失败时附加 Allure 数据")
-@pytest.mark.asyncio
-async def test_async_response_context_assertion_failure_attaches_allure():
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json = AsyncMock(return_value={"code": 500, "msg": "error"})
-    mock_response.text = AsyncMock(return_value='{"code": 500, "msg": "error"}')
-    mock_response.raise_for_status = MagicMock()
-    mock_response.release = AsyncMock()
-
-    mock_session = AsyncMock()
-    mock_session.request = AsyncMock(return_value=mock_response)
-    mock_session.closed = False
-    mock_session.headers = {}
-
-    client = AsyncClient(base_url="https://example.com")
-    client._session = mock_session
+async def test_async_response_context_assertion_failure_attaches_allure(async_client_with_mock):
+    ac, mock_resp = async_client_with_mock
+    mock_resp.json = AsyncMock(return_value={"code": 500, "msg": "error"})
+    mock_resp.text = AsyncMock(return_value='{"code": 500, "msg": "error"}')
 
     with patch("har2pytest.client.allure.attach") as mock_attach:
-        ctx = client.get("/api/test")
+        ctx = ac.get("/api/test")
         with pytest.raises(AssertionError):
             async with ctx as r:
                 data = await r.json()
@@ -178,33 +182,21 @@ async def test_async_response_context_assertion_failure_attaches_allure():
         assert mock_attach.call_count >= 1
 
 
+# ==================== Allure 数据附加测试 ====================
+
+
 @allure.feature("异步客户端")
 @allure.story("Allure 数据附加")
 @allure.title("测试 DEBUG 级别下断言成功时也附加 Allure 数据")
-@pytest.mark.asyncio
-async def test_async_response_context_success_attachs_allure_when_debug():
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json = AsyncMock(return_value={"code": 200})
-    mock_response.raise_for_status = MagicMock()
-    mock_response.release = AsyncMock()
-    mock_response.text = AsyncMock(return_value='{"code": 200}')
-
-    mock_session = AsyncMock()
-    mock_session.request = AsyncMock(return_value=mock_response)
-    mock_session.closed = False
-    mock_session.headers = {}
-
-    client = AsyncClient(base_url="https://example.com")
-    client._session = mock_session
+async def test_async_response_context_success_attaches_allure_when_debug(async_client_with_mock):
+    ac, mock_resp = async_client_with_mock
 
     # 设置 logger 为 DEBUG 级别以触发 Allure 附件
     original_level = logger.level
     logger.setLevel(logging.DEBUG)
     try:
         with patch("har2pytest.client.allure.attach") as mock_attach:
-            async with client.get("/api/test") as r:
+            async with ac.get("/api/test") as r:
                 assert r.status == 200
 
             # DEBUG 级别下，断言成功时也会附加 Allure 数据
@@ -213,10 +205,12 @@ async def test_async_response_context_success_attachs_allure_when_debug():
         logger.setLevel(original_level)
 
 
+# ==================== Session 管理测试 ====================
+
+
 @allure.feature("异步客户端")
 @allure.story("Session管理")
 @allure.title("测试 session 复用")
-@pytest.mark.asyncio
 async def test_async_client_session_reuse():
     client = AsyncClient(base_url="https://example.com")
 
@@ -229,7 +223,6 @@ async def test_async_client_session_reuse():
 @allure.feature("异步客户端")
 @allure.story("Session管理")
 @allure.title("测试 close 关闭 session")
-@pytest.mark.asyncio
 async def test_async_client_close():
     client = AsyncClient(base_url="https://example.com")
 
@@ -242,24 +235,22 @@ async def test_async_client_close():
 
 
 @allure.feature("异步客户端")
-@allure.story("请求日志")
-@allure.title("测试请求日志记录")
-def test_async_client_log_request():
+@allure.story("Session管理")
+@allure.title("测试旧 session 已关闭时自动重建")
+async def test_async_client_session_rebuild_on_closed():
     client = AsyncClient(base_url="https://example.com")
-    mock_logger = MagicMock()
-    client.logger = mock_logger
 
-    request_info = {
-        "method": "GET",
-        "url": "https://example.com/api/test",
-        "headers": {"Authorization": "bearer xxx"},
-        "params": {"key": "value"},
-    }
-    client._log_request("GET", "https://example.com/api/test", request_info)
+    # 用一个 closed=True 的 mock 模拟已关闭的旧 session
+    old_session = MagicMock()
+    old_session.closed = True
+    old_session.close = AsyncMock()
+    client._session = old_session
 
-    mock_logger.info.assert_called_once()
-    call_args = mock_logger.info.call_args
-    assert "Request data:" in call_args[0][0]
+    new_session = await client._get_session()
+    assert new_session is not old_session
+
+
+# ==================== 全局实例测试 ====================
 
 
 @allure.feature("异步客户端")
@@ -270,10 +261,12 @@ def test_async_client_global_instance():
     assert async_client._session is None
 
 
+# ==================== 响应体解析测试 ====================
+
+
 @allure.feature("异步客户端")
 @allure.story("响应体解析")
 @allure.title("测试 _parse_response_body 解析 JSON 响应")
-@pytest.mark.asyncio
 async def test_parse_response_body_json():
     mock_response = AsyncMock()
     mock_response.headers = {"Content-Type": "application/json"}
@@ -290,7 +283,6 @@ async def test_parse_response_body_json():
 @allure.feature("异步客户端")
 @allure.story("响应体解析")
 @allure.title("测试 _parse_response_body 解析 HTML 响应")
-@pytest.mark.asyncio
 async def test_parse_response_body_html():
     mock_response = AsyncMock()
     mock_response.headers = {"Content-Type": "text/html"}
@@ -305,27 +297,45 @@ async def test_parse_response_body_html():
 
 
 @allure.feature("异步客户端")
-@allure.story("请求信息记录")
-@allure.title("测试请求信息包含 params 参数")
-@pytest.mark.asyncio
-async def test_async_response_context_request_info_params():
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json = AsyncMock(return_value={"code": 200})
-    mock_response.text = AsyncMock(return_value='{"code": 200}')
-    mock_response.raise_for_status = MagicMock()
-    mock_response.release = AsyncMock()
-
-    mock_session = AsyncMock()
-    mock_session.request = AsyncMock(return_value=mock_response)
-    mock_session.closed = False
-    mock_session.headers = {}
+@allure.story("响应体解析")
+@allure.title("测试 _parse_response_body 解析 image 响应")
+async def test_parse_response_body_image():
+    mock_resp = AsyncMock()
+    mock_resp.headers = {"Content-Type": "image/png"}
+    mock_resp.read = AsyncMock(return_value=b"\x89PNG\r\n")
 
     client = AsyncClient(base_url="https://example.com")
-    client._session = mock_session
+    ctx = client.get("/api/image")
 
-    ctx = client.get("/api/test", params={"pageNum": "1"})
+    result = await ctx._parse_response_body(mock_resp)
+    assert result == b"\x89PNG\r\n"
+
+
+@allure.feature("异步客户端")
+@allure.story("响应体解析")
+@allure.title("测试 _parse_response_body 解析失败回退截断文本")
+async def test_parse_response_body_fallback():
+    mock_resp = AsyncMock()
+    mock_resp.headers = {"Content-Type": "application/xml"}
+    mock_resp.json = AsyncMock(side_effect=Exception("parse error"))
+    mock_resp.text = AsyncMock(return_value="<xml>fallback</xml>")
+
+    client = AsyncClient(base_url="https://example.com")
+    ctx = client.get("/api/data")
+
+    result = await ctx._parse_response_body(mock_resp)
+    assert result == "<xml>fallback</xml>"
+
+
+# ==================== 请求信息记录测试 ====================
+
+
+@allure.feature("异步客户端")
+@allure.story("请求信息记录")
+@allure.title("测试请求信息包含 params 参数")
+async def test_async_response_context_request_info_params(async_client_with_mock):
+    ac, mock_resp = async_client_with_mock
+    ctx = ac.get("/api/test", params={"pageNum": "1"})
     await ctx.__aenter__()
 
     assert ctx._request_info is not None
@@ -336,25 +346,9 @@ async def test_async_response_context_request_info_params():
 @allure.feature("异步客户端")
 @allure.story("请求信息记录")
 @allure.title("测试请求信息包含 json 参数")
-@pytest.mark.asyncio
-async def test_async_response_context_request_info_json():
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json = AsyncMock(return_value={"code": 200})
-    mock_response.text = AsyncMock(return_value='{"code": 200}')
-    mock_response.raise_for_status = MagicMock()
-    mock_response.release = AsyncMock()
-
-    mock_session = AsyncMock()
-    mock_session.request = AsyncMock(return_value=mock_response)
-    mock_session.closed = False
-    mock_session.headers = {}
-
-    client = AsyncClient(base_url="https://example.com")
-    client._session = mock_session
-
-    ctx = client.post("/api/create", json={"name": "test"})
+async def test_async_response_context_request_info_json(async_client_with_mock):
+    ac, mock_resp = async_client_with_mock
+    ctx = ac.post("/api/create", json={"name": "test"})
     await ctx.__aenter__()
 
     assert ctx._request_info is not None
@@ -365,29 +359,14 @@ async def test_async_response_context_request_info_json():
 @allure.feature("异步客户端")
 @allure.story("请求信息记录")
 @allure.title("测试请求信息包含 FormData 参数")
-@pytest.mark.asyncio
-async def test_async_response_context_request_info_multipart():
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json = AsyncMock(return_value={"code": 200})
-    mock_response.text = AsyncMock(return_value='{"code": 200}')
-    mock_response.raise_for_status = MagicMock()
-    mock_response.release = AsyncMock()
-
-    mock_session = AsyncMock()
-    mock_session.request = AsyncMock(return_value=mock_response)
-    mock_session.closed = False
-    mock_session.headers = {}
+async def test_async_response_context_request_info_multipart(async_client_with_mock):
+    ac, mock_resp = async_client_with_mock
 
     # 模拟 aiohttp.FormData（异步模式）
     mock_data = MagicMock()
     mock_data.__class__.__name__ = "FormData"
 
-    client = AsyncClient(base_url="https://example.com")
-    client._session = mock_session
-
-    ctx = client.post("/api/upload", data=mock_data)
+    ctx = ac.post("/api/upload", data=mock_data)
     await ctx.__aenter__()
 
     assert ctx._request_info is not None
@@ -395,30 +374,56 @@ async def test_async_response_context_request_info_multipart():
     assert "文件上传请求" in ctx._request_info["data"]
 
 
+# ==================== 异常处理测试 ====================
+
+
 @allure.feature("异步客户端")
 @allure.story("异常处理")
 @allure.title("测试 HTTP 错误状态码抛出异常")
-@pytest.mark.asyncio
-async def test_async_response_context_http_error():
-    mock_response = AsyncMock()
-    mock_response.status = 500
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json = AsyncMock(return_value={"error": "server error"})
-    mock_response.text = AsyncMock(return_value='{"error": "server error"}')
-    mock_response.raise_for_status = MagicMock(side_effect=Exception("500 Server Error"))
-    mock_response.release = AsyncMock()
+async def test_async_response_context_http_error(async_client_with_mock):
+    ac, mock_resp = async_client_with_mock
+    mock_resp.status = 500
+    mock_resp.json = AsyncMock(return_value={"error": "server error"})
+    mock_resp.text = AsyncMock(return_value='{"error": "server error"}')
+    mock_resp.raise_for_status = MagicMock(side_effect=Exception("500 Server Error"))
+    ac.raise_for_status = True
 
-    mock_session = AsyncMock()
-    mock_session.request = AsyncMock(return_value=mock_response)
-    mock_session.closed = False
-    mock_session.headers = {}
-
-    client = AsyncClient(base_url="https://example.com")
-    client._session = mock_session
-
-    ctx = client.get("/api/error")
+    ctx = ac.get("/api/error")
 
     with pytest.raises(Exception):
         await ctx.__aenter__()
 
-    mock_response.release.assert_called_once()
+    mock_resp.release.assert_called_once()
+
+
+@allure.feature("异步客户端")
+@allure.story("异常处理")
+@allure.title("测试默认(False)时可进入并断言 4xx/5xx")
+async def test_async_response_context_raise_for_status_disabled(async_client_with_mock):
+    ac, mock_resp = async_client_with_mock
+    mock_resp.status = 500
+    mock_resp.json = AsyncMock(return_value={"code": 500})
+    mock_resp.text = AsyncMock(return_value='{"code": 500}')
+    mock_resp.raise_for_status = MagicMock(side_effect=Exception("500 Server Error"))
+
+    async with ac.get("/api/error") as r:
+        assert r.status == 500
+
+    mock_resp.raise_for_status.assert_not_called()
+
+
+@allure.feature("异步客户端")
+@allure.story("异常处理")
+@allure.title("测试每请求 raise_for_status 参数覆盖客户端默认值")
+async def test_async_response_context_per_request_raise_for_status(async_client_with_mock):
+    ac, mock_resp = async_client_with_mock
+    mock_resp.status = 500
+    mock_resp.raise_for_status = MagicMock(side_effect=Exception("500 Server Error"))
+
+    # 客户端默认 False，但单次请求覆盖为 True
+    ctx = ac.get("/api/error", raise_for_status=True)
+
+    with pytest.raises(Exception, match="500 Server Error"):
+        await ctx.__aenter__()
+
+    mock_resp.release.assert_called_once()

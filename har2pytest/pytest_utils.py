@@ -18,11 +18,14 @@ def retry_step(counts: int = 2, times: int = 20) -> Callable:
     """
 
     def after(retry_state):
+        # 最后一次失败后没有下一次重试，提示语不再说“Xs后重试”
+        is_last = retry_state.attempt_number >= counts
+        suffix = f"{times}s后重试" if not is_last else "重试次数已用完"
         logger.warning(
-            "[retry_step] %s 第%d次失败, %ds后重试: %s",
+            "[retry_step] %s 第%d次失败, %s: %s",
             retry_state.fn.__name__,
             retry_state.attempt_number,
-            times,
+            suffix,
             retry_state.outcome.exception(),
         )
 

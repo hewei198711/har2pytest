@@ -1,0 +1,6 @@
+import os
+{% if is_file_upload %}from har2pytest.client import client, build_multipart_data
+{% elif is_multipart %}from har2pytest.client import client, build_form_data
+{% endif %}{% if is_need_urlencode %}from urllib.parse import urlencode
+{% endif %}{% if plain_client %}from har2pytest.client import client
+{% endif %}

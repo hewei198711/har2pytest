@@ -1,10 +1,12 @@
-"""测试 swagger_handler.py 模块"""
+"""测试 har2pytest.swagger_handler 模块中 Swagger 文档获取与合并、API 信息查找、参数提取与默认值、嵌套描述递归提取、URL 清洗与 $ref 解析的功能与边界。"""
 
 import asyncio
 
 import allure
 
 from har2pytest.swagger_handler import SwaggerHandler
+
+# ==================== 查找API信息测试 ====================
 
 
 @allure.feature("Swagger处理器")
@@ -54,11 +56,22 @@ def test_model_reference_handling():
             }
         },
         "definitions": {
-            "TestModel": {"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "integer"}}}
+            "TestModel": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "姓名"},
+                    "age": {"type": "integer", "description": "年龄"},
+                },
+            }
         },
     }
     result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
-    assert result is not None
+    assert result.summary == "测试API"
+    # body schema 的属性描述经 $ref 递归提取进 result.parameters
+    assert result.parameters == {"name": "姓名", "age": "年龄"}
+
+
+# ==================== 获取默认值测试 ====================
 
 
 @allure.feature("Swagger处理器")
@@ -92,6 +105,9 @@ def test_extract_params_from_swagger():
     assert "name" in query_params
 
 
+# ==================== 提取参数测试 ====================
+
+
 @allure.feature("Swagger处理器")
 @allure.story("从Swagger提取参数")
 @allure.title("测试从Swagger提取属性参数")
@@ -108,6 +124,36 @@ def test_extract_params_from_swagger_with_properties():
     }
     params = handler._extract_params_from_swagger(swagger_info["parameters"], {})
     assert len(params) >= 2
+
+
+@allure.feature("Swagger处理器")
+@allure.story("从Swagger提取参数")
+@allure.title("测试多行参数描述压成单行")
+def test_extract_params_from_swagger_multiline_description():
+    handler = SwaggerHandler()
+    swagger_data = {
+        "definitions": {
+            "GiftOrderQueryReqDTO": {
+                "type": "object",
+                "properties": {
+                    "orderStatusList": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "订单状态集合（参考OrderStatus枚举）：\n1:待支付, 2:待发货",
+                    }
+                },
+            }
+        }
+    }
+    parameters = [
+        {"name": "body", "in": "body", "schema": {"$ref": "#/definitions/GiftOrderQueryReqDTO"}},
+        {"name": "pageNum", "in": "query", "type": "integer", "description": "分页页码\n（默认1）"},
+    ]
+    param_descriptions = handler._extract_params_from_swagger(parameters, swagger_data)[5]
+
+    assert param_descriptions["orderStatusList"] == "订单状态集合（参考OrderStatus枚举）： 1:待支付, 2:待发货"
+    assert param_descriptions["pageNum"] == "分页页码 （默认1）"
+    assert all("\n" not in value for value in param_descriptions.values())
 
 
 @allure.feature("Swagger处理器")
@@ -170,6 +216,9 @@ def test_extract_body_params_ref_not_found():
     assert params == {}
 
 
+# ==================== 提取Body参数测试 ====================
+
+
 @allure.feature("Swagger处理器")
 @allure.story("从Swagger查找API信息")
 @allure.title("测试路径不存在时查找API信息")
@@ -182,12 +231,14 @@ def test_find_api_info_path_not_found():
 
 @allure.feature("Swagger处理器")
 @allure.story("从Swagger查找API信息")
-@allure.title("测试方法未找到时有回退")
-def test_find_api_info_method_not_found_but_has_fallback():
+@allure.title("测试方法未找到时返回空信息")
+def test_find_api_info_method_not_found():
     handler = SwaggerHandler()
     swagger_data = {"paths": {"/api/test": {"get": {"summary": "GET测试"}, "post": {"summary": "POST测试"}}}}
     result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "PUT")
-    assert result is not None
+    # 路径存在但方法缺失时：不抛错，返回空 SwaggerInfo（无 summary/description）
+    assert result.summary == ""
+    assert result.description == ""
 
 
 @allure.feature("Swagger处理器")
@@ -210,36 +261,6 @@ def test_find_api_info_empty_paths():
 
 
 @allure.feature("Swagger处理器")
-@allure.story("从Swagger查找API信息")
-@allure.title("测试带参数引用查找API信息")
-def test_find_api_info_with_param_ref():
-    handler = SwaggerHandler()
-    swagger_data = {
-        "paths": {
-            "/api/test": {
-                "get": {
-                    "summary": "测试API",
-                    "parameters": [{"name": "body", "in": "body", "schema": {"$ref": "#/definitions/TestModel"}}],
-                }
-            }
-        },
-        "definitions": {"TestModel": {"type": "object", "properties": {"name": {"type": "string"}}}},
-    }
-    result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
-    assert result is not None
-
-
-@allure.feature("Swagger处理器")
-@allure.story("从Swagger查找API信息")
-@allure.title("测试方法回退查找API信息")
-def test_find_api_info_method_fallback():
-    handler = SwaggerHandler()
-    swagger_data = {"paths": {"/api/test": {"get": {"summary": "GET测试"}}}}
-    result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
-    assert result is not None
-
-
-@allure.feature("Swagger处理器")
 @allure.story("获取默认值")
 @allure.title("测试未知类型获取默认值")
 def test_get_default_value_unknown_type():
@@ -248,12 +269,18 @@ def test_get_default_value_unknown_type():
     assert result == ""
 
 
+# ==================== 初始化测试 ====================
+
+
 @allure.feature("Swagger处理器")
 @allure.story("初始化")
 @allure.title("测试Swagger处理器初始化")
 def test_swagger_handler_init():
     handler = SwaggerHandler()
     assert handler.swagger_cache == {}
+
+
+# ==================== 获取Swagger文档测试 ====================
 
 
 @allure.feature("Swagger处理器")
@@ -270,19 +297,141 @@ def test_get_swagger_doc_all_paths_failed(monkeypatch):
 
 
 @allure.feature("Swagger处理器")
-@allure.story("从Swagger生成API")
-@allure.title("测试指定路径从Swagger生成API")
-def test_find_api_info_in_swagger_specific_path():
+@allure.story("获取Swagger文档")
+@allure.title("测试通过 swagger-resources 发现文档路径并成功获取")
+def test_get_swagger_doc_via_swagger_resources(monkeypatch):
+    calls = []
+
+    async def mock_send_request(url):
+        calls.append(url)
+        if url.endswith("/swagger-resources"):
+            return [{"location": "/actual/api-docs"}]
+        return {"paths": {"/api/test": {"get": {}}}}
+
     handler = SwaggerHandler()
-    swagger_data = {
-        "paths": {
-            "/api/test": {"get": {"summary": "测试API", "parameters": []}},
-            "/api/other": {"post": {"summary": "其他API", "parameters": []}},
-        }
-    }
-    result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
+    monkeypatch.setattr(handler, "_send_request", mock_send_request)
+    result = asyncio.run(handler.get_swagger_doc("https://example.com"))
     assert result is not None
-    assert result.summary == "测试API"
+    assert "paths" in result
+    assert any("actual/api-docs" in u for u in calls)
+
+
+@allure.feature("Swagger处理器")
+@allure.story("获取Swagger文档")
+@allure.title("测试遍历并合并 swagger-resources 的全部分组")
+def test_get_swagger_doc_merges_all_groups(monkeypatch):
+    calls = []
+    docs = {
+        "https://example.com/admin/v2/api-docs?group=ApiV_1": {
+            "swagger": "2.0",
+            "basePath": "/admin",
+            "tags": [{"name": "comm"}],
+            "paths": {"/admin/comm/coupon": {"get": {"summary": "优惠券列表"}}},
+            "definitions": {"Coupon": {"type": "object", "properties": {"id": {"type": "integer"}}}},
+        },
+        "https://example.com/admin/v2/api-docs?group=ApiV_2": {
+            "swagger": "2.0",
+            "basePath": "/admin",
+            "tags": [{"name": "activity"}],
+            "paths": {
+                "/admin/activity/activity": {"get": {"summary": "活动列表"}},
+                # 与第一个分组重复的 path+method：保留首次出现的定义
+                "/admin/comm/coupon": {"get": {"summary": "重复的优惠券列表"}, "post": {"summary": "新增优惠券"}},
+            },
+            "definitions": {
+                "Activity": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "Coupon": {"type": "object", "properties": {"stale": {"type": "string"}}},
+            },
+        },
+    }
+
+    async def mock_send_request(url):
+        calls.append(url)
+        if url.endswith("/swagger-resources"):
+            return [
+                {"name": "ApiV_1", "location": "/v2/api-docs?group=ApiV_1"},
+                {"name": "ApiV_2", "location": "/v2/api-docs?group=ApiV_2"},
+            ]
+        return docs[url]
+
+    handler = SwaggerHandler()
+    monkeypatch.setattr(handler, "_send_request", mock_send_request)
+    result = asyncio.run(handler.get_swagger_doc("https://example.com/admin/doc.html#/"))
+
+    assert result is not None
+    # 两个分组的路径都拿到
+    assert set(result["paths"]) == {"/admin/comm/coupon", "/admin/activity/activity"}
+    # 同 path 的不同 method 合并
+    assert set(result["paths"]["/admin/comm/coupon"]) == {"get", "post"}
+    # 重复的 path+method 保留首次出现
+    assert result["paths"]["/admin/comm/coupon"]["get"]["summary"] == "优惠券列表"
+    # definitions 取并集，重名保留首次出现的定义
+    assert set(result["definitions"]) == {"Coupon", "Activity"}
+    assert "id" in result["definitions"]["Coupon"]["properties"]
+    # tags 合并，顶层字段取首个分组
+    assert [t["name"] for t in result["tags"]] == ["comm", "activity"]
+    assert result["basePath"] == "/admin"
+    # 两个分组文档都被请求过
+    assert sum(1 for u in calls if "api-docs?group=" in u) == 2
+
+
+@allure.feature("Swagger处理器")
+@allure.story("获取Swagger文档")
+@allure.title("测试部分分组获取失败时仍合并其余分组")
+def test_get_swagger_doc_group_failure_keeps_others(monkeypatch):
+    async def mock_send_request(url):
+        if url.endswith("/swagger-resources"):
+            return [
+                {"name": "ApiV_1", "location": "/v2/api-docs?group=ApiV_1"},
+                {"name": "broken", "location": "/v2/api-docs?group=broken"},
+                {"name": "ApiV_2", "location": "/v2/api-docs?group=ApiV_2"},
+            ]
+        if url.endswith("group=broken"):
+            raise Exception("500 Server Error")
+        group = url.rsplit("=", 1)[-1]
+        return {"paths": {f"/{group}/list": {"get": {"summary": group}}}}
+
+    handler = SwaggerHandler()
+    monkeypatch.setattr(handler, "_send_request", mock_send_request)
+    result = asyncio.run(handler.get_swagger_doc("https://example.com"))
+
+    assert result is not None
+    assert set(result["paths"]) == {"/ApiV_1/list", "/ApiV_2/list"}
+    # 没有任何分组携带 tags/definitions 时不留空键
+    assert "tags" not in result
+    assert "definitions" not in result
+
+
+@allure.feature("Swagger处理器")
+@allure.story("获取Swagger文档")
+@allure.title("测试 swagger-resources 为空列表时回退到常见路径")
+def test_get_swagger_doc_empty_resources_fallback(monkeypatch):
+    async def mock_send_request(url):
+        if url.endswith("/swagger-resources"):
+            return []
+        return {"paths": {"/api/test": {"get": {}}}}
+
+    handler = SwaggerHandler()
+    monkeypatch.setattr(handler, "_send_request", mock_send_request)
+    result = asyncio.run(handler.get_swagger_doc("https://example.com"))
+    assert result is not None
+    assert "/api/test" in result["paths"]
+
+
+@allure.feature("Swagger处理器")
+@allure.story("获取Swagger文档")
+@allure.title("测试 swagger-resources 失败后回退到常见路径")
+def test_get_swagger_doc_fallback_paths(monkeypatch):
+    async def mock_send_request(url):
+        if url.endswith("/swagger-resources"):
+            raise Exception("no resources")
+        return {"paths": {"/api/test": {"get": {}}}}
+
+    handler = SwaggerHandler()
+    monkeypatch.setattr(handler, "_send_request", mock_send_request)
+    result = asyncio.run(handler.get_swagger_doc("https://example.com"))
+    assert result is not None
+    assert "paths" in result
 
 
 @allure.feature("Swagger处理器")
@@ -308,9 +457,12 @@ def test_find_api_info_in_swagger_extract_params():
     assert len(result.parameters) == 2
 
 
+# ==================== 从Swagger生成API测试 ====================
+
+
 @allure.feature("Swagger处理器")
 @allure.story("获取Swagger文档")
-@allure.title("测试Swagger文档缓存")
+@allure.title("测试Swagger文档缓存命中与首次获取")
 def test_get_swagger_doc_caching(monkeypatch):
     handler = SwaggerHandler()
     swagger_data = {"paths": {"/api/test": {"get": {}}}}
@@ -323,29 +475,22 @@ def test_get_swagger_doc_caching(monkeypatch):
 
     monkeypatch.setattr(handler, "_send_request", mock_send_request)
 
+    # 预填缓存：直接命中，不发任何网络请求
+    handler.swagger_cache["https://cached.com"] = swagger_data
+    result_cached = asyncio.run(handler.get_swagger_doc("https://cached.com"))
+    assert result_cached == swagger_data
+    assert call_count[0] == 0
+
+    # 首次获取：探测 swagger-resources + 常见路径，至少发 1 次请求
     result1 = asyncio.run(handler.get_swagger_doc("https://example.com"))
-    result2 = asyncio.run(handler.get_swagger_doc("https://example.com"))
-
+    calls_after_first = call_count[0]
+    assert calls_after_first >= 1
     assert result1 is not None
+
+    # 第二次调用命中缓存，不再发起请求
+    result2 = asyncio.run(handler.get_swagger_doc("https://example.com"))
+    assert call_count[0] == calls_after_first
     assert result2 is not None
-    # NOTE: 当前实现中缓存基于实例的 swagger_cache 字典，monkeypatch 修改了 _send_request，
-    # 但 get_swagger_doc 在首次调用后缓存了结果，第二次调用从缓存返回，不会调用 _send_request。
-    # 实际调用次数取决于 mock 实现细节，此处验证调用次数 >= 1 即可。
-    assert call_count[0] >= 1
-
-
-@allure.feature("Swagger处理器")
-@allure.story("获取Swagger文档")
-@allure.title("测试Swagger文档缓存(类级别)")
-def test_get_swagger_doc_cache():
-    handler = SwaggerHandler()
-    swagger_data = {"paths": {"/api/test": {"get": {}}}}
-
-    handler.swagger_cache["https://example.com"] = swagger_data
-
-    result = asyncio.run(handler.get_swagger_doc("https://example.com"))
-
-    assert result == swagger_data
 
 
 @allure.feature("Swagger处理器")
@@ -360,6 +505,9 @@ def test_extract_params_with_enum():
     assert "status" in query_params
 
 
+# ==================== 提取参数值测试 ====================
+
+
 @allure.feature("Swagger处理器")
 @allure.story("从Swagger提取参数")
 @allure.title("测试提取路径参数")
@@ -369,6 +517,10 @@ def test_extract_params_path_param():
     params = handler._extract_params_from_swagger(swagger_info["parameters"], {})
     assert len(params) == 6
     query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions = params
+    # path 参数进入 path_params（默认值按 integer=0），不落入 query
+    assert path_params == {"id": 0}
+    assert query_params == {}
+    assert has_query_param is False
 
 
 @allure.feature("Swagger处理器")
@@ -446,7 +598,7 @@ def test_extract_param_value_empty_array():
     assert value == []
 
 
-# ==================== _clean_swagger_url 测试 ====================
+# ==================== 清洗Swagger URL测试 ====================
 
 
 class TestCleanSwaggerUrl:
@@ -500,7 +652,7 @@ class TestCleanSwaggerUrl:
         assert result == "https://example.com"
 
 
-# ==================== _extract_param_value 边缘测试 ====================
+# ==================== 提取参数值边缘测试 ====================
 
 
 class TestExtractParamValueEdge:
@@ -580,7 +732,7 @@ class TestExtractParamValueEdge:
         assert len(value) == 1
 
 
-# ==================== _extract_nested_descriptions 测试 ====================
+# ==================== 提取嵌套描述测试 ====================
 
 
 class TestExtractNestedDescriptions:
@@ -694,3 +846,196 @@ class TestExtractNestedDescriptions:
         descriptions = {}
         handler._extract_nested_descriptions({"$ref": "#/definitions/NotFound"}, {}, descriptions)
         assert descriptions == {}
+
+    @allure.feature("Swagger处理器")
+    @allure.story("提取嵌套描述")
+    @allure.title("测试自引用模型（数组指向自身）不无限递归")
+    def test_extract_nested_desc_self_ref_array(self):
+        handler = SwaggerHandler()
+        swagger_data = {
+            "definitions": {
+                "MsgType": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer", "description": "类型ID"},
+                        "name": {"type": "string", "description": "类型名称"},
+                        "children": {
+                            "type": "array",
+                            "description": "子类型列表",
+                            "items": {"$ref": "#/definitions/MsgType"},
+                        },
+                    },
+                }
+            }
+        }
+        descriptions = {}
+        handler._extract_nested_descriptions({"$ref": "#/definitions/MsgType"}, swagger_data, descriptions)
+        assert descriptions["id"] == "类型ID"
+        assert descriptions["name"] == "类型名称"
+        assert descriptions["children"] == "子类型列表"
+        # 自引用环在第一处重复 $ref 被截断，不再展开第二层 children
+        assert "children.id" not in descriptions
+
+    @allure.feature("Swagger处理器")
+    @allure.story("提取嵌套描述")
+    @allure.title("测试互相引用模型不无限递归")
+    def test_extract_nested_desc_cross_ref_cycle(self):
+        handler = SwaggerHandler()
+        swagger_data = {
+            "definitions": {
+                "A": {
+                    "type": "object",
+                    "properties": {
+                        "aName": {"type": "string", "description": "A名称"},
+                        "b": {"$ref": "#/definitions/B"},
+                    },
+                },
+                "B": {
+                    "type": "object",
+                    "properties": {
+                        "bName": {"type": "string", "description": "B名称"},
+                        "a": {"$ref": "#/definitions/A"},
+                    },
+                },
+            }
+        }
+        descriptions = {}
+        handler._extract_nested_descriptions({"$ref": "#/definitions/A"}, swagger_data, descriptions)
+        assert descriptions["aName"] == "A名称"
+        assert descriptions["b.bName"] == "B名称"
+        # 回到 A 的引用在 b.a 处被截断
+        assert "b.a.aName" not in descriptions
+
+    @allure.feature("Swagger处理器")
+    @allure.story("提取嵌套描述")
+    @allure.title("测试兄弟节点引用同一模型时各自完整展开")
+    def test_extract_nested_desc_sibling_refs(self):
+        handler = SwaggerHandler()
+        swagger_data = {
+            "definitions": {
+                "Addr": {"type": "object", "properties": {"city": {"type": "string", "description": "城市"}}},
+                "User": {
+                    "type": "object",
+                    "properties": {
+                        "home": {"$ref": "#/definitions/Addr"},
+                        "office": {"$ref": "#/definitions/Addr"},
+                    },
+                },
+            }
+        }
+        descriptions = {}
+        handler._extract_nested_descriptions({"$ref": "#/definitions/User"}, swagger_data, descriptions)
+        assert descriptions["home.city"] == "城市"
+        assert descriptions["office.city"] == "城市"
+
+
+# ==================== OpenAPI 3 components/schemas 测试 ====================
+
+
+class TestOpenAPI3ComponentsSchemas:
+    @allure.feature("Swagger处理器")
+    @allure.story("OpenAPI3 components/schemas")
+    @allure.title("测试 $ref 解析到 components/schemas")
+    def test_resolve_schema_ref_components(self):
+        handler = SwaggerHandler()
+        swagger_data = {
+            "components": {"schemas": {"TestModel": {"type": "object", "properties": {"name": {"type": "string"}}}}}
+        }
+        result = handler._resolve_schema_ref("#/components/schemas/TestModel", swagger_data)
+        assert result is not None
+        assert "name" in result["properties"]
+
+    @allure.feature("Swagger处理器")
+    @allure.story("OpenAPI3 components/schemas")
+    @allure.title("测试 $ref 解析到 definitions(v2 兼容)")
+    def test_resolve_schema_ref_definitions(self):
+        handler = SwaggerHandler()
+        swagger_data = {"definitions": {"TestModel": {"type": "object", "properties": {"name": {"type": "string"}}}}}
+        result = handler._resolve_schema_ref("#/definitions/TestModel", swagger_data)
+        assert result is not None
+        assert "name" in result["properties"]
+
+    @allure.feature("Swagger处理器")
+    @allure.story("OpenAPI3 components/schemas")
+    @allure.title("测试 $ref 带文件前缀解析")
+    def test_resolve_schema_ref_file_prefix(self):
+        handler = SwaggerHandler()
+        swagger_data = {
+            "components": {"schemas": {"TestModel": {"type": "object", "properties": {"name": {"type": "string"}}}}}
+        }
+        result = handler._resolve_schema_ref("Model.yaml#/components/schemas/TestModel", swagger_data)
+        assert result is not None
+        assert "name" in result["properties"]
+
+    @allure.feature("Swagger处理器")
+    @allure.story("OpenAPI3 components/schemas")
+    @allure.title("测试 components/schemas 提取 body 默认值")
+    def test_extract_body_params_components(self):
+        handler = SwaggerHandler()
+        swagger_data = {
+            "components": {
+                "schemas": {"TestModel": {"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "integer"}}}}
+            }
+        }
+        schema = {"$ref": "#/components/schemas/TestModel"}
+        params = handler._extract_body_params(schema, swagger_data)
+        assert params == {"name": "", "age": 0}
+
+    @allure.feature("Swagger处理器")
+    @allure.story("OpenAPI3 components/schemas")
+    @allure.title("测试 components/schemas 提取嵌套描述")
+    def test_extract_nested_desc_components(self):
+        handler = SwaggerHandler()
+        swagger_data = {
+            "components": {
+                "schemas": {
+                    "UserInfo": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "用户名称"},
+                            "age": {"type": "integer", "description": "用户年龄"},
+                        },
+                    }
+                }
+            }
+        }
+        descriptions = {}
+        handler._extract_nested_descriptions({"$ref": "#/components/schemas/UserInfo"}, swagger_data, descriptions)
+        assert descriptions == {"name": "用户名称", "age": "用户年龄"}
+
+
+# ==================== close 方法测试 ====================
+
+
+@allure.feature("Swagger处理器")
+@allure.story("会话关闭")
+@allure.title("测试未创建会话时 close 不报错")
+async def test_close_without_session():
+    handler = SwaggerHandler()
+    assert handler._session is None
+    await handler.close()
+    assert handler._session is None
+
+
+@allure.feature("Swagger处理器")
+@allure.story("会话关闭")
+@allure.title("测试 close 关闭已有会话并置空")
+async def test_close_with_session():
+    handler = SwaggerHandler()
+    session = await handler._get_session()
+    assert session is not None
+    assert not session.closed
+    await handler.close()
+    assert handler._session is None
+    assert session.closed
+
+
+@allure.feature("Swagger处理器")
+@allure.story("会话关闭")
+@allure.title("测试重复 close 不报错")
+async def test_close_idempotent():
+    handler = SwaggerHandler()
+    await handler._get_session()
+    await handler.close()
+    await handler.close()
+    assert handler._session is None

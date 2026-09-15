@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import os
+import re
 import time
-from dataclasses import replace
 from typing import Any
 
+from .codegen import render_lines, validate_python
 from .config import APIConfig
 from .har_parser import HARParser
 from .logger import logger
@@ -22,6 +24,7 @@ from .utils import (
     merge_request_params,
     parse_api_file,
     sanitize_param_name,
+    sanitize_remark,
     write_test_file,
 )
 
@@ -36,7 +39,6 @@ class TestCaseGenerator:
         har_parser: HAR 文件解析器实例
         swagger_handler: Swagger 文档处理器实例
         url_matcher: URL 匹配器实例
-        _api_file_cache: API 文件信息缓存字典
     """
 
     def __init__(
@@ -65,15 +67,13 @@ class TestCaseGenerator:
         self.har_parser = HARParser(base_urls=base_urls, kill_urls=kill_urls)
         self.swagger_handler = SwaggerHandler()
         self.url_matcher = URLMatcher()
-        # API文件缓存
-        self._api_file_cache = {}
         # 场景模式下目标API的 headers（用于生成类级别 headers 属性，步骤 headers 差异对比基准）
         self._class_headers: dict[str, Any] = {}
 
     # ==================== API 文件处理相关 ====================
 
     def _get_api_file_info(self, api_file: str) -> APIFileInfo:
-        """获取 API 文件信息（带缓存）。
+        """获取 API 文件信息（复用 parse_api_file 的全局缓存，不再自建第二层缓存）。
 
         Args:
             api_file: API 文件路径
@@ -81,9 +81,7 @@ class TestCaseGenerator:
         Returns:
             APIFileInfo: API 文件信息对象
         """
-        if api_file not in self._api_file_cache:
-            self._api_file_cache[api_file] = parse_api_file(api_file)
-        return replace(self._api_file_cache[api_file])
+        return parse_api_file(api_file)
 
     def _get_all_api_files(self) -> list[str]:
         """获取所有 API 文件路径。
@@ -121,12 +119,111 @@ class TestCaseGenerator:
         except ValueError:
             # Windows 下跨盘符无法计算相对路径
             return None
-        # 去掉 .py 后缀，统一分隔符
-        module_path = rel_path.replace(".py", "").replace("\\", "/")
+        # 去掉 .py 后缀（removesuffix 仅匹配末尾，避免目录名中的 .py 子串被误删），统一分隔符
+        module_path = rel_path.removesuffix(".py").replace("\\", "/")
         parts = module_path.split("/")
         if len(parts) > 1:
             return parts[0]
         return None
+
+    def _is_within_api_dir(self, api_file: str) -> bool:
+        """判断 API 文件是否位于 api_dir 目录下（不做日志）。"""
+        try:
+            rel_path = os.path.relpath(os.path.abspath(api_file), os.path.abspath(self.api_dir))
+        except ValueError:
+            return False
+        return not rel_path.startswith(os.pardir)
+
+    def _validate_api_dir(self, api_file: str) -> bool:
+        """校验 API 文件位于 api_dir 目录下。
+
+        import 语句的前缀包名由 api_dir 的目录名推导（如 ``from apis.svc import x``），
+        因此 API 文件必须位于 api_dir 下；否则直接报错提示，而不是生成非法 import。
+
+        Args:
+            api_file: API 文件路径
+
+        Returns:
+            bool: 位于 api_dir 下返回 True，否则记录错误并返回 False
+        """
+        if self._is_within_api_dir(api_file):
+            return True
+        logger.error(
+            f"API 文件 {api_file} 不在 --api-dir({self.api_dir}) 目录下，无法推导 import 包名。"
+            f"请用 --api-dir 指定实际的 API 目录后重试。"
+        )
+        return False
+
+    # ==================== 测试模式决策（配置化） ====================
+
+    @staticmethod
+    def _profile_matches(profile_url: str, api_url: str) -> bool:
+        """判断 profile.url 是否命中接口 URL（精确 / {param} 模板 / 末尾通配 *）。"""
+        norm_profile = URLMatcher.normalize_url(profile_url)
+        norm_url = URLMatcher.normalize_url(api_url)
+
+        if norm_url == norm_profile:
+            return True
+        if "*" in norm_profile:
+            # 通配仅在结尾（如 /mgmt/order/*），用 fnmatch 匹配
+            if fnmatch.fnmatchcase(norm_url, norm_profile):
+                return True
+        # 双向路径模板匹配（覆盖 {id} 与具体值的互转）
+        matched, _ = URLMatcher.match_url_pattern(norm_url, norm_profile)
+        if matched:
+            return True
+        matched, _ = URLMatcher.match_url_pattern(norm_profile, norm_url)
+        return matched
+
+    def _find_profile(self, api_url: str | None) -> dict | None:
+        """返回命中该接口 URL 的 TESTCASE_PROFILES 条目（无命中返回 None）。"""
+        if not api_url:
+            return None
+        for profile in APIConfig.TESTCASE_PROFILES() or []:
+            if isinstance(profile, dict) and profile.get("url") and self._profile_matches(str(profile["url"]), api_url):
+                return profile
+        return None
+
+    def _resolve_testcase_mode(self, api_file: str) -> str:
+        """决策单个接口的测试生成模式，返回 ``parametrized`` 或 ``scenario``。
+
+        决策优先级（消除分散在命令行/中文关键字中的判定点）：
+        1. TESTCASE_PROFILES 中按 URL 命中且 ``mode`` 显式给出 → 直接采用；
+        2. ``mode=auto``（缺省）或未配置 → 回落关键字启发式；
+           keywords/exclude_keywords 条目可覆盖全局 LIST_QUERY_KEYWORDS/
+           LIST_QUERY_EXCLUDE_KEYWORDS。
+
+        Args:
+            api_file: API 文件路径
+
+        Returns:
+            "parametrized"（列表参数化）或 "scenario"（复杂场景）
+        """
+        api_info = self._get_api_file_info(api_file)
+        description = api_info.description or ""
+        profile = self._find_profile(api_info.url)
+
+        explicit = (profile or {}).get("mode", "auto")
+        if explicit == "list_query":
+            return "parametrized"
+        if explicit == "complex_scenario":
+            return "scenario"
+
+        # 关键字启发式（profile 可覆盖全局默认）
+        if profile is not None:
+            keywords = profile.get("keywords")
+            exclude_keywords = profile.get("exclude_keywords")
+        else:
+            keywords = exclude_keywords = None
+        list_keywords = keywords if isinstance(keywords, list) else APIConfig.LIST_QUERY_KEYWORDS()
+        exclude = (
+            exclude_keywords if isinstance(exclude_keywords, list) else APIConfig.LIST_QUERY_EXCLUDE_KEYWORDS()
+        )
+
+        is_list_query = bool(list_keywords) and any(kw in description for kw in list_keywords)
+        if is_list_query and exclude and any(kw in description for kw in exclude):
+            is_list_query = False
+        return "parametrized" if is_list_query else "scenario"
 
     # ==================== Swagger/URL 匹配相关 ====================
 
@@ -221,15 +318,14 @@ class TestCaseGenerator:
         Returns:
             参数化取值列表（整数或字符串）
         """
-        import re
-
         # 内置匹配模式：(类型, 正则)
+        # 注意：模式 1/5 添加 (?<!\w) 负向后行断言，避免匹配嵌入单词中的数字（如 "H5、APP" 中的 5）
         builtin_patterns = [
-            ("int", r"(-?\d+)\s*[:：、.]"),  # 匹配数字后跟冒号、顿号或点号（如 1.产品编码）
-            ("int", r"(\d+)\s*[-》>]"),  # 匹配数字后跟箭头或破折号（如 1->描述 或 1-描述）
+            ("int", r"(?<!\w)(-?\d+)\s*[:：、.]"),  # 匹配段首数字后跟冒号、顿号或点号（如 1.产品编码）
+            ("int", r"(?<!\w)(\d+)\s*[-》>]"),  # 匹配段首数字后跟箭头或破折号（如 1->描述 或 1-描述）
             ("str", r"(\w+)\s*->"),  # 匹配文本后跟箭头（如 health->上海健康 ev->企业微信）
             ("bracket_int", r"\((.*?)\)"),  # 匹配括号内的连续数字
-            ("int", r"(\d+)(?=[\u4e00-\u9fff])"),  # 匹配数字后直接跟中文（如 1待审核 2审核通过）
+            ("int", r"(?<!\w)(\d+)(?=[\u4e00-\u9fff])"),  # 匹配段首数字后直接跟中文（如 1待审核 2审核通过）
         ]
 
         # 合并配置扩展模式
@@ -381,25 +477,54 @@ class TestCaseGenerator:
         for param_name, data in param_value_map.items():
             merged_result.append({param_name: deduplicate_values(data["values"]), "other_params": data["other_params"]})
 
+        # 过滤分页参数后没有任何有效参数（如列表接口仅携带 pageNum/pageSize），
+        # 退化为一条基于分页参数的默认参数化项，避免后续误报“没有有效的测试参数”。
+        if not merged_result:
+            return self._build_pagination_only_items(requests_params)
         return merged_result
 
-    def _extract_requests_for_url(
-        self, requests: list[ParsedRequestInfo], api_url: str
-    ) -> tuple[set[str], list[dict[str, Any]], str | None]:
-        """提取指定 URL 的请求参数。
+    def _build_pagination_only_items(self, requests_params: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """请求仅有分页/无效参数时，退化为单条默认参数化项。
 
-        从请求列表中筛选出匹配指定 API URL 的请求，并提取其参数信息。
+        列表类接口常只携带 ``pageNum``/``pageSize``（也可能全为空值参数），
+        过滤分页参数后没有可变的“有效参数”。此时把分页参数本身当作变量，
+        生成一条能正常发请求的参数化项：变量取各请求中的取值（去重），
+        其余参数作为固定值放入 ``other_params``。
+
+        Args:
+            requests_params: 请求参数字典列表（每项为非空 dict）。
+
+        Returns:
+            含 0 或 1 条参数化项的列表；无可用参数时返回空列表。
+        """
+        if not requests_params:
+            return []
+        pagination_params = APIConfig.PAGINATION_PARAMS()
+        first = requests_params[0]
+        # 变量优先选配置中的分页参数（如 pageNum），否则退而求其次取首个键
+        var = next((p for p in pagination_params if p in first), next(iter(first), None))
+        if var is None:
+            return []
+        values = deduplicate_values([r[var] for r in requests_params if var in r and self._is_valid_param(r[var])])
+        if not values:
+            values = [first[var]]
+        other_params = {key: value for key, value in first.items() if key != var}
+        return [{var: values, "other_params": other_params}]
+
+    def _extract_requests_for_url(self, requests: list[ParsedRequestInfo], api_url: str) -> list[dict[str, Any]]:
+        """提取指定 URL 的请求参数列表。
+
+        从请求列表中筛选出匹配指定 API URL 的请求，合并 query_params 与 post_data，
+        返回有效请求参数字典列表。
 
         Args:
             requests: HAR 请求列表
             api_url: 目标 API URL
 
         Returns:
-            三元组：参数名集合、请求参数字典列表、请求方法
+            请求参数字典列表（已合并 query 与 body）。
         """
-        all_params = set()
         all_requests_params = []
-        request_method = None
 
         normalized_api_url = URLMatcher.normalize_url(api_url)
 
@@ -412,18 +537,9 @@ class TestCaseGenerator:
                 if isinstance(api_params, dict) and api_params:
                     all_requests_params.append(api_params)
 
-                    for param_name, param_value in api_params.items():
-                        if self._is_valid_param(param_value):
-                            all_params.add(param_name)
+        logger.debug(f"提取到的请求参数: {all_requests_params}")
 
-                # 获取最后一个匹配请求的方法
-                request_method = req.method or "GET"
-
-        logger.info(f"提取到的参数: {all_params}")
-        logger.info(f"提取到的请求参数: {all_requests_params}")
-        logger.info(f"提取到的请求方法: {request_method}")
-
-        return all_params, all_requests_params, request_method
+        return all_requests_params
 
     # ==================== 测试用例生成入口方法 ====================
 
@@ -453,7 +569,7 @@ class TestCaseGenerator:
             logger.info(f"未找到HAR文件 {har_file_path} 对应的API文件")
             return []
 
-        output_dir = get_output_dir(self.output_dir, task_id or "")
+        output_dir = get_output_dir(self.output_dir)
         generated_files: list[str] = []
 
         for api_file in api_files:
@@ -481,6 +597,9 @@ class TestCaseGenerator:
                         har_file_path, [api_file], task_id, api_file, all_requests
                     )
                 if not test_content:
+                    logger.warning(
+                        f"API文件 {api_file} 既无可用参数，场景模式也未生成内容，跳过该接口"
+                    )
                     continue
 
                 write_test_file(test_filepath, test_content)
@@ -525,9 +644,9 @@ class TestCaseGenerator:
             logger.error(f"未找到指定URL对应的API文件: {target_url}")
             return None
 
-        output_dir = get_output_dir(self.output_dir, task_id or "")
+        output_dir = get_output_dir(self.output_dir)
         api_info = self._get_api_file_info(target_api_file)
-        clean_name = api_info.function_name
+        clean_name = (api_info.function_name or "").lstrip("_")
         test_filename = f"test_{clean_name}.py"
         test_filepath = os.path.join(output_dir, test_filename)
 
@@ -597,7 +716,25 @@ class TestCaseGenerator:
         failed_count = 0
         generated_files_list: list[str] = []
 
-        output_dir = get_output_dir(self.output_dir, task_id or "")
+        # 提前校验：API 文件必须位于 api_dir 下（import 前缀包名依赖该目录结构），
+        # 否则直接报错提示，避免生成非法 import 的测试用例。
+        invalid_files = [f for f in expanded_api_files if not self._is_within_api_dir(f)]
+        if invalid_files:
+            examples = "、".join(invalid_files[:3])
+            more = f" 等 {len(invalid_files)} 个文件" if len(invalid_files) > 3 else ""
+            logger.error(
+                f"API 文件 {examples}{more} 不在 --api-dir({self.api_dir}) 目录下，无法推导 import 包名。"
+                f"请用 --api-dir 指定实际的 API 目录后重试。"
+            )
+            return {
+                "total": len(expanded_api_files),
+                "skipped": 0,
+                "generated": 0,
+                "failed": len(invalid_files),
+                "generated_files": [],
+            }
+
+        output_dir = get_output_dir(self.output_dir)
 
         # 如果有 HAR 文件，提前解析一次请求列表，所有任务复用
         cached_requests = None
@@ -629,15 +766,9 @@ class TestCaseGenerator:
                         logger.debug(f"  [任务跳过] {api_basename} 测试文件已存在 (耗时 {elapsed:.2f}s)")
                         return "skipped", None
 
-                api_description = api_info.description
-                list_keywords = APIConfig.LIST_QUERY_KEYWORDS()
-                is_list_query = any(kw in api_description for kw in list_keywords) if list_keywords else False
-                # 描述含排除关键字（如“详情”）时，即使命中列表关键字也不使用参数化列表模式
-                if is_list_query:
-                    exclude_keywords = APIConfig.LIST_QUERY_EXCLUDE_KEYWORDS()
-                    if exclude_keywords and any(kw in api_description for kw in exclude_keywords):
-                        is_list_query = False
-                if is_list_query:
+                # 统一决策模式：TESTCASE_PROFILES 显式配置优先，否则关键字启发式
+                mode = self._resolve_testcase_mode(api_file)
+                if mode == "parametrized":
                     test_content = self.generate_parametrized_test_content(
                         har_file_path, api_file, task_id, cached_requests
                     )
@@ -729,6 +860,9 @@ class TestCaseGenerator:
         if not function_name:
             return None
 
+        if not self._validate_api_dir(api_file):
+            return None
+
         # 提取接口信息（复用 complex_scenario 模式的方法）
         feature_name, story_name = self._extract_api_info(api_file)
 
@@ -736,7 +870,8 @@ class TestCaseGenerator:
         api_params = {}
         if api_info.params:
             api_params.update(api_info.params)
-        if api_info.data:
+        # JSON 数组请求体（list）无法用 dict.update 合并，保持整 list 交由下游分支处理
+        if isinstance(api_info.data, dict):
             api_params.update(api_info.data)
 
         # 构建参数化项
@@ -749,10 +884,11 @@ class TestCaseGenerator:
             param_var_name = "params"
 
         # 如果有HAR文件，从HAR文件提取参数
+        all_requests_params: list[dict[str, Any]] = []
         if has_har and har_file_path is not None:
             if requests is None:
                 requests = self.har_parser.extract_requests_from_har(har_file_path, self.filter_duplicate_url)
-            _all_params, all_requests_params, _request_method = self._extract_requests_for_url(requests, api_info.url or "")
+            all_requests_params = self._extract_requests_for_url(requests, api_info.url or "")
 
             if all_requests_params:
                 param_items = self.normalize_params_for_parametrization(all_requests_params)
@@ -761,13 +897,30 @@ class TestCaseGenerator:
         if not param_items and not has_har:
             param_items = self._build_param_items_from_api(api_params, api_info.param_remarks, is_batch_mode=True)
 
+        # 过滤分页参数后没有有效参数时，退化为单条默认参数化项（分页参数作变量，其余为固定值）
         if not param_items:
-            logger.warning(f"API文件 {api_file} 中没有有效的测试参数")
+            fallback_source: list[dict[str, Any]] | None = None
+            if all_requests_params:
+                fallback_source = all_requests_params
+            elif api_params:
+                fallback_source = [api_params]
+            if fallback_source:
+                param_items = self._build_pagination_only_items(fallback_source)
+                if param_items:
+                    logger.info(
+                        f"API文件 {os.path.basename(api_file)} 仅有分页参数，按默认分页生成参数化用例"
+                    )
+
+        if not param_items:
+            # 无参数接口无需参数化：这里只是回退场景模式的正常路径，调用方会继续生成场景用例，
+            # 因此用 INFO 记录，真正的失败（两种模式都没内容）由调用方告警。
+            logger.info(f"API文件 {api_file} 没有有效的参数化参数，回退场景模式")
             return None
 
         # 生成测试用例内容（单函数模式，需要 pytest）
         content = self._generate_test_case_imports(
-            service_package=feature_name, function_name=function_name, task_id=task_id
+            service_package=feature_name, function_name=function_name, task_id=task_id,
+            is_list_query=True,
         )
         content.extend(
             self._generate_test_case_description(
@@ -783,7 +936,9 @@ class TestCaseGenerator:
             )
         )
 
-        return "\n".join(content)
+        rendered = "\n".join(content)
+        validate_python(rendered, f"参数化测试用例 {os.path.basename(api_file)}")
+        return rendered
 
     def generate_scenario_test_content(
         self,
@@ -792,7 +947,7 @@ class TestCaseGenerator:
         task_id: str | None = None,
         target_api_file: str | None = None,
         requests: list[ParsedRequestInfo] | None = None,
-    ) -> str:
+    ) -> str | None:
         """生成复杂场景流程测试用例内容（complex_scenario 模式）。
 
         根据 HAR 文件和多个 API 文件生成场景化的流程测试用例，包含多个步骤函数的调用链。
@@ -805,11 +960,16 @@ class TestCaseGenerator:
             requests: 已解析的 HAR 请求列表（可选，避免重复解析）
 
         Returns:
-            场景流程测试用例文件内容字符串
+            str | None: 场景流程测试用例文件内容字符串；API 文件不在 api_dir 下时返回 None
         """
         # 1. 提取请求（优先从 HAR 文件，没有则从 API 文件构建）
         if requests is None:
             requests = self._get_requests_from_source(har_file_path, api_files, target_api_file)
+
+        # 1.1 API 文件必须位于 api_dir 下（import 前缀包名依赖该目录结构）
+        for api_file in api_files:
+            if not self._validate_api_dir(api_file):
+                return None
 
         # 2. 生成导入语句（多函数模式，不需要 pytest）
         content = self._generate_test_case_imports(api_files=api_files, task_id=task_id)
@@ -850,7 +1010,9 @@ class TestCaseGenerator:
                 content.append(f"        {call_prefix}{step_func}()")
             content.append("")
 
-        return "\n".join(content)
+        rendered = "\n".join(content)
+        validate_python(rendered, f"场景测试用例 {os.path.basename(target_api_file) if target_api_file else 'unknown'}")
+        return rendered
 
     # ==================== 场景测试辅助方法 ====================
 
@@ -919,6 +1081,8 @@ class TestCaseGenerator:
     def _generate_scenario_test_method_definition(self, target_api_file: str) -> list[str]:
         """生成场景测试方法定义。
 
+        由 Jinja2 模板 ``s_test_method_definition.j2`` 渲染。
+
         Args:
             target_api_file: 目标 API 文件路径（必选）
 
@@ -928,17 +1092,14 @@ class TestCaseGenerator:
         api_info = self._get_api_file_info(target_api_file)
         clean_function_name = (api_info.function_name or "").lstrip("_")
         api_description = api_info.description or clean_function_name
-        prefix = "    async def " if self.async_mode else "    def "
-        test_function_name = f"{prefix}test_{clean_function_name}(self):"
+        def_prefix = "    async def " if self.async_mode else "    def "
 
-        return [
-            f'    @allure.title("{api_description}")',
-            test_function_name,
-            "",
-            "        # 初始化测试数据字典，用于在步骤间传递数据",
-            "        test_data = {}",
-            "",
-        ]
+        return render_lines(
+            "s_test_method_definition.j2",
+            title_text=sanitize_remark(api_description),
+            def_prefix=def_prefix,
+            clean_name=clean_function_name,
+        )
 
     def _generate_scenario_step_functions(
         self, content: list[str], requests: list[ParsedRequestInfo], api_files: list[str]
@@ -978,24 +1139,30 @@ class TestCaseGenerator:
                     else (func_parts[0] if func_parts else f"response_{i + 1}")
                 )
 
-                # 生成函数签名
+                # 生成函数签名（模板渲染，避免手工拼接缩进）
                 step_prefix = "        async def " if self.async_mode else "        def "
-                content.extend([f'        @allure.step("{api_description}")', f"{step_prefix}{step_name}():", ""])
+                content.extend(
+                    render_lines(
+                        "s_step_heading.j2",
+                        step_description=api_description or "",
+                        step_prefix=step_prefix,
+                        step_name=step_name,
+                    )
+                )
 
                 # 生成步骤函数体（从HAR请求中获取参数）
                 self._generate_step_function_body(content, api_function_name, api_info, request_info)
 
-                # 生成断言
+                # 生成断言（模板渲染；同步 requests / 异步 aiohttp 响应字段不同）
                 status_attr = "r.status" if self.async_mode else "r.status_code"
                 json_call = "await r.json()" if self.async_mode else "r.json()"
                 content.extend(
-                    [
-                        f"                assert {status_attr} == 200",
-                        f"                data = {json_call}",
-                        "                assert data['code'] == 200",
-                        f"                test_data['{data_key}'] = data['data']",
-                        "",
-                    ]
+                    render_lines(
+                        "s_step_asserts.j2",
+                        status_attr=status_attr,
+                        json_call=json_call,
+                        data_key=data_key,
+                    )
                 )
 
         return step_functions
@@ -1067,13 +1234,21 @@ class TestCaseGenerator:
         if header_lines:
             content.extend(header_lines)
 
+        # 步骤体代码行由 Jinja2 模板渲染（s_step_*.j2），避免手工拼接缩进
         if is_file_upload:
             # 文件上传请求，使用 files 参数（list 请求体不会出现在文件上传分支）
             har_values_dict = har_values if isinstance(har_values, dict) else {}
             actual_values = {**api_files, **har_values_dict} if har_values_dict else api_files
             files_str = format_params_for_python(actual_values, indent=16)
-            content.extend([f"            files = {files_str}", ""])
-            content.extend([f"            {ctx} {api_function_name}(files=files, {headers_arg}) as r:"])
+            content.extend(
+                render_lines(
+                    "s_step_upload.j2",
+                    files_code=files_str,
+                    ctx=ctx,
+                    function_name=api_function_name,
+                    headers_arg=headers_arg,
+                )
+            )
         elif api_data:
             # API 定义使用 data 参数，合并 HAR 值和 API 默认值
             if isinstance(api_data, dict) and isinstance(har_values, dict):
@@ -1086,18 +1261,39 @@ class TestCaseGenerator:
             else:
                 # API 文件 data 本身是数组（如行为采集接口），直接用 API 默认数组
                 data_str = format_parameter_value(api_data)
-            content.extend([f"            data = {data_str}", ""])
-            content.extend([f"            {ctx} {api_function_name}(data=data, {headers_arg}) as r:"])
+            content.extend(
+                render_lines(
+                    "s_step_data.j2",
+                    data_code=data_str,
+                    ctx=ctx,
+                    function_name=api_function_name,
+                    headers_arg=headers_arg,
+                )
+            )
         elif api_params:
             # API 定义使用 params 参数（list 请求体不会出现在 params 分支）
             har_values_dict = har_values if isinstance(har_values, dict) else {}
             actual_values = {**api_params, **har_values_dict} if har_values_dict else api_params
             params_str = format_params_for_python(actual_values, indent=16)
-            content.extend([f"            params = {params_str}", ""])
-            content.extend([f"            {ctx} {api_function_name}(params=params, {headers_arg}) as r:"])
+            content.extend(
+                render_lines(
+                    "s_step_params.j2",
+                    params_code=params_str,
+                    ctx=ctx,
+                    function_name=api_function_name,
+                    headers_arg=headers_arg,
+                )
+            )
         else:
             # 没有参数时，直接调用函数（仍传 headers 覆盖模块级默认值）
-            content.extend([f"            {ctx} {api_function_name}({headers_arg}) as r:"])
+            content.extend(
+                render_lines(
+                    "s_step_none.j2",
+                    ctx=ctx,
+                    function_name=api_function_name,
+                    headers_arg=headers_arg,
+                )
+            )
 
     # ==================== 通用方法 ====================
 
@@ -1131,6 +1327,7 @@ class TestCaseGenerator:
         service_package: str | None = None,
         function_name: str | None = None,
         task_id: str | None = None,
+        is_list_query: bool = False,
     ) -> list[str]:
         """生成测试用例的导入部分。
 
@@ -1139,6 +1336,7 @@ class TestCaseGenerator:
             service_package: 服务包名称（用于单函数导入）
             function_name: API 函数名称（用于单函数导入）
             task_id: 任务 ID
+            is_list_query: 是否为 list_query 模式（自动添加 @pytest.mark.test_list_query）
 
         Returns:
             导入语句列表
@@ -1148,8 +1346,8 @@ class TestCaseGenerator:
             "",
         ]
 
-        # 根据实际的 api_dir 目录名确定导入前缀
-        base_pkg = os.path.basename(self.api_dir) or "apis"
+        # 根据实际的 api_dir 目录名确定导入前缀（调用前已校验 API 文件在 api_dir 下）
+        base_pkg = os.path.basename(self.api_dir) or APIConfig.DEFAULT_API_DIR()
 
         content.extend(
             [
@@ -1199,15 +1397,19 @@ class TestCaseGenerator:
                     content.append("")
         elif function_name:
             # 单函数模式
-            if service_package is not None:
+            if service_package is not None and service_package.isidentifier():
                 content.append(f"from {base_pkg}.{service_package} import {function_name}")
             else:
-                # 根目录下的 API 文件（无子包），直接从 apis 导入
+                # 根目录下的 API 文件（无子包）或服务包未知（如占位提示文本）：
+                # 无法拼出合法的包路径，直接从 apis 导入，避免生成非法 Python
                 content.append(f"from {base_pkg} import {function_name}")
             content.append("")
 
         if task_id:
             content.append(f"@pytest.mark.{task_id}")
+
+        if is_list_query:
+            content.append("@pytest.mark.test_list_query")
 
         return content
 
@@ -1232,7 +1434,7 @@ class TestCaseGenerator:
             desc_lines.append("")
             desc_lines.append("主要参数说明：")
             for param_name, remark in param_remarks.items():
-                desc_lines.append(f"- {param_name}：{remark or '# TODO 请填写参数备注'}")
+                desc_lines.append(f"- {param_name}：{sanitize_remark(remark) or '# TODO 请填写参数备注'}")
         return f'@allure.description("""{chr(10).join(desc_lines)}""")'
 
     def _generate_test_case_description(
@@ -1246,6 +1448,8 @@ class TestCaseGenerator:
     ) -> list[str]:
         """生成测试用例的描述部分。
 
+        由 Jinja2 模板 ``tc_description.j2`` 渲染，避免手工拼接缩进。
+
         Args:
             api_url: API URL
             service_package: 服务包名称
@@ -1257,26 +1461,24 @@ class TestCaseGenerator:
         Returns:
             描述语句列表
         """
-        content = [
-            f"@allure.severity(Severity.{severity})",
-            f"@allure.feature('{service_package}')",
-            f"@allure.story('{api_url}')",
-        ]
+        description = ""
         if api_description:
-            content.append(self._generate_allure_description(api_url, api_description, param_remarks))
-        content.append("class TestClass:")
-        content.append("")
-
-        # 生成类级别 headers 属性（调用时求值，避免 import 时读取环境变量）
+            description = self._generate_allure_description(api_url, api_description, param_remarks)
+        header_items = []
         if api_headers:
-            content.append("    @property")
-            content.append("    def headers(self):")
-            content.append("        return {")
-            for key, value in api_headers.items():
-                content.append(f'            "{key}": {header_value_formatter(value)},')
-            content.append("        }")
-            content.append("")
+            header_items = [(key, header_value_formatter(value)) for key, value in api_headers.items()]
 
+        content = render_lines(
+            "tc_description.j2",
+            severity=severity,
+            service_package=service_package,
+            api_url=api_url,
+            description=description,
+            header_items=header_items,
+        )
+        # 与旧实现一致：描述段以空行结束，作为与后续代码块的间隔
+        if not content or content[-1] != "":
+            content.append("")
         return content
 
     # ==================== 参数化测试辅助方法 ====================
@@ -1311,7 +1513,13 @@ class TestCaseGenerator:
 
             param_values = item[param_name]
             other_params = item["other_params"]
-            is_combination = "," in param_name
+            # 组合参数判定：名称含逗号 且 取值为列表嵌套结构（HAR 流生成的组合参数）
+            # 避免将名称本身含逗号的 Swagger 参数误判为组合参数
+            is_combination = (
+                "," in param_name
+                and bool(param_values)
+                and isinstance(param_values[0], list)
+            )
 
             content.extend(self._generate_parametrize_decorator(param_name, param_values, is_combination))
             content.extend(
@@ -1329,6 +1537,8 @@ class TestCaseGenerator:
     ) -> list[str]:
         """生成 @pytest.mark.parametrize 装饰器。
 
+        由 Jinja2 模板 ``p_parametrize_decorator.j2`` 渲染，避免手工拼接缩进。
+
         Args:
             param_name: 参数名称（可能包含多个参数，用逗号分隔）
             param_values: 参数值列表
@@ -1341,17 +1551,14 @@ class TestCaseGenerator:
 
         if is_combination:
             safe_names = [sanitize_param_name(n.strip()) for n in param_name.split(",")]
-            safe_param_name = ", ".join(safe_names)
+            arg_names = ", ".join(safe_names)
         else:
-            safe_param_name = sanitize_param_name(param_name)
-        decorator_line = f'    @pytest.mark.parametrize("{safe_param_name}", ['
-
-        content = [decorator_line]
-        for i, value in enumerate(parametrize_values):
-            suffix = "" if i == len(parametrize_values) - 1 else ","
-            content.append(f"        {value}{suffix}")
-        content.append("    ])")
-        return content
+            arg_names = sanitize_param_name(param_name)
+        return render_lines(
+            "p_parametrize_decorator.j2",
+            arg_names=arg_names,
+            values=parametrize_values,
+        )
 
     def _generate_parametrize_values(self, param_values: list[Any], is_combination: bool) -> list[str]:
         """生成参数化值列表。
@@ -1383,7 +1590,9 @@ class TestCaseGenerator:
         param_count: int,
         is_combination: bool,
     ) -> list[str]:
-        """生成测试方法定义。
+        """生成参数化测试方法定义（标题 + def 行）。
+
+        由 Jinja2 模板 ``p_test_method_definition.j2`` 渲染。
 
         Args:
             api_description: API 描述信息
@@ -1396,35 +1605,41 @@ class TestCaseGenerator:
         Returns:
             测试方法定义代码行列表
         """
-        prefix = "    async def " if self.async_mode else "    def "
         if is_combination:
             param_names = param_name.split(",")
-            safe_param_names = [sanitize_param_name(p) for p in param_names]
+            safe_names = [sanitize_param_name(p) for p in param_names]
             param_descriptions = []
             for p in param_names:
-                desc = param_remarks.get(p, p)
+                # 备注可能含换行（多行 Swagger 描述），压成单行后再拼进字符串字面量
+                desc = sanitize_remark(param_remarks.get(p, p))
                 if "-" in desc:
                     desc = desc.split("-")[0]
                 param_descriptions.append(desc)
-            param_desc_str = "-".join(param_descriptions)
-            return [
-                f'    @allure.title("{api_description}: {param_desc_str} 查询")',
-                f"{prefix}test_{param_count}_{clean_function_name}(self, {', '.join(safe_param_names)}):",
-            ]
+            title_param = "-".join(param_descriptions)
         else:
-            safe_param_name = sanitize_param_name(param_name)
-            param_description = param_remarks.get(param_name, param_name)
-            if " " in param_description:
-                param_description = param_description.split(" ")[0]
-            return [
-                f'    @allure.title("{api_description}: {param_description} 查询")',
-                f"{prefix}test_{param_count}_{clean_function_name}(self, {safe_param_name}):",
-            ]
+            safe_names = [sanitize_param_name(param_name)]
+            title_param = sanitize_remark(param_remarks.get(param_name, param_name))
+            if " " in title_param:
+                title_param = title_param.split(" ")[0]
+
+        def_prefix = "    async def " if self.async_mode else "    def "
+        return render_lines(
+            "p_test_method_definition.j2",
+            api_description=sanitize_remark(api_description),
+            title_param=title_param,
+            def_prefix=def_prefix,
+            clean_name=clean_function_name,
+            idx=param_count,
+            safe_names=safe_names,
+        )
 
     def _generate_test_method_body(
         self, param_var_name: str, param_name: str, other_params: dict[str, Any], is_combination: bool
     ) -> list[str]:
         """生成测试方法体。
+
+        由 Jinja2 模板 ``p_method_body.j2`` 渲染（内部复用 ``p_data_dict.j2``），
+        避免手工拼接缩进。
 
         Args:
             param_var_name: 参数变量名（params 或 data）
@@ -1435,39 +1650,31 @@ class TestCaseGenerator:
         Returns:
             测试方法体代码行列表
         """
-        content = [
-            "",
-            f"        {param_var_name} = {{",
-        ]
-        self._generate_data_dict(content, param_name, other_params, is_combination, param_var_name)
-        content.append("        }")
-        return content
+        ctx = self._param_dict_context(param_name, other_params, is_combination)
+        body_lines = render_lines(
+            "p_method_body.j2",
+            leading_blank=False,
+            param_var_name=param_var_name,
+            **ctx,
+        )
+        # 方法体第一行为空行（与 def 行之间留白），与旧实现保持一致
+        return ["", *body_lines]
 
-    def _generate_data_dict(
-        self, content: list[str], param_name: str, other_params: dict[str, Any], is_combination: bool, param_var_name: str
-    ) -> None:
-        """生成数据字典。
-
-        Args:
-            content: 内容列表（会被修改）
-            param_name: 参数名称
-            other_params: 其他参数字典
-            is_combination: 是否为组合参数
-            param_var_name: 参数变量名
-        """
+    def _param_dict_context(
+        self, param_name: str, other_params: dict[str, Any], is_combination: bool
+    ) -> dict[str, Any]:
+        """构建参数化数据字典模板的渲染上下文（p_method_body/p_data_dict 共用）。"""
         if is_combination:
-            for key in param_name.split(","):
-                safe_key = sanitize_param_name(key)
-                content.append(f'            "{key}": {safe_key},')
+            param_pairs = [(key, sanitize_param_name(key)) for key in param_name.split(",")]
+            combo_ctx: dict[str, Any] = {"param_pairs": param_pairs}
         else:
-            safe_name = sanitize_param_name(param_name)
-            content.append(f'            "{param_name}": {safe_name},')
-
-        for key, value in other_params.items():
-            if isinstance(value, str):
-                content.append(f'            "{key}": {repr(value)},')
-            else:
-                content.append(f'            "{key}": {value},')
+            combo_ctx = {"param_name": param_name, "param_safe": sanitize_param_name(param_name)}
+        other_items = [(key, repr(value) if isinstance(value, str) else str(value)) for key, value in other_params.items()]
+        return {
+            "is_combination": is_combination,
+            "other_items": other_items,
+            **combo_ctx,
+        }
 
     @staticmethod
     def _is_time_param(param_name: str) -> bool:
@@ -1485,6 +1692,8 @@ class TestCaseGenerator:
     def _generate_test_method_assertions(self, function_name: str, param_var_name: str, param_name: str = "") -> list[str]:
         """生成测试方法断言部分。
 
+        由 Jinja2 模板 ``p_test_method_assertions.j2`` 渲染。
+
         Args:
             function_name: API 函数名称
             param_var_name: 参数变量名（params 或 data）
@@ -1493,29 +1702,23 @@ class TestCaseGenerator:
         Returns:
             断言代码行列表
         """
-        ctx = "async with" if self.async_mode else "with"
-        status_attr = "r.status" if self.async_mode else "r.status_code"
-        json_call = "await r.json()" if self.async_mode else "r.json()"
-        content = [
-            f"        {ctx} {function_name}({param_var_name}={param_var_name}, headers=self.headers) as r:",
-            f"            assert {status_attr} == 200",
-            f"            data = {json_call}",
-            "            assert data['code'] == 200",
-        ]
-
-        # 非时间类参数：验证返回数据是否符合搜索条件
-        if param_name and not self._is_time_param(param_name) and "," not in param_name:
-            safe_name = sanitize_param_name(param_name)
-            content.extend([
-                "            # 验证返回数据符合搜索条件",
-                "            resp_data = data.get('data')",
-                "            items = resp_data.get('list', []) if isinstance(resp_data, dict) else []",
-                "            for item in items:",
-                "                if isinstance(item, dict):",
-                "                    for k, v in item.items():",
-                f"                        if k.lower() == '{param_name.lower()}':",
-                f"                            assert str(v) == str({safe_name}), f'字段 {{k}} 值 {{v}} 与搜索条件 {safe_name}={{{safe_name}}} 不一致'",
-            ])
-
+        search_enabled = bool(param_name) and not self._is_time_param(param_name) and "," not in param_name
+        safe_name = sanitize_param_name(param_name) if param_name else ""
+        verify_assert = ""
+        if search_enabled:
+            verify_assert = (
+                f"assert str(v) == str({safe_name}), "
+                f"f'字段 {{k}} 值 {{v}} 与搜索条件 {safe_name}={{{safe_name}}} 不一致'"
+            )
+        content = render_lines(
+            "p_test_method_assertions.j2",
+            async_mode=self.async_mode,
+            function_name=function_name,
+            param_var=param_var_name,
+            search_enabled=search_enabled,
+            search_param=param_name.lower() if search_enabled else "",
+            verify_assert=verify_assert,
+        )
+        # 与旧实现一致：断言块后补空行分隔下一个测试方法
         content.append("")
         return content

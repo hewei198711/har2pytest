@@ -3,7 +3,6 @@
 提供参数格式化、文件处理等通用工具函数。
 """
 
-import ast
 import asyncio
 import json
 import keyword
@@ -14,21 +13,22 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
+from .api_metadata import VALUE_FIELDS, read_api_metadata
 from .logger import logger
 from .models import APIFileInfo, ParsedRequestInfo
 
 
-def _format_nested(value: Any) -> str:
-    """递归格式化值，生成合法的 Python 代码字符串。
+def format_parameter_value(value: Any) -> str:
+    """生成参数值的 Python 代码字符串（递归处理嵌套容器）。
 
-    与 json.dumps 不同，输出使用 Python 字面量（None/True/False）
-    而非 JSON 字面量（null/true/false）。
+    将 Python 值转换为可在代码中使用的字符串表示：None/True/False 用 Python
+    字面量而非 JSON 字面量（null/true/false），中文字符保留，其余类型 repr 兜底。
 
     Args:
-        value: 要格式化的值。
+        value: 要格式化的值，可以是任意类型。
 
     Returns:
-        str: 格式化后的 Python 代码字符串。
+        str: 格式化后的字符串，如 '"hello"'、'123'、'None'、'{"a": [1, None]}' 等。
     """
     if value is None:
         return "None"
@@ -39,36 +39,31 @@ def _format_nested(value: Any) -> str:
     if isinstance(value, (int, float)):
         return repr(value)
     if isinstance(value, list):
-        items = [_format_nested(item) for item in value]
+        items = [format_parameter_value(item) for item in value]
         return "[" + ", ".join(items) + "]"
     if isinstance(value, dict):
-        items = [f"{json.dumps(k, ensure_ascii=False)}: {_format_nested(v)}" for k, v in value.items()]
+        items = [f"{json.dumps(k, ensure_ascii=False)}: {format_parameter_value(v)}" for k, v in value.items()]
         return "{" + ", ".join(items) + "}"
     return repr(value)
 
 
-def format_parameter_value(value: Any) -> str:
-    """生成参数值的 Python 代码字符串。
+def sanitize_remark(text: Any) -> str:
+    """把参数备注/描述规范化为单行文本。
 
-    将 Python 值转换为可在代码中使用的字符串表示。
+    Swagger 的描述可能包含换行、制表符或续行缩进（如多行枚举说明）。这类文本
+    直接写入 ``#`` 注释、docstring 或 ``@allure.title`` 字符串会造成排版错乱，
+    甚至生成非法代码（unterminated string literal）。这里把行内空白折叠为单个
+    空格并去掉首尾空白；中文全角空格等非 ASCII 字符保持原样。
 
     Args:
-        value: 要格式化的值，可以是任意类型。
+        text: 原始文本；非字符串返回空串。
 
     Returns:
-        str: 格式化后的字符串，如 '"hello"'、'123'、'None' 等。
+        str: 单行文本。
     """
-    if value is None:
-        return "None"
-    if isinstance(value, bool):
-        return "True" if value else "False"
-    if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, (int, float)):
-        return repr(value)
-    if isinstance(value, (list, dict)):
-        return _format_nested(value)
-    return repr(value)
+    if not isinstance(text, str):
+        return ""
+    return re.sub(r"[ \t\r\n\f\v]+", " ", text).strip()
 
 
 def deduplicate_values(values: list[Any]) -> list[Any]:
@@ -93,21 +88,19 @@ def deduplicate_values(values: list[Any]) -> list[Any]:
     return unique_values
 
 
-def get_output_dir(base_output_dir: str, task_id: str | None = None) -> str:
+def get_output_dir(base_output_dir: str) -> str:
     """获取输出目录路径。
 
     如果目录不存在则创建。
 
     Args:
         base_output_dir: 基础输出目录。
-        task_id: 任务 ID，用于创建子目录（可选）。
 
     Returns:
         str: 输出目录的完整路径。
     """
-    output_dir = os.path.join(base_output_dir, task_id) if task_id else base_output_dir
-    os.makedirs(output_dir, exist_ok=True)
-    return output_dir
+    os.makedirs(base_output_dir, exist_ok=True)
+    return base_output_dir
 
 
 def write_test_file(filepath: str, content: str):
@@ -140,46 +133,39 @@ async def format_directory(dir_path: str) -> None:
         return
 
     logger.info(f"批量格式化目录: {dir_path}")
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-m",
-            "ruff",
-            "check",
-            "--fix",
-            # 生成代码在 import 前设置 client，E402 为固有结构，忽略避免误报
-            "--ignore",
-            "E402",
-            "--no-respect-gitignore",
-            dir_path,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
-        if proc.returncode != 0:
-            logger.warning(f"ruff check --fix 返回非零退出码: {proc.returncode}（可能未安装 ruff）")
-    except Exception as e:
-        logger.warning(f"ruff check --fix 执行失败: {e}")
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-m",
-            "ruff",
-            "format",
-            "--no-respect-gitignore",
-            dir_path,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
-        if proc.returncode != 0:
-            logger.warning(f"ruff format 返回非零退出码: {proc.returncode}（可能未安装 ruff）")
-    except Exception as e:
-        logger.warning(f"ruff 格式化执行失败: {e}")
+    async def _run_ruff(args: list[str], task: str) -> None:
+        """运行一次 ruff（check --fix / format），失败仅告警不抛出。"""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-m",
+                "ruff",
+                *args,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+            if proc.returncode != 0:
+                logger.warning(f"ruff {task} 返回非零退出码: {proc.returncode}（可能未安装 ruff）")
+        except Exception as e:
+            logger.warning(f"ruff {task} 执行失败: {e}")
+
+    # 生成代码在 import 前设置 client，E402 为固有结构，忽略避免误报
+    await _run_ruff(["check", "--fix", "--ignore", "E402", "--no-respect-gitignore", dir_path], "check --fix")
+    await _run_ruff(["format", "--no-respect-gitignore", dir_path], "format")
 
 
-# API文件解析缓存
+# ===========================================================================
+# API 模块结构化读取（元数据唯一入口）
+#
+# 生成器产出 .py 的同时会写入 <module>.api.json 元数据（见 api_metadata），
+# 描述/URL/参数备注与 params/data/files/headers 的当前值都在其中。
+# parse_api_file 只消费元数据：没有元数据或缺少必需字段时直接报错并提示
+# 补充（重新生成该 API 文件或手工补 .api.json），不再回退去解析 .py 源码。
+# ===========================================================================
+
+# API 文件解析缓存
 _API_FILE_CACHE = {}
 
 
@@ -188,11 +174,40 @@ def clear_api_file_cache():
     _API_FILE_CACHE.clear()
 
 
-def parse_api_file(filepath: str) -> APIFileInfo:
-    """从 API 文件中提取所有信息。
+# 模块级赋值可携带的参数/头名称（与 API 元数据 VALUE_FIELDS 单一来源，见 api_metadata）
+_API_HEADER_ASSIGN = "headers"
+_API_DATA_ASSIGNS = tuple(f for f in VALUE_FIELDS if f != _API_HEADER_ASSIGN)
+_API_CURRENT_FIELDS = VALUE_FIELDS
 
-    提取函数名、描述、URL、参数备注、请求头和参数值等信息。
-    结果会被缓存以提高性能。
+
+def _normalize_field_value(key: str, current: Any, value: Any) -> Any:
+    """当前值字段的统一规则：headers 仅接受 dict（整体合并）；params/data/files 为 dict 时合并、
+    非 dict（如 JSON 数组 body）时整体替换。返回要写入的新值。
+    """
+    if isinstance(value, dict):
+        base = current if isinstance(current, dict) else {}
+        merged = dict(base)
+        merged.update(value)
+        return merged
+    if key == _API_HEADER_ASSIGN:
+        return current  # headers 忽略非 dict 值（保持现状）
+    return value  # 其余字段非 dict 整体替换
+
+
+def _apply_current_field(result: APIFileInfo, key: str, value: Any) -> None:
+    """把 headers/params/data/files 的当前值应用到解析结果（规则同 _normalize_field_value）。"""
+    if key == _API_HEADER_ASSIGN and not isinstance(value, dict):
+        return
+    merged = _normalize_field_value(key, getattr(result, key), value)
+    setattr(result, key, merged)
+
+
+def parse_api_file(filepath: str) -> APIFileInfo:
+    """从 API 元数据（``<module>.api.json``）读取 API 信息（唯一入口）。
+
+    生成测试用例要求每个 API 文件都带生成时写好的元数据；没有元数据或
+    缺少必需字段（url 等）时抛出带提示的 ValueError，**不再回退解析 .py**
+    源码/docstring——缺什么就提示补什么（重新生成该 API 文件即可自动补齐）。
 
     Args:
         filepath: API 文件路径。
@@ -200,137 +215,52 @@ def parse_api_file(filepath: str) -> APIFileInfo:
     Returns:
         APIFileInfo: 包含 function_name、description、url、param_remarks、
             headers、params、data、files 的数据对象。
+
+    Raises:
+        ValueError: 缺少元数据文件或其中缺少必需字段时抛出，附补充提示。
     """
     if filepath in _API_FILE_CACHE:
         return _API_FILE_CACHE[filepath]
 
     result = APIFileInfo()
+    result.function_name = os.path.splitext(os.path.basename(filepath))[0]
 
-    try:
-        basename = os.path.basename(filepath)
-        result.function_name = os.path.splitext(basename)[0]
-    except Exception as e:
-        logger.error(f"从文件路径提取函数名失败 {filepath}: {str(e)}")
+    metadata = read_api_metadata(filepath)
+    if metadata is None:
+        raise ValueError(
+            f"缺少 API 元数据文件 {filepath}（应为同名的 .api.json），无法生成测试用例。"
+            "请用 har2pytest api/swagger 重新生成该 API 文件（或手工补写 .api.json）后再生成测试用例。"
+        )
 
-    try:
-        with open(filepath, encoding="utf-8") as f:
-            content = f.read()
-
-        # 提取描述和URL（支持双引号和单引号的docstring）
-        docstring_match = re.search(r'"""([\s\S]*?)"""', content) or re.search(r"'''([\s\S]*?)'''", content)
-        if docstring_match:
-            # 获取第一个非空的捕获组
-            docstring_content = docstring_match.group(1)
-            lines = [line.strip() for line in docstring_content.split("\n") if line.strip()]
-            if lines:
-                result.description = lines[0]
-                result.url = lines[1]
-
-        # 提取参数值和备注（params、data 和 files）
-        for param_type in ["params", "data", "files"]:
-            # 使用括号计数法正确提取嵌套字典（避免正则 {.*?} 在嵌套结构时截断）；
-            # 同时支持 JSON 数组请求体形式：data = [{...}]（list 以 [ ] 配对计数）
-            param_start = content.find(f"{param_type} = {{")
-            open_char, close_char = "{", "}"
-            if param_start == -1:
-                param_start = content.find(f"{param_type} = [")
-                open_char, close_char = "[", "]"
-            if param_start != -1:
-                brace_start = content.find(open_char, param_start)
-                if brace_start != -1:
-                    brace_count = 1
-                    brace_end = brace_start + 1
-                    while brace_count > 0 and brace_end < len(content):
-                        if content[brace_end] == open_char:
-                            brace_count += 1
-                        elif content[brace_end] == close_char:
-                            brace_count -= 1
-                        brace_end += 1
-                    dict_str = content[param_start:brace_end]
-                else:
-                    continue
-
-                # 提取参数备注（支持嵌套 dict，使用 dotted key 如 "payDTO.accountName"）
-                lines = dict_str.split("\n")
-                parent_keys = []
-                for line in lines:
-                    stripped = line.strip()
-                    # 检测进入嵌套 dict： "key": {
-                    enter_match = re.match(r'"(\w+)"\s*:\s*\{', stripped)
-                    if enter_match:
-                        parent_keys.append(enter_match.group(1))
-                        continue
-                    # 检测退出嵌套 dict： } 或 },
-                    if re.match(r"^\}\s*,?\s*$", stripped):
-                        if parent_keys:
-                            parent_keys.pop()
-                        continue
-                    # 匹配 key-value-comment 格式
-                    comment_match = re.match(r'"(\w+)"\s*:\s*[^#]*#\s*(.+)$', stripped)
-                    if comment_match:
-                        key_name = comment_match.group(1)
-                        remark = comment_match.group(2).strip()
-                        full_key = ".".join(parent_keys + [key_name]) if parent_keys else key_name
-                        result.param_remarks[full_key] = remark
-
-                # 移除行尾注释后解析字典值
-                try:
-                    # 移除变量名赋值部分，只保留字典内容
-                    dict_str = dict_str.replace(f"{param_type} = ", "")
-                    lines = dict_str.split("\n")
-                    cleaned_lines = []
-                    for line in lines:
-                        if "#" in line:
-                            line = line.split("#")[0]
-                        cleaned_lines.append(line)
-                    dict_str = "\n".join(cleaned_lines)
-
-                    params_dict = ast.literal_eval(dict_str)
-                    if isinstance(params_dict, dict):
-                        getattr(result, param_type).update(params_dict)
-                    else:
-                        setattr(result, param_type, params_dict)
-                    break  # API文件只会有第一个参数类型
-                except Exception as e:
-                    logger.error(f"解析 {param_type} 字典失败: {str(e)}")
-
-        # 提取headers
-        # 先定位 headers 字典范围，再提取键值对
-        headers_start = content.find("headers = {")
-        if headers_start != -1:
-            # 找到 headers 字典的结束位置（正确处理嵌套的大括号）
-            headers_start += len("headers = {")
-            brace_count = 1
-            headers_end = headers_start
-            while brace_count > 0 and headers_end < len(content):
-                if content[headers_end] == "{":
-                    brace_count += 1
-                elif content[headers_end] == "}":
-                    brace_count -= 1
-                headers_end += 1
-
-            headers_content = "{" + content[headers_start:headers_end]
-
-            header_pattern = r'"([\w-]+)"\s*:\s*(f"[^"]*"|f\'[^\']*\'|"[^"]*"|\'[^\']*\')'
-            for key, value in re.findall(header_pattern, headers_content):
-                if value.startswith('f"') or value.startswith("f'"):
-                    result.headers[key] = value
-                else:
-                    result.headers[key] = value.strip('"').strip("'")
-
-    except Exception as e:
-        logger.error(f"读取API文件 {filepath} 失败: {str(e)}")
+    url = metadata.get("url")
+    if not url:
+        raise ValueError(
+            f"{filepath} 的 API 元数据缺少必需字段 url，无法用于 URL 匹配/生成测试用例。"
+            "请重新生成该 API 文件（--overwrite）以补齐元数据。"
+        )
+    result.url = url
+    result.description = metadata.get("description", "")
+    remarks = metadata.get("param_remarks")
+    if isinstance(remarks, dict):
+        # 历史元数据里的描述可能含换行（Swagger 多行 description），读取时统一压成单行
+        result.param_remarks.update({key: sanitize_remark(value) for key, value in remarks.items()})
+    # 当前值字段（headers/params/data/files）：仅取元数据中提供的字段
+    for key in _API_CURRENT_FIELDS:
+        meta_value = metadata.get(key)
+        if meta_value is not None:
+            _apply_current_field(result, key, meta_value)
 
     _API_FILE_CACHE[filepath] = replace(result)
     return result
 
 
 def header_value_formatter(value: Any) -> str:
-    """将 headers 值转换为 Python 字面量字符串。
+    """将 headers 值转换为可嵌入 Python 代码的字符串字面量。
 
-    f-string 值中的 os.environ[...] 会被转换为 os.environ.get(..., '') 以安全访问，
-    避免在 import 时因环境变量未设置而抛出 KeyError。
-    已带引号的字符串值直接返回，普通字符串包装引号。
+    - 普通字符串：用 ``json.dumps`` 转义包装，内部引号/反斜杠/换行不会被破坏；
+    - 已是字面量文本（以 ``'``/``"``/``f'``/``f"`` 开头）：原样保留，其中
+      ``f'``/``f"`` 里的 ``os.environ[...]`` 转换为 ``os.environ.get(..., '')``，
+      避免 import 时因环境变量未设置抛 KeyError。
 
     Args:
         value: headers 值，可能为普通字符串、f-string 字面量或已带引号的字符串。
@@ -338,11 +268,16 @@ def header_value_formatter(value: Any) -> str:
     Returns:
         str: 可嵌入 Python 代码的字符串字面量。
     """
-    if isinstance(value, str) and value.startswith(('"', 'f"')):
-        if value.startswith('f"'):
-            return value.replace("os.environ[", "os.environ.get(").replace("]", ", '')")
+    if not isinstance(value, str):
+        return repr(value)
+    text = value.lstrip()
+    if text.startswith(("f'", 'f"')):
+        # f-string 字面量文本：仅把 os.environ[索引] 改为 .get，避免误伤其它 [] 下标
+        return re.sub(r"os\.environ\[([^\[\]]+)\]", lambda m: f"os.environ.get({m.group(1)}, '')", value)
+    if text[:1] in ("'", '"'):
+        # 已带引号的字符串字面量，原样保留
         return value
-    return f'"{value}"'
+    return json.dumps(value, ensure_ascii=False)
 
 
 def format_headers_for_python(headers: dict[str, str]) -> str:
@@ -394,13 +329,15 @@ def format_params_for_python(
     items = []
     for key, value in params.items():
         full_key = f"{key_prefix}.{key}" if key_prefix else key
+        # key 用 json.dumps 转义，避免含引号/反斜杠的参数名生成非法代码
+        key_literal = json.dumps(key, ensure_ascii=False) if isinstance(key, str) else repr(key)
         if isinstance(value, dict) and value:
-            # 递归处理嵌套字典，传递 key_prefix 用于 dotted key 查找
+            # 递归处理嵌套字典，传递 key_prefix 用于 dotted key 查找（inline 语义透传）
             formatted_value = format_params_for_python(
                 value,
                 value_formatter,
                 comments,
-                inline=False,
+                inline=inline,
                 indent=indent + 4,
                 key_prefix=full_key,
             )
@@ -408,14 +345,14 @@ def format_params_for_python(
             formatted_value = value_formatter(value)
         comment = comments.get(full_key, "")
         if comment:
-            # 将注释中的换行符替换为空格，避免语法错误
-            safe_comment = comment.replace("\n", " ").replace("\r", " ")
-            items.append(f'{indent_str}"{key}": {formatted_value},  # {safe_comment}')
+            # 注释中的换行会导致生成代码断行/语法错误，统一压成单行
+            safe_comment = sanitize_remark(comment)
+            items.append(f"{indent_str}{key_literal}: {formatted_value},  # {safe_comment}")
         elif comments:
             # 有 comments 字典但无此 key 的描述，添加回退注释
-            items.append(f'{indent_str}"{key}": {formatted_value},  # TODO: 添加参数说明')
+            items.append(f"{indent_str}{key_literal}: {formatted_value},  # TODO: 添加参数说明")
         else:
-            items.append(f'{indent_str}"{key}": {formatted_value},')
+            items.append(f"{indent_str}{key_literal}: {formatted_value},")
 
     if inline:
         return "{" + ", ".join(items) + "}"
@@ -445,9 +382,11 @@ def merge_request_params(request_info: ParsedRequestInfo) -> dict[str, Any]:
 
 
 def sanitize_param_name(name: str) -> str:
-    """清理参数名，避免 Python 关键字冲突。
+    """清理参数名，使其可安全用作 Python 标识符。
 
-    如果参数名是 Python 关键字（如 from、class 等），追加下划线后缀。
+    - Python 关键字（from、class 等）追加下划线；
+    - 其余非标识符字符（如 ``-``、``.``、空格）替换为下划线；
+    - 空结果或纯数字开头时加 ``param_`` 前缀，避免生成非法代码。
 
     Args:
         name: 原始参数名
@@ -460,7 +399,14 @@ def sanitize_param_name(name: str) -> str:
         'from_'
         >>> sanitize_param_name("user_id")
         'user_id'
+        >>> sanitize_param_name("order-id")
+        'order_id'
     """
-    if keyword.iskeyword(name):
-        return name + "_"
-    return name
+    if not name:
+        return "param_"
+    safe = re.sub(r"\W", "_", name)
+    if keyword.iskeyword(safe):
+        safe += "_"
+    if not safe or not (safe[0].isalpha() or safe[0] == "_"):
+        safe = "param_" + safe
+    return safe

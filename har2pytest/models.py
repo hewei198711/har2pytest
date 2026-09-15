@@ -76,9 +76,8 @@ class ParsedRequestInfo:
 
 @dataclass
 class APIFileInfo:
-    """解析后的 API 文件元数据。
+    """API 文件元数据（由 parse_api_file 从 .api.json 读取）。
 
-    由 parse_api_file 生成，包含从已生成 API 文件中提取的所有元信息。
     用于测试用例生成时使用 API 文件的原始参数和备注信息。
 
     Attributes:

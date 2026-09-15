@@ -9,38 +9,50 @@ import allure
 import pytest
 import requests
 
-from har2pytest.client import Client, ResponseContext, _value_with_color, client
+from har2pytest.client import (
+    _DATA_FIELDS_ATTR,
+    _DATA_FILES_ATTR,
+    Client,
+    ResponseContext,
+    _build_request_info,
+    _guess_content_type,
+    _json_default,
+    _shorten,
+    build_form_data,
+    build_multipart_data,
+    client,
+)
 from har2pytest.logger import logger
 
-# ==================== _value_with_color 测试 ====================
+# ==================== Fixtures ====================
 
 
-@allure.feature("共享工具函数")
-@allure.story("性能监控颜色")
-@allure.title("测试性能值绿色（低于green阈值）")
-def test_value_with_color_green():
-    thresholds = {"green": 5, "yellow": 10}
-    result = _value_with_color(2.0, thresholds)
-    assert "green" in result
-    assert "2.000" in result
+@pytest.fixture
+def mock_response():
+    """构造默认的同步 mock 响应对象（200 OK + JSON）。"""
+    resp = MagicMock(spec=requests.Response)
+    resp.status_code = 200
+    resp.headers = {"Content-Type": "application/json"}
+    resp.json.return_value = {"code": 200}
+    resp.raise_for_status = MagicMock()
+    return resp
 
 
-@allure.feature("共享工具函数")
-@allure.story("性能监控颜色")
-@allure.title("测试性能值橙色（低于yellow阈值）")
-def test_value_with_color_yellow():
-    thresholds = {"green": 5, "yellow": 10}
-    result = _value_with_color(7.0, thresholds)
-    assert "orange" in result
+@pytest.fixture
+def mock_session(mock_response):
+    """构造同步 mock session，request 返回 mock_response。"""
+    session = MagicMock()
+    session.request.return_value = mock_response
+    return session
 
 
-@allure.feature("共享工具函数")
-@allure.story("性能监控颜色")
-@allure.title("测试性能值红色（超过阈值）")
-def test_value_with_color_red():
-    thresholds = {"green": 5, "yellow": 10}
-    result = _value_with_color(15.0, thresholds)
-    assert "red" in result
+@pytest.fixture
+def client_with_mock(mock_session):
+    """已注入 mock session 的 Client，同时返回 (client, mock_response)。"""
+    mock_response = mock_session.request.return_value
+    ac = Client(base_url="https://example.com")
+    ac.session = mock_session
+    return ac, mock_response
 
 
 # ==================== Client 初始化测试 ====================
@@ -103,6 +115,28 @@ def test_client_put_returns_context():
     assert ctx._url == "/api/update"
 
 
+@allure.feature("同步客户端")
+@allure.story("请求方法")
+@allure.title("测试 Client.delete 返回 ResponseContext")
+def test_client_delete_returns_context():
+    c = Client(base_url="https://example.com")
+    ctx = c.delete("/api/remove")
+    assert isinstance(ctx, ResponseContext)
+    assert ctx._method == "DELETE"
+    assert ctx._url == "/api/remove"
+
+
+@allure.feature("同步客户端")
+@allure.story("请求方法")
+@allure.title("测试 Client.patch 返回 ResponseContext")
+def test_client_patch_returns_context():
+    c = Client(base_url="https://example.com")
+    ctx = c.patch("/api/update", json={"field": "value"})
+    assert isinstance(ctx, ResponseContext)
+    assert ctx._method == "PATCH"
+    assert ctx._url == "/api/update"
+
+
 # ==================== ResponseContext 初始化测试 ====================
 
 
@@ -125,18 +159,8 @@ def test_response_context_init():
 @allure.feature("同步客户端")
 @allure.story("ResponseContext")
 @allure.title("测试 ResponseContext.__enter__ GET 请求成功")
-def test_response_context_enter_get_success():
-    mock_session = MagicMock()
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json.return_value = {"code": 200, "data": {}}
-    mock_response.raise_for_status = MagicMock()
-    mock_session.request.return_value = mock_response
-
-    c = Client(base_url="https://example.com")
-    c.session = mock_session
-
+def test_response_context_enter_get_success(client_with_mock, mock_session):
+    c, mock_response = client_with_mock
     ctx = c.get("/api/test", params={"key": "value"})
     response = ctx.__enter__()
 
@@ -144,24 +168,14 @@ def test_response_context_enter_get_success():
     mock_session.request.assert_called_once()
     call_args = mock_session.request.call_args
     assert call_args[0][0] == "GET"
-    assert "https://example.com/api/test" in str(call_args)
+    assert call_args[0][1] == "https://example.com/api/test"
 
 
 @allure.feature("同步客户端")
 @allure.story("ResponseContext")
 @allure.title("测试 ResponseContext.__enter__ POST JSON 请求")
-def test_response_context_enter_post_json():
-    mock_session = MagicMock()
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json.return_value = {"code": 200}
-    mock_response.raise_for_status = MagicMock()
-    mock_session.request.return_value = mock_response
-
-    c = Client(base_url="https://example.com")
-    c.session = mock_session
-
+def test_response_context_enter_post_json(client_with_mock, mock_session):
+    c, mock_response = client_with_mock
     ctx = c.post("/api/create", json={"name": "test"})
     response = ctx.__enter__()
 
@@ -172,18 +186,10 @@ def test_response_context_enter_post_json():
 @allure.feature("同步客户端")
 @allure.story("ResponseContext")
 @allure.title("测试 ResponseContext.__enter__ 带自定义 timeout 和 verify")
-def test_response_context_enter_custom_timeout_verify():
-    mock_session = MagicMock()
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json.return_value = {"code": 200}
-    mock_response.raise_for_status = MagicMock()
-    mock_session.request.return_value = mock_response
-
-    c = Client(base_url="https://example.com", default_timeout=30, default_verify=False)
-    c.session = mock_session
-
+def test_response_context_enter_custom_timeout_verify(client_with_mock, mock_session):
+    c, _ = client_with_mock
+    c.default_timeout = 30
+    c.default_verify = False
     ctx = c.get("/api/test", timeout=10, verify=True)
     ctx.__enter__()
 
@@ -198,17 +204,8 @@ def test_response_context_enter_custom_timeout_verify():
 @allure.feature("同步客户端")
 @allure.story("ResponseContext")
 @allure.title("测试 ResponseContext.__exit__ 正常退出不附加 Allure")
-def test_response_context_exit_success_no_attach():
-    mock_session = MagicMock()
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json.return_value = {"code": 200}
-    mock_response.raise_for_status = MagicMock()
-    mock_session.request.return_value = mock_response
-
-    c = Client(base_url="https://example.com")
-    c.session = mock_session
+def test_response_context_exit_success_no_attach(client_with_mock):
+    c, _ = client_with_mock
 
     with patch("har2pytest.client.allure.attach") as mock_attach:
         with c.get("/api/test") as r:
@@ -220,18 +217,27 @@ def test_response_context_exit_success_no_attach():
 
 @allure.feature("同步客户端")
 @allure.story("ResponseContext")
-@allure.title("测试 ResponseContext.__exit__ 异常时附加 Allure")
-def test_response_context_exit_exception_attaches_allure():
-    mock_session = MagicMock()
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 500
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json.return_value = {"code": 500, "msg": "error"}
-    mock_response.raise_for_status = MagicMock()
-    mock_session.request.return_value = mock_response
+@allure.title("测试 ResponseContext.__exit__ 关闭挂载的文件句柄")
+def test_response_context_exit_closes_files(client_with_mock):
+    c, _ = client_with_mock
+    mock_fh = MagicMock()
+    mock_body = MagicMock()
+    mock_body._har2pytest_open_files = [mock_fh]
 
-    c = Client(base_url="https://example.com")
-    c.session = mock_session
+    ctx = c.post("/api/upload", data=mock_body)
+    ctx.__enter__()
+    ctx.__exit__(None, None, None)
+
+    mock_fh.close.assert_called_once()
+
+
+@allure.feature("同步客户端")
+@allure.story("ResponseContext")
+@allure.title("测试 ResponseContext.__exit__ 异常时附加 Allure")
+def test_response_context_exit_exception_attaches_allure(client_with_mock):
+    c, mock_response = client_with_mock
+    mock_response.status_code = 500
+    mock_response.json.return_value = {"code": 500, "msg": "error"}
 
     with patch("har2pytest.client.allure.attach") as mock_attach:
         try:
@@ -247,17 +253,8 @@ def test_response_context_exit_exception_attaches_allure():
 @allure.feature("同步客户端")
 @allure.story("ResponseContext")
 @allure.title("测试 ResponseContext.__exit__ DEBUG 级别附加 Allure")
-def test_response_context_exit_debug_attaches_allure():
-    mock_session = MagicMock()
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json.return_value = {"code": 200}
-    mock_response.raise_for_status = MagicMock()
-    mock_session.request.return_value = mock_response
-
-    c = Client(base_url="https://example.com")
-    c.session = mock_session
+def test_response_context_exit_debug_attaches_allure(client_with_mock):
+    c, _ = client_with_mock
 
     original_level = logger.level
     logger.setLevel(logging.DEBUG)
@@ -278,18 +275,8 @@ def test_response_context_exit_debug_attaches_allure():
 @allure.feature("同步客户端")
 @allure.story("ResponseContext")
 @allure.title("测试请求信息包含 params 参数")
-def test_response_context_request_info_params():
-    mock_session = MagicMock()
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json.return_value = {"code": 200}
-    mock_response.raise_for_status = MagicMock()
-    mock_session.request.return_value = mock_response
-
-    c = Client(base_url="https://example.com")
-    c.session = mock_session
-
+def test_response_context_request_info_params(client_with_mock):
+    c, _ = client_with_mock
     ctx = c.get("/api/test", params={"pageNum": "1"})
     ctx.__enter__()
 
@@ -301,18 +288,8 @@ def test_response_context_request_info_params():
 @allure.feature("同步客户端")
 @allure.story("ResponseContext")
 @allure.title("测试请求信息包含 json 参数")
-def test_response_context_request_info_json():
-    mock_session = MagicMock()
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json.return_value = {"code": 200}
-    mock_response.raise_for_status = MagicMock()
-    mock_session.request.return_value = mock_response
-
-    c = Client(base_url="https://example.com")
-    c.session = mock_session
-
+def test_response_context_request_info_json(client_with_mock):
+    c, _ = client_with_mock
     ctx = c.post("/api/create", json={"name": "test"})
     ctx.__enter__()
 
@@ -324,27 +301,32 @@ def test_response_context_request_info_json():
 @allure.feature("同步客户端")
 @allure.story("ResponseContext")
 @allure.title("测试请求信息包含 MultipartEncoder data 参数")
-def test_response_context_request_info_multipart():
-    mock_session = MagicMock()
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json.return_value = {"code": 200}
-    mock_response.raise_for_status = MagicMock()
-    mock_session.request.return_value = mock_response
-
+def test_response_context_request_info_multipart(client_with_mock):
+    c, _ = client_with_mock
     mock_encoder = MagicMock()
     mock_encoder.__class__.__name__ = "MultipartEncoder"
-
-    c = Client(base_url="https://example.com")
-    c.session = mock_session
-
     ctx = c.post("/api/upload", data=mock_encoder)
     ctx.__enter__()
 
     assert ctx._request_info is not None
     assert "data" in ctx._request_info
     assert "文件上传请求" in ctx._request_info["data"]
+
+
+@allure.feature("同步客户端")
+@allure.story("ResponseContext")
+@allure.title("测试请求信息包含 _DATA_FIELDS_ATTR 挂载字段和文件信息")
+def test_response_context_request_info_data_fields_attr(client_with_mock):
+    c, _ = client_with_mock
+    mock_data = MagicMock()
+    setattr(mock_data, _DATA_FIELDS_ATTR, {"key": "value"})
+    setattr(mock_data, _DATA_FILES_ATTR, {"file": "test.png"})
+
+    ctx = c.post("/api/upload", data=mock_data)
+    ctx.__enter__()
+
+    assert ctx._request_info["data"] == {"key": "value"}
+    assert ctx._request_info["files"] == {"file": "test.png"}
 
 
 # ==================== _parse_response_body 测试 ====================
@@ -411,116 +393,64 @@ def test_parse_response_body_fallback():
     assert result == "fallback text"
 
 
-# ==================== 日志方法测试 ====================
-
-
 @allure.feature("同步客户端")
-@allure.story("日志")
-@allure.title("测试 _log_request 记录请求日志")
-def test_client_log_request():
-    c = Client(base_url="https://example.com")
-    mock_logger = MagicMock()
-    c.logger = mock_logger
+@allure.story("响应体解析")
+@allure.title("测试解析全部失败时回退到 [无法读取响应体]")
+def test_parse_response_body_total_failure():
+    class _NoTextMock(MagicMock):
+        @property
+        def text(self):
+            raise RuntimeError("no text")
 
-    request_info = {
-        "method": "GET",
-        "url": "https://example.com/api/test",
-        "headers": {"Authorization": "bearer xxx"},
-        "params": {"key": "value"},
-    }
-    c._log_request("GET", "https://example.com/api/test", request_info)
-
-    mock_logger.info.assert_called_once()
-
-
-@allure.feature("同步客户端")
-@allure.story("日志")
-@allure.title("测试 _log_request 记录带 json 的请求日志")
-def test_client_log_request_with_json():
-    c = Client(base_url="https://example.com")
-    mock_logger = MagicMock()
-    c.logger = mock_logger
-
-    request_info = {
-        "method": "POST",
-        "url": "https://example.com/api/create",
-        "headers": {},
-        "json": {"name": "test"},
-    }
-    c._log_request("POST", "https://example.com/api/create", request_info)
-
-    mock_logger.info.assert_called_once()
-
-
-@allure.feature("同步客户端")
-@allure.story("日志")
-@allure.title("测试 _log_request 记录带 data 的请求日志")
-def test_client_log_request_with_data():
-    c = Client(base_url="https://example.com")
-    mock_logger = MagicMock()
-    c.logger = mock_logger
-
-    request_info = {
-        "method": "POST",
-        "url": "https://example.com/api/create",
-        "headers": {},
-        "data": "key=value",
-    }
-    c._log_request("POST", "https://example.com/api/create", request_info)
-
-    mock_logger.info.assert_called_once()
-
-
-@allure.feature("同步客户端")
-@allure.story("日志")
-@allure.title("测试 _log_response 记录 JSON 响应日志")
-def test_client_log_response_json():
-    c = Client(base_url="https://example.com")
-    mock_logger = MagicMock()
-    c.logger = mock_logger
-
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 200
+    mock_response = _NoTextMock()
     mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json.return_value = {"code": 200}
+    mock_response.json = MagicMock(side_effect=ValueError("invalid json"))
 
-    c._log_response(mock_response)
-    mock_logger.info.assert_called_once()
+    result = ResponseContext._parse_response_body(mock_response)
+    assert result == "[无法读取响应体]"
 
 
-@allure.feature("同步客户端")
-@allure.story("日志")
-@allure.title("测试 _log_response 记录非 JSON 响应日志")
-def test_client_log_response_non_json():
-    c = Client(base_url="https://example.com")
-    mock_logger = MagicMock()
-    c.logger = mock_logger
-
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "text/html"}
-    mock_response.text = "<html>ok</html>"
-
-    c._log_response(mock_response)
-    mock_logger.info.assert_called_once()
+# ==================== 工具函数测试 ====================
 
 
 @allure.feature("同步客户端")
-@allure.story("日志")
-@allure.title("测试 _log_response 异常时回退")
-def test_client_log_response_exception():
-    c = Client(base_url="https://example.com")
-    mock_logger = MagicMock()
-    c.logger = mock_logger
+@allure.story("工具函数")
+@allure.title("测试 _shorten 截断长值")
+def test_shorten_truncation():
+    assert _shorten("abc") == "abc"
+    assert _shorten("a" * 300) == "a" * 200 + "..."
 
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 500
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json.side_effect = ValueError("bad json")
-    mock_response.text = "error"
 
-    c._log_response(mock_response)
-    mock_logger.info.assert_called_once()
+@allure.feature("同步客户端")
+@allure.story("工具函数")
+@allure.title("测试 _json_default bytes 转 base64")
+def test_json_default_bytes():
+    import base64
+
+    result = _json_default(b"\x89PNG")
+    assert result == base64.b64encode(b"\x89PNG").decode("ascii")
+
+    long_bytes = b"x" * 3000
+    result_long = _json_default(long_bytes)
+    assert "[二进制 3000 bytes]" in result_long
+    assert result_long.endswith("...")
+
+
+@allure.feature("同步客户端")
+@allure.story("工具函数")
+@allure.title("测试 _json_default 非 bytes 回退 str")
+def test_json_default_fallback():
+    assert _json_default(42) == "42"
+    assert _json_default(None) == "None"
+
+
+@allure.feature("同步客户端")
+@allure.story("工具函数")
+@allure.title("测试 _guess_content_type 猜测 MIME 类型")
+def test_guess_content_type():
+    assert _guess_content_type("photo.png") == "image/png"
+    assert _guess_content_type("doc.pdf") == "application/pdf"
+    assert _guess_content_type("unknown.xyz") == "application/octet-stream"
 
 
 # ==================== 全局实例测试 ====================
@@ -528,9 +458,8 @@ def test_client_log_response_exception():
 
 @allure.feature("同步客户端")
 @allure.story("全局实例")
-@allure.title("测试 client 全局实例")
+@allure.title("测试 client 全局实例为 _ClientProxy 且默认同步")
 def test_client_global_instance():
-    """client 是 _ClientProxy，默认包装同步 Client 实例。"""
     from har2pytest.client import _ClientProxy
 
     assert isinstance(client, _ClientProxy)
@@ -539,9 +468,8 @@ def test_client_global_instance():
 
 @allure.feature("同步客户端")
 @allure.story("全局实例")
-@allure.title("测试 _ClientProxy 切换客户端")
+@allure.title("测试 _ClientProxy 切换同步/异步客户端")
 def test_client_proxy_set_client():
-    """_ClientProxy.set_client 可切换同步/异步客户端。"""
     from har2pytest.client import AsyncClient, Client, _ClientProxy
 
     proxy = _ClientProxy(Client(base_url=""))
@@ -560,19 +488,13 @@ def test_client_proxy_set_client():
 
 @allure.feature("同步客户端")
 @allure.story("ResponseContext")
-@allure.title("测试 HTTP 错误状态码抛出异常")
-def test_response_context_http_error():
-    mock_session = MagicMock()
-    mock_response = MagicMock(spec=requests.Response)
+@allure.title("测试 HTTP 错误状态码在 raise_for_status=True 时抛出异常")
+def test_response_context_http_error(client_with_mock):
+    c, mock_response = client_with_mock
+    c.raise_for_status = True
     mock_response.status_code = 500
-    mock_response.headers = {"Content-Type": "application/json"}
     mock_response.json.return_value = {"error": "server error"}
     mock_response.raise_for_status.side_effect = requests.HTTPError("500 Server Error")
-    mock_session.request.return_value = mock_response
-
-    c = Client(base_url="https://example.com")
-    c.session = mock_session
-
     ctx = c.get("/api/error")
     with pytest.raises(requests.HTTPError):
         ctx.__enter__()
@@ -584,18 +506,8 @@ def test_response_context_http_error():
 @allure.feature("同步客户端")
 @allure.story("Allure附件")
 @allure.title("测试 _attach_to_allure 附加请求和响应数据")
-def test_attach_to_allure():
-    mock_session = MagicMock()
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json.return_value = {"code": 200, "data": {}}
-    mock_response.raise_for_status = MagicMock()
-    mock_session.request.return_value = mock_response
-
-    c = Client(base_url="https://example.com")
-    c.session = mock_session
-
+def test_attach_to_allure(client_with_mock):
+    c, _ = client_with_mock
     ctx = c.get("/api/test")
     ctx.__enter__()
 
@@ -608,18 +520,9 @@ def test_attach_to_allure():
 @allure.feature("同步客户端")
 @allure.story("Allure附件")
 @allure.title("测试 _attach_to_allure 附加断言错误")
-def test_attach_to_allure_with_exception():
-    mock_session = MagicMock()
-    mock_response = MagicMock(spec=requests.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "application/json"}
+def test_attach_to_allure_with_exception(client_with_mock):
+    c, mock_response = client_with_mock
     mock_response.json.return_value = {"code": 500}
-    mock_response.raise_for_status = MagicMock()
-    mock_session.request.return_value = mock_response
-
-    c = Client(base_url="https://example.com")
-    c.session = mock_session
-
     ctx = c.get("/api/test")
     ctx.__enter__()
 
@@ -627,3 +530,67 @@ def test_attach_to_allure_with_exception():
         ctx._attach_to_allure(AssertionError("assertion failed"))
         # 应该附加请求、响应和错误信息（至少3次）
         assert mock_attach.call_count >= 3
+
+
+@allure.feature("同步客户端")
+@allure.story("ResponseContext")
+@allure.title("测试默认(False)与单请求开关下可进入并断言 4xx/5xx")
+def test_response_context_raise_for_status_disabled(client_with_mock, mock_session):
+    c, mock_response = client_with_mock
+    mock_response.status_code = 500
+    mock_response.json.return_value = {"code": 500}
+    mock_response.raise_for_status.side_effect = requests.HTTPError("500 Server Error")
+
+    # 默认 raise_for_status=False：可直接进入并断言
+    with c.get("/api/error") as r:
+        assert r.status_code == 500
+    mock_response.raise_for_status.assert_not_called()
+
+    # 客户端级开启 True → 入口抛错
+    mock_response.raise_for_status.reset_mock()
+    c_true = Client(base_url="https://example.com", raise_for_status=True)
+    c_true.session = mock_session
+    with pytest.raises(requests.HTTPError):
+        c_true.get("/api/error").__enter__()
+
+    # 单请求级覆盖：默认 False 的客户端上开启 True 也会抛错
+    mock_response.raise_for_status.reset_mock()
+    c2 = Client(base_url="https://example.com")
+    c2.session = mock_session
+    with pytest.raises(requests.HTTPError):
+        c2.get("/api/error", raise_for_status=True).__enter__()
+
+
+@allure.feature("同步客户端")
+@allure.story("请求信息记录")
+@allure.title("测试 multipart 表单在请求信息中展示真实字段")
+def test_request_info_shows_multipart_fields():
+    # 默认全局 client 为同步，build_form_data 走 MultipartEncoder 分支
+    m, content_type = build_form_data({"orderNo": "SG001", "remarks": "111"})
+
+    info = _build_request_info(
+        "POST", "https://example.com/api/order/cancel", {"content-type": content_type or "multipart/form-data"},
+        None, None, m,
+    )
+    assert info["data"] == {"orderNo": "SG001", "remarks": "111"}
+    assert "文件上传请求" not in str(info["data"])
+
+
+# ==================== build_multipart_data 测试 ====================
+
+
+@allure.feature("同步客户端")
+@allure.story("文件上传")
+@allure.title("测试 build_multipart_data 同步分支返回 MultipartEncoder")
+def test_build_multipart_data_sync(tmp_path):
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("hello")
+
+    result, content_type = build_multipart_data(
+        {"file": str(test_file), "name": "test"}, "file",
+    )
+    assert content_type is not None
+    assert "multipart/form-data" in content_type
+    assert hasattr(result, "_har2pytest_open_files")
+    for fh in result._har2pytest_open_files:
+        fh.close()

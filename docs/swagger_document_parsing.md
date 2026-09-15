@@ -101,7 +101,7 @@ flowchart TD
     H -->|path| J[提取路径参数]
     H -->|body| K[提取请求体参数]
     K --> L{含 $ref?}
-    L -->|是| M[递归解析 definitions]
+    L -->|是| M[递归解析 definitions / components.schemas]
     L -->|否| N[直接解析 properties]
     M --> O[处理嵌套对象]
     N --> O
@@ -121,6 +121,8 @@ flowchart TD
 | `query` | 查询参数 | `query_params` | `pageNum: 0, pageSize: 0` |
 | `path` | 路径参数 | `path_params` | `id: ""` → URL 模板 `{params['id']}` |
 | `body` | 请求体 | `post_data` | `{"keyword": "", "pageNum": 0}` |
+| `formData` | 表单参数 | 不提取 | 代码静默忽略 |
+| `header` | 请求头参数 | 不提取 | 代码静默忽略 |
 
 ### Step 2: 参数默认值映射
 
@@ -140,7 +142,7 @@ flowchart TD
 
 ### Step 3: 解析 body 参数（嵌套模型）
 
-当 body 参数包含 `$ref` 引用时，递归解析 `definitions` 中的模型定义：
+当 body 参数包含 `$ref` 引用时，递归解析 `definitions`（Swagger 2.0）或 `components/schemas`（OpenAPI 3）中的模型定义：
 
 ```json
 // Swagger 文档定义
@@ -189,6 +191,11 @@ post_data = {
     "statusList": [],
 }
 ```
+
+> **OpenAPI 3 兼容**：`$ref` 解析同时支持 Swagger 2.0 的 `#/definitions/X`
+> 与 OpenAPI 3 的 `#/components/schemas/X`（也支持 `Model.yaml#/...` 带文件前缀
+> 的写法），由 `SwaggerHandler._resolve_schema_ref()` 统一处理。二者生成的
+> body 默认值 / 嵌套描述行为一致。
 
 ### Step 4: 嵌套对象处理
 
@@ -289,23 +296,22 @@ param_descriptions = {
 4. 遍历 parameters 提取参数描述
 5. 处理 body 参数的 $ref 引用，展开嵌套参数描述
 
-输出:
-{
-    "summary": "订单列表查询",
-    "description": "分页查询订单列表",
-    "parameters": {
+输出: SwaggerInfo(
+    summary="订单列表查询",
+    description="分页查询订单列表",
+    parameters={
         "keyword": "关键字",
         "pageNum": "页码",
         "pageSize": "每页数量"
     }
-}
+)
 ```
 
 ---
 
 ## 生成 API 文件
 
-### `generate_apis_from_swagger()`
+### `generate_apis_from_swagger()`（属于 `APIGenerator`）
 
 从 Swagger 文档批量生成 API 文件：
 
@@ -327,8 +333,8 @@ param_descriptions = {
 | 维度 | HAR 生成 | Swagger 生成 |
 |------|---------|-------------|
 | **参数值** | 实际请求值 | 类型默认值 |
-| **接口描述** | 自动填充 `summary` | 自动填充 `summary` |
-| **参数说明** | 自动填充 `description` | 自动填充 `description` |
+| **接口描述** | 有 Swagger 时自动填充，无 Swagger 时为 TODO 占位 | 自动填充 `summary` |
+| **参数说明** | 有 Swagger 时自动填充，无 Swagger 时为空 | 自动填充 `description` |
 | **接口覆盖** | 仅抓包出现的接口 | 文档定义的所有接口 |
 
 ---
@@ -351,12 +357,3 @@ har2pytest swagger https://... --overwrite
 # 组合使用
 har2pytest swagger https://... --output apis --overwrite --path /mobile/order/list
 ```
-
----
-
-## 配置项
-
-| 配置项 | 用途 | 说明 |
-|--------|------|------|
-| `SWAGGER_DOC_URLS` | Swagger 文档 URL 映射 | `{"服务名": "URL"}` 格式 |
-| `REQUIRED_HEADERS` | 默认请求头 | 自动添加到所有生成的 API 文件 |

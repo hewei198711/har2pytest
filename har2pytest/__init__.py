@@ -27,6 +27,20 @@ from .utils import (
     write_test_file,
 )
 
+# ===========================================================================
+# Allure async step 兼容层
+#
+# allure-commons 的 @allure.step 对 async 函数是“同步包装”，导致异步场景用例里
+# 请求/响应附件逃逸到用例级。这里在包被导入时自动安装 async 感知包装（幂等；
+# 若 allure 已原生支持 async step 会自动跳过）。
+# ===========================================================================
+try:
+    from .allure_compat import install_async_step_support as _install_allure_async_support
+
+    _install_allure_async_support()
+except Exception:  # pragma: no cover - 兼容层失败不影响主功能
+    pass
+
 __all__ = [
     "APIConfig",
     "HARParser",

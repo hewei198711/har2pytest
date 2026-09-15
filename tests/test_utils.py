@@ -1,18 +1,16 @@
-"""
-测试 utils.py 模块
-"""
+"""测试 har2pytest.utils 中参数格式化、文件处理、API 文件解析、参数合并、URL 规范化、值去重与参数名清理等工具函数的功能与边界。"""
 
+import json
 import logging
 import os
 from unittest.mock import AsyncMock, MagicMock
 
 import allure
+import pytest
 
 from har2pytest import utils as utils_module
 from har2pytest.models import ParsedRequestInfo
 from har2pytest.utils import (
-    _API_FILE_CACHE,
-    _format_nested,
     clear_api_file_cache,
     deduplicate_values,
     format_directory,
@@ -24,23 +22,25 @@ from har2pytest.utils import (
     merge_request_params,
     parse_api_file,
     sanitize_param_name,
+    sanitize_remark,
     write_test_file,
 )
+
+# ==================== API 文件解析测试 ====================
 
 
 @allure.feature("工具函数")
 @allure.story("URL提取")
-@allure.title("测试从文件中提取URL")
+@allure.title("测试从 API 元数据(.api.json)中提取URL与描述")
 def test_parse_api_file_url(tmp_path):
-    test_content = '''def user_login(data=data, headers=headers):
-    """
-    用户登录
-    /user/login
-    """
-    url = "/user/login"
-'''
     api_file = tmp_path / "test_url.py"
-    api_file.write_text(test_content, encoding="utf-8")
+    api_file.write_text("def user_login():\n    pass\n", encoding="utf-8")
+
+    # 描述与 URL 以元数据为准（不再解析 .py 的 docstring）
+    api_file.with_suffix(".api.json").write_text(
+        json.dumps({"url": "/user/login", "description": "用户登录"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     result = parse_api_file(str(api_file))
     assert result is not None
@@ -48,33 +48,7 @@ def test_parse_api_file_url(tmp_path):
     assert result.url == "/user/login"
 
 
-@allure.feature("工具函数")
-@allure.story("URL提取")
-@allure.title("测试从API文件中提取URL")
-def test_extract_url_from_api_file(tmp_path):
-    _API_FILE_CACHE.clear()
-    test_content = '''from har2pytest.client import client
-
-def user_order_getStoreAgentOrderList(data=data, headers=headers):
-    """
-    PC店铺查询兑换订单列表
-    /user/order/getStoreAgentOrderList
-
-    参数说明:
-    - orderNo: 兑换流水号
-    - pageNum: 页码
-    """
-
-    url = "/user/order/getStoreAgentOrderList"
-'''
-
-    api_file = tmp_path / "test_api.py"
-    api_file.write_text(test_content, encoding="utf-8")
-
-    result = parse_api_file(str(api_file))
-    assert result is not None
-    assert result.description == "PC店铺查询兑换订单列表"
-    assert result.url == "/user/order/getStoreAgentOrderList"
+# ==================== 参数值格式化测试 ====================
 
 
 @allure.feature("工具函数")
@@ -98,28 +72,28 @@ def test_format_parameter_value():
 
 @allure.feature("工具函数")
 @allure.story("Headers提取")
-@allure.title("测试从API文件中提取headers配置")
+@allure.title("测试从 API 元数据(.api.json)中提取headers配置")
 def test_parse_api_file_headers(tmp_path):
-    test_content = '''from har2pytest.client import client
-
-headers = {
-    "channel": "pc",
-    "client": "op",
-    "content-type": "application/json;charset=UTF-8",
-    "authorization": f"bearer {os.environ['token']}",
-}
-
-def user_login(data=data, headers=headers):
-    """
-    用户登录
-    /user/login
-    """
-
-    url = "/user/login"
-'''
-
     api_file = tmp_path / "test_api_headers.py"
-    api_file.write_text(test_content, encoding="utf-8")
+    api_file.write_text("def user_login():\n    pass\n", encoding="utf-8")
+
+    # headers 当前值以元数据为准（原 .py 模块级赋值 → .api.json 的 headers 字段）
+    api_file.with_suffix(".api.json").write_text(
+        json.dumps(
+            {
+                "url": "/user/login",
+                "description": "用户登录",
+                "headers": {
+                    "channel": "pc",
+                    "client": "op",
+                    "content-type": "application/json;charset=UTF-8",
+                    "authorization": "f\"bearer {os.environ['token']}\"",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     result = parse_api_file(str(api_file))
     assert result is not None
@@ -130,11 +104,13 @@ def user_login(data=data, headers=headers):
     assert headers["content-type"] == "application/json;charset=UTF-8"
 
 
+# ==================== 参数名清理测试 ====================
+
+
 @allure.feature("工具函数")
 @allure.story("参数名清理")
 @allure.title("测试清理参数名避免 Python 关键字冲突")
 def test_sanitize_param_name():
-    """测试清理参数名，对于 Python 关键字追加下划线后缀。"""
     assert sanitize_param_name("from") == "from_"
     assert sanitize_param_name("class") == "class_"
     assert sanitize_param_name("def") == "def_"
@@ -143,11 +119,13 @@ def test_sanitize_param_name():
     assert sanitize_param_name("from_user") == "from_user"
 
 
+# ==================== 值去重测试 ====================
+
+
 @allure.feature("工具函数")
 @allure.story("值去重")
 @allure.title("测试基本类型去重")
 def test_deduplicate_values_primitives():
-    """验证基本类型值的去重。"""
     assert deduplicate_values([1, 2, 2, 3]) == [1, 2, 3]
     assert deduplicate_values(["a", "b", "a"]) == ["a", "b"]
     assert deduplicate_values([True, False, True]) == [True, False]
@@ -158,7 +136,6 @@ def test_deduplicate_values_primitives():
 @allure.story("值去重")
 @allure.title("测试 dict 去重（含键顺序不同）")
 def test_deduplicate_values_dicts():
-    """验证 dict 去重，sort_keys 确保键顺序不影响去重。"""
     result = deduplicate_values([{"b": 2, "a": 1}, {"a": 1, "b": 2}])
     assert result == [{"b": 2, "a": 1}]
 
@@ -167,7 +144,6 @@ def test_deduplicate_values_dicts():
 @allure.story("值去重")
 @allure.title("测试 list 去重")
 def test_deduplicate_values_lists():
-    """验证 list 去重。"""
     result = deduplicate_values([[1, 2], [1, 2], [3, 4]])
     assert result == [[1, 2], [3, 4]]
 
@@ -176,7 +152,6 @@ def test_deduplicate_values_lists():
 @allure.story("值去重")
 @allure.title("测试 raw string 与 JSON 序列化结果不碰撞")
 def test_deduplicate_values_no_cross_type_collision():
-    """验证 raw string 不会与 json.dumps 输出碰撞导致错误去重。"""
     result = deduplicate_values(['{"a": 1}', {"a": 1}])
     assert len(result) == 2
     assert '{"a": 1}' in result
@@ -187,7 +162,6 @@ def test_deduplicate_values_no_cross_type_collision():
 @allure.story("值去重")
 @allure.title("测试嵌套结构去重")
 def test_deduplicate_values_nested():
-    """验证嵌套 list/dict 结构的去重。"""
     result = deduplicate_values(
         [
             {"items": [{"b": 2, "a": 1}]},
@@ -198,57 +172,45 @@ def test_deduplicate_values_nested():
 
 
 @allure.feature("工具函数")
-@allure.story("API文件解析")
-@allure.title("测试无docstring时函数名从文件名提取")
+@allure.story("API 文件解析")
+@allure.title("测试函数名取自文件名且元数据无 description 时缺省为空")
 def test_parse_api_file_function_name(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     api_file = tmp_path / "my_api_func.py"
     api_file.write_text("def my_api_func(headers=headers):\n    pass\n", encoding="utf-8")
-
-    result = parse_api_file(str(api_file))
-
-    assert result.function_name == "my_api_func"
-    assert result.description == ""
-    assert result.url is None
-
-
-@allure.feature("工具函数")
-@allure.story("API文件解析")
-@allure.title("测试单引号docstring解析")
-def test_parse_api_file_single_quote_docstring(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    api_file = tmp_path / "single_quote.py"
-    api_file.write_text(
-        "def single_quote(headers=headers):\n    '''\n    单引号描述\n    /api/single-quote\n    '''\n",
+    # 元数据只给必需字段 url、不给 description → 描述缺省为空字符串
+    api_file.with_suffix(".api.json").write_text(
+        json.dumps({"url": "/api/my_api_func"}),
         encoding="utf-8",
     )
 
     result = parse_api_file(str(api_file))
 
-    assert result.description == "单引号描述"
-    assert result.url == "/api/single-quote"
+    assert result.function_name == "my_api_func"
+    assert result.description == ""
+    assert result.url == "/api/my_api_func"
 
 
 @allure.feature("工具函数")
-@allure.story("API文件解析")
-@allure.title("测试params嵌套字典与dotted key备注提取")
+@allure.story("API 文件解析")
+@allure.title("测试元数据中的嵌套params与dotted key备注")
 def test_parse_api_file_params_nested_remarks(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    content = '''params = {
-    "pageNum": 1,  # 页码
-    "payDTO": {
-        "accountName": "test",  # 账户名
-    },
-}
-
-def api_demo(params=params, headers=headers):
-    """
-    接口描述
-    /api/demo
-    """
-'''
     api_file = tmp_path / "api_demo.py"
-    api_file.write_text(content, encoding="utf-8")
+    api_file.write_text("def api_demo(params=params, headers=headers):\n    pass\n", encoding="utf-8")
+    # params 当前值与备注(含 dotted key)取自元数据
+    api_file.with_suffix(".api.json").write_text(
+        json.dumps(
+            {
+                "url": "/api/demo",
+                "description": "接口描述",
+                "params": {"pageNum": 1, "payDTO": {"accountName": "test"}},
+                "param_remarks": {"pageNum": "页码", "payDTO.accountName": "账户名"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     result = parse_api_file(str(api_file))
 
@@ -260,20 +222,72 @@ def api_demo(params=params, headers=headers):
 
 
 @allure.feature("工具函数")
-@allure.story("API文件解析")
-@allure.title("测试data为JSON数组形式时解析为list")
+@allure.story("API 文件解析")
+@allure.title("测试元数据备注中的换行符被压成单行")
+def test_parse_api_file_remarks_newline_flattened(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    api_file = tmp_path / "gift_order.py"
+    api_file.write_text("def gift_order(data=data, headers=headers):\n    pass\n", encoding="utf-8")
+    api_file.with_suffix(".api.json").write_text(
+        json.dumps(
+            {
+                "url": "/mgmt/activityGift/giftOrder/pageQuery",
+                "description": "分页查询礼物订单活动列表",
+                "data": {"orderStatusList": []},
+                "param_remarks": {
+                    "orderStatusList": "订单状态集合（参考OrderStatus枚举）：\n1:待支付, 2:待发货",
+                    "receiverName": "收礼人姓名",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = parse_api_file(str(api_file))
+
+    assert result.param_remarks["orderStatusList"] == "订单状态集合（参考OrderStatus枚举）： 1:待支付, 2:待发货"
+    assert "\n" not in result.param_remarks["orderStatusList"]
+    assert result.param_remarks["receiverName"] == "收礼人姓名"
+
+
+# ==================== 参数备注清洗测试 ====================
+
+
+@allure.feature("工具函数")
+@allure.story("参数备注清洗")
+@allure.title("测试备注文本规范化为单行")
+def test_sanitize_remark():
+    # 换行、制表符、续行缩进统一折叠为单个空格
+    assert sanitize_remark("第一行\n    第二行\t第三行") == "第一行 第二行 第三行"
+    assert sanitize_remark("  两侧空白  ") == "两侧空白"
+    assert sanitize_remark("状态：\r\n1:待支付") == "状态： 1:待支付"
+    # 中文全角空格保留原样
+    assert sanitize_remark("待支付\u3000已取消") == "待支付\u3000已取消"
+    # 非字符串返回空串
+    assert sanitize_remark(None) == ""
+    assert sanitize_remark(123) == ""
+
+
+@allure.feature("工具函数")
+@allure.story("API 文件解析")
+@allure.title("测试元数据中data为JSON数组形式时解析为list")
 def test_parse_api_file_data_list(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    content = '''data = [{"app_id": "uc-pc", "page": "home"}, {"app_id": "uc-pc"}]
-
-def behavior_collect(data=data, headers=headers):
-    """
-    行为采集
-    /isomer/datacollect/behaviorCollect
-    """
-'''
     api_file = tmp_path / "behavior.py"
-    api_file.write_text(content, encoding="utf-8")
+    api_file.write_text("def behavior_collect(data=data, headers=headers):\n    pass\n", encoding="utf-8")
+    # data 当前值取自元数据（JSON 数组请求体 → list）
+    api_file.with_suffix(".api.json").write_text(
+        json.dumps(
+            {
+                "url": "/isomer/datacollect/behaviorCollect",
+                "description": "行为采集",
+                "data": [{"app_id": "uc-pc", "page": "home"}, {"app_id": "uc-pc"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     result = parse_api_file(str(api_file))
 
@@ -283,22 +297,25 @@ def behavior_collect(data=data, headers=headers):
 
 
 @allure.feature("工具函数")
-@allure.story("API文件解析")
-@allure.title("测试files参数提取")
+@allure.story("API 文件解析")
+@allure.title("测试元数据中的files参数与备注提取")
 def test_parse_api_file_files(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    content = '''files = {
-    "file": "test.txt",  # 上传文件
-}
-
-def upload(files=files, headers=headers):
-    """
-    上传
-    /api/upload
-    """
-'''
     api_file = tmp_path / "upload.py"
-    api_file.write_text(content, encoding="utf-8")
+    api_file.write_text("def upload(files=files, headers=headers):\n    pass\n", encoding="utf-8")
+    # files 当前值与备注取自元数据（原 .py 行内 # 注释 → param_remarks）
+    api_file.with_suffix(".api.json").write_text(
+        json.dumps(
+            {
+                "url": "/api/upload",
+                "description": "上传",
+                "files": {"file": "test.txt"},
+                "param_remarks": {"file": "上传文件"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     result = parse_api_file(str(api_file))
 
@@ -307,38 +324,46 @@ def upload(files=files, headers=headers):
 
 
 @allure.feature("工具函数")
-@allure.story("API文件解析")
-@allure.title("测试文件不存在时记录错误日志")
-def test_parse_api_file_not_found(caplog):
-    caplog.set_level(logging.ERROR, logger="har2pytest")
-
-    result = parse_api_file("nonexistent_xyz.py")
-
-    # 函数名仍从文件路径提取，读取失败记录错误日志
-    assert result.function_name == "nonexistent_xyz"
-    assert "读取API文件" in caplog.text
+@allure.story("API 文件解析")
+@allure.title("测试无同名 .api.json 元数据时抛出缺少元数据 ValueError")
+def test_parse_api_file_not_found():
+    # .py 是否存在不再影响解析：没有同名 .api.json 元数据直接报错并提示重新生成
+    with pytest.raises(ValueError, match="缺少 API 元数据"):
+        parse_api_file("nonexistent_xyz.py")
 
 
 @allure.feature("工具函数")
-@allure.story("API文件解析")
-@allure.title("测试解析结果缓存与清除")
+@allure.story("API 文件解析")
+@allure.title("测试解析结果缓存与清除(元数据为准)")
 def test_parse_api_file_cache(tmp_path, monkeypatch):
+    clear_api_file_cache()
     monkeypatch.chdir(tmp_path)
     api_file = tmp_path / "cached_api.py"
-    api_file.write_text('def cached_api():\n    """\n    旧描述\n    /old\n    """\n', encoding="utf-8")
+    api_file.write_text("def cached_api():\n    pass\n", encoding="utf-8")
+    meta_file = api_file.with_suffix(".api.json")
+    meta_file.write_text(
+        json.dumps({"url": "/old", "description": "旧描述"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     first = parse_api_file(str(api_file))
     assert first.description == "旧描述"
 
-    # 修改文件内容后再次解析，命中缓存结果不变
-    api_file.write_text('def cached_api():\n    """\n    新描述\n    /new\n    """\n', encoding="utf-8")
+    # 修改元数据后再次解析，命中缓存结果不变
+    meta_file.write_text(
+        json.dumps({"url": "/new", "description": "新描述"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
     second = parse_api_file(str(api_file))
     assert second.description == "旧描述"
 
-    # 清除缓存后重新解析，读到最新内容
+    # 清除缓存后重新解析，读到最新元数据
     clear_api_file_cache()
     third = parse_api_file(str(api_file))
     assert third.description == "新描述"
+
+
+# ==================== 输出目录测试 ====================
 
 
 @allure.feature("工具函数")
@@ -352,11 +377,15 @@ def test_get_output_dir_without_task_id(tmp_path):
 
 @allure.feature("工具函数")
 @allure.story("输出目录")
-@allure.title("测试带task_id时创建子目录")
-def test_get_output_dir_with_task_id(tmp_path):
-    result = get_output_dir(str(tmp_path), "task_4291")
-    assert result == str(tmp_path / "task_4291")
+@allure.title("测试输出目录不存在时自动创建")
+def test_get_output_dir_creates_missing(tmp_path):
+    target = str(tmp_path / "new_dir" / "sub_dir")
+    result = get_output_dir(target)
+    assert result == target
     assert os.path.isdir(result)
+
+
+# ==================== 文件写入测试 ====================
 
 
 @allure.feature("工具函数")
@@ -368,6 +397,9 @@ def test_write_test_file(tmp_path):
     write_test_file(str(target), "content = 1\n")
 
     assert target.read_text(encoding="utf-8") == "content = 1\n"
+
+
+# ==================== 目录格式化测试 ====================
 
 
 @allure.feature("工具函数")
@@ -438,6 +470,9 @@ async def test_format_directory_exception(monkeypatch, tmp_path, caplog):
     assert "执行失败" in caplog.text
 
 
+# ==================== 请求参数合并测试 ====================
+
+
 @allure.feature("工具函数")
 @allure.story("请求参数合并")
 @allure.title("测试query参数与body参数合并")
@@ -482,6 +517,9 @@ def test_merge_request_params_empty():
     assert result == {}
 
 
+# ==================== Headers格式化测试 ====================
+
+
 @allure.feature("工具函数")
 @allure.story("Headers格式化")
 @allure.title("测试header值格式化")
@@ -504,6 +542,9 @@ def test_format_headers_for_python():
 
     assert '"channel": "pc"' in result
     assert "os.environ.get('token', '')" in result
+
+
+# ==================== 参数格式化测试 ====================
 
 
 @allure.feature("工具函数")
@@ -573,10 +614,10 @@ def test_format_params_for_python_custom_formatter():
 @allure.feature("工具函数")
 @allure.story("参数格式化")
 @allure.title("测试嵌套值递归格式化为Python字面量")
-def test_format_nested_complex():
+def test_format_parameter_value_complex():
     value = {"a": [1, None, True], "b": {"c": "中文"}}
 
-    result = _format_nested(value)
+    result = format_parameter_value(value)
 
     # None/True 使用 Python 字面量，中文字符保留
     assert result == '{"a": [1, None, True], "b": {"c": "中文"}}'
@@ -594,22 +635,25 @@ def test_format_parameter_value_fallback_repr():
 @allure.feature("工具函数")
 @allure.story("参数格式化")
 @allure.title("测试嵌套值不支持类型使用repr兜底")
-def test_format_nested_fallback_repr():
-    result = _format_nested({1, 2})
+def test_format_parameter_value_set_repr():
+    result = format_parameter_value({1, 2})
 
     assert result.startswith("{1, 2}")
 
 
 @allure.feature("工具函数")
-@allure.story("API文件解析")
-@allure.title("测试参数解析失败时记录错误日志")
-def test_parse_api_file_invalid_dict(caplog, tmp_path, monkeypatch):
-    caplog.set_level(logging.ERROR, logger="har2pytest")
+@allure.story("API 文件解析")
+@allure.title("测试有 .api.json 但缺必需字段 url 时抛出 ValueError(.py 不再解析)")
+def test_parse_api_file_metadata_missing_url(tmp_path, monkeypatch):
+    clear_api_file_cache()
     monkeypatch.chdir(tmp_path)
     api_file = tmp_path / "broken.py"
+    # .py 语法损坏与否已不影响解析：元数据缺必需字段 url 即报错提示
     api_file.write_text("data = {broken\n", encoding="utf-8")
+    api_file.with_suffix(".api.json").write_text(
+        json.dumps({"description": "缺少url的元数据"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
-    result = parse_api_file(str(api_file))
-
-    assert result.data == {}
-    assert "解析 data 字典失败" in caplog.text
+    with pytest.raises(ValueError, match="url"):
+        parse_api_file(str(api_file))
