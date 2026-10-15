@@ -32,8 +32,9 @@ def test_setup_logger_default_handlers(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     setup_logger()
 
-    assert any(isinstance(h, logging.StreamHandler) for h in logger.handlers)
-    assert any(isinstance(h, logging.FileHandler) for h in logger.handlers)
+    # 精确检查 handler 类型（FileHandler 是 StreamHandler 子类，isinstance 会误匹配）
+    assert any(type(h) is logging.StreamHandler for h in logger.handlers)
+    assert any(type(h) is logging.FileHandler for h in logger.handlers)
     assert not any(isinstance(h, logging.NullHandler) for h in logger.handlers)
     # 默认日志文件写入当前工作目录
     assert (tmp_path / "har2pytest.log").exists()
@@ -73,6 +74,24 @@ def test_setup_logger_idempotent(monkeypatch, tmp_path):
 
     # 第二次调用先清除旧 handler 再重新配置，总数为 1 控制台 + 1 文件
     assert len(logger.handlers) == 2
+
+
+@allure.feature("日志模块")
+@allure.story("setup_logger")
+@allure.title("多次调用 setup_logger 更新日志级别并替换 handler")
+def test_setup_logger_level_update_on_reconfigure(tmp_path):
+    log_warn = tmp_path / "warn.log"
+    setup_logger(level=logging.WARNING, log_file=str(log_warn))
+    assert logger.level == logging.WARNING
+
+    # 重新配置为 INFO 级别
+    log_info = tmp_path / "info.log"
+    setup_logger(level=logging.INFO, log_file=str(log_info))
+    assert logger.level == logging.INFO
+    logger.info("info message after reconfigure")
+
+    content = log_info.read_text(encoding="utf-8")
+    assert "info message after reconfigure" in content
 
 
 # ==================== 库模式默认行为测试 ====================

@@ -1,6 +1,7 @@
 """测试 har2pytest.testcase_generator 中 TESTCASE_PROFILES 配置化模式决策（_profile_matches / _find_profile / _resolve_testcase_mode）的 URL 匹配、显式模式覆盖、关键字回落与 profile 级关键字覆盖的功能与边界。"""
 
 import allure
+import pytest
 
 from har2pytest.api_metadata import write_api_metadata
 from har2pytest.config import APIConfig
@@ -54,12 +55,16 @@ def {filename[:-3]}(params=params):
 @allure.feature("测试模式配置化")
 @allure.story("URL匹配")
 @allure.title("测试精确 URL / 模板 / 通配匹配")
-def test_profile_matches():
+@pytest.mark.parametrize("profile_url,api_url,expected", [
+    ("/mgmt/order/orderList", "/mgmt/order/orderList", True),   # 精确匹配
+    ("/mgmt/order/{orderNo}", "/mgmt/order/1001", True),        # profile 模板 → 具体 URL
+    ("/mgmt/order/1001", "/mgmt/order/{orderNo}", True),        # 具体 profile → 模板 URL（反向）
+    ("/mgmt/order/*", "/mgmt/order/orderList", True),           # 通配符
+    ("/mall/user/list", "/mgmt/order/orderList", False),        # 不匹配
+])
+def test_profile_matches(profile_url, api_url, expected):
     gen = TestCaseGenerator(api_dir="apis")
-    assert gen._profile_matches("/mgmt/order/orderList", "/mgmt/order/orderList")
-    assert gen._profile_matches("/mgmt/order/{orderNo}", "/mgmt/order/1001")
-    assert gen._profile_matches("/mgmt/order/*", "/mgmt/order/orderList")
-    assert not gen._profile_matches("/mall/user/list", "/mgmt/order/orderList")
+    assert gen._profile_matches(profile_url, api_url) == expected
 
 
 # ==================== 模式决策优先级测试 ====================
@@ -87,6 +92,22 @@ def test_profile_explicit_scenario(tmp_path):
     restore = _set_profiles([{"url": "/mgmt/order/orderList", "mode": "complex_scenario"}], keywords=["列表"])
     try:
         assert gen._resolve_testcase_mode(api_file) == "scenario"
+    finally:
+        restore()
+
+
+# ==================== _find_profile 边界测试 ====================
+
+
+@allure.feature("测试模式配置化")
+@allure.story("_find_profile边界")
+@allure.title("测试 api_url 为 None 或空字符串时返回 None")
+@pytest.mark.parametrize("api_url", [None, ""])
+def test_find_profile_empty_url(api_url):
+    gen = TestCaseGenerator(api_dir="apis")
+    restore = _set_profiles([{"url": "/mgmt/order/*", "mode": "list_query"}])
+    try:
+        assert gen._find_profile(api_url) is None
     finally:
         restore()
 
@@ -120,6 +141,20 @@ def test_profile_auto_with_exclude(tmp_path):
     )
     try:
         assert gen._resolve_testcase_mode(api_file) == "scenario"
+    finally:
+        restore()
+
+
+@allure.feature("测试模式配置化")
+@allure.story("关键字回落")
+@allure.title("测试描述不含列表关键字但有参数时回落参数化模式")
+def test_no_keyword_match_with_params_falls_back_to_parametrized(tmp_path):
+    gen = TestCaseGenerator(api_dir=str(tmp_path / "apis"))
+    api_file = _write_api(tmp_path, "order_detail.py", "订单详情", "/mgmt/order/detail")
+    # 全局关键字为 ["列表"]，描述 "订单详情" 不含 "列表"，但 API 携带参数，应回落为 parametrized
+    restore = _set_profiles([], keywords=["列表"])
+    try:
+        assert gen._resolve_testcase_mode(api_file) == "parametrized"
     finally:
         restore()
 

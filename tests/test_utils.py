@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 from unittest.mock import AsyncMock, MagicMock
 
 import allure
@@ -11,13 +10,15 @@ import pytest
 from har2pytest import utils as utils_module
 from har2pytest.models import ParsedRequestInfo
 from har2pytest.utils import (
+    _extract_date_format_from_remark,
+    build_time_pairs,
     clear_api_file_cache,
     deduplicate_values,
+    extract_service_package,
     format_directory,
     format_headers_for_python,
     format_parameter_value,
     format_params_for_python,
-    get_output_dir,
     header_value_formatter,
     merge_request_params,
     parse_api_file,
@@ -117,6 +118,10 @@ def test_sanitize_param_name():
     assert sanitize_param_name("return") == "return_"
     assert sanitize_param_name("user_id") == "user_id"
     assert sanitize_param_name("from_user") == "from_user"
+    # 空字符串返回默认前缀
+    assert sanitize_param_name("") == "param_"
+    # 数字开头时加 param_ 前缀
+    assert sanitize_param_name("123abc") == "param_123abc"
 
 
 # ==================== 值去重测试 ====================
@@ -363,28 +368,6 @@ def test_parse_api_file_cache(tmp_path, monkeypatch):
     assert third.description == "新描述"
 
 
-# ==================== 输出目录测试 ====================
-
-
-@allure.feature("工具函数")
-@allure.story("输出目录")
-@allure.title("测试无task_id时输出目录为基础目录")
-def test_get_output_dir_without_task_id(tmp_path):
-    result = get_output_dir(str(tmp_path))
-    assert result == str(tmp_path)
-    assert os.path.isdir(result)
-
-
-@allure.feature("工具函数")
-@allure.story("输出目录")
-@allure.title("测试输出目录不存在时自动创建")
-def test_get_output_dir_creates_missing(tmp_path):
-    target = str(tmp_path / "new_dir" / "sub_dir")
-    result = get_output_dir(target)
-    assert result == target
-    assert os.path.isdir(result)
-
-
 # ==================== 文件写入测试 ====================
 
 
@@ -530,6 +513,8 @@ def test_header_value_formatter():
     assert header_value_formatter('"pc"') == '"pc"'
     # f-string 中的 os.environ 下标访问转为安全访问
     assert header_value_formatter("f\"bearer {os.environ['token']}\"") == "f\"bearer {os.environ.get('token', '')}\""
+    # 非字符串类型使用 repr 兆底
+    assert header_value_formatter(123) == "123"
 
 
 @allure.feature("工具函数")
@@ -657,3 +642,84 @@ def test_parse_api_file_metadata_missing_url(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="url"):
         parse_api_file(str(api_file))
+
+
+# ==================== 时间参数对解析测试 ====================
+
+
+@allure.feature("工具函数")
+@allure.story("时间参数对解析")
+@allure.title("测试 build_time_pairs 识别时间对并提取格式")
+def test_build_time_pairs_basic(monkeypatch):
+    if utils_module.APIConfig._config is None:
+        utils_module.APIConfig._config = utils_module.APIConfig._load_config()
+    monkeypatch.setitem(
+        utils_module.APIConfig._config, "TIME_PARAMS", ["starttime", "endtime"]
+    )
+    remarks = {
+        "getTimeStartTime": "领取时间开始时间(yyyy-MM-dd)",
+        "getTimeEndTime": "领取时间结束时间(yyyy-MM-dd)",
+        "cardNo": "会员卡号",
+    }
+    result = build_time_pairs(remarks)
+    assert "getTime" in result
+    assert result["getTime"]["start"] == "getTimeStartTime"
+    assert result["getTime"]["end"] == "getTimeEndTime"
+    assert result["getTime"]["format"] == "%Y-%m-%d"
+
+
+@allure.feature("工具函数")
+@allure.story("时间参数对解析")
+@allure.title("测试 build_time_pairs 无配对时返回空")
+def test_build_time_pairs_no_pair(monkeypatch):
+    if utils_module.APIConfig._config is None:
+        utils_module.APIConfig._config = utils_module.APIConfig._load_config()
+    monkeypatch.setitem(
+        utils_module.APIConfig._config, "TIME_PARAMS", ["starttime", "endtime"]
+    )
+    # 只有 start 没有 end
+    remarks = {"getTimeStartTime": "开始时间(yyyy-MM-dd)"}
+    assert build_time_pairs(remarks) == {}
+
+
+@allure.feature("工具函数")
+@allure.story("时间参数对解析")
+@allure.title("测试 build_time_pairs 空备注时返回空")
+def test_build_time_pairs_empty_remarks(monkeypatch):
+    if utils_module.APIConfig._config is None:
+        utils_module.APIConfig._config = utils_module.APIConfig._load_config()
+    monkeypatch.setitem(
+        utils_module.APIConfig._config, "TIME_PARAMS", ["starttime", "endtime"]
+    )
+    assert build_time_pairs({}) == {}
+
+
+# ==================== 服务包提取测试 ====================
+
+
+@allure.feature("工具函数")
+@allure.story("服务包提取")
+@allure.title("测试从 API 文件路径提取服务包名")
+def test_extract_service_package():
+    # 正常子目录结构
+    assert extract_service_package("/root/apis/user/info.py", "/root/apis") == "user"
+    # 文件直接在 api_dir 下，无服务包
+    assert extract_service_package("/root/apis/info.py", "/root/apis") is None
+    # 多层嵌套取首段
+    assert extract_service_package("/root/apis/trade/order/list.py", "/root/apis") == "trade"
+
+
+# ==================== 时间参数对解析测试 ====================
+
+
+@allure.feature("工具函数")
+@allure.story("时间参数对解析")
+@allure.title("测试 _extract_date_format_from_remark 格式提取")
+@pytest.mark.parametrize("remark,expected", [
+    ("领取时间开始时间(yyyy-MM-dd)", "%Y-%m-%d"),
+    ("创建时间（yyyy-MM-dd HH:mm:ss）", "%Y-%m-%d %H:%M:%S"),
+    ("无格式备注", "%Y-%m-%d"),  # 默认格式
+    ("时间(yyyy/MM/dd)", "%Y/%m/%d"),
+])
+def test_extract_date_format_from_remark(remark, expected):
+    assert _extract_date_format_from_remark(remark) == expected

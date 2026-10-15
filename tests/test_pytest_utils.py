@@ -101,3 +101,20 @@ async def test_retry_step_async_fail_always():
     with pytest.raises(AssertionError, match="async boom"):
         await always_fail_async()
     assert len(attempts) == 2
+
+
+@allure.feature("pytest工具函数")
+@allure.story("重试装饰器")
+@allure.title("测试默认参数 counts=2 时执行两次后成功")
+async def test_retry_step_default_counts():
+    attempts = []
+
+    @retry_step(times=0)
+    async def flaky():
+        attempts.append(1)
+        if len(attempts) < 2:
+            raise AssertionError("first fail")
+        return "ok"
+
+    assert await flaky() == "ok"
+    assert len(attempts) == 2

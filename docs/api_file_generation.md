@@ -94,7 +94,7 @@ flowchart TD
  │
  └─ 检测上传类型：
  │     - content-type 含 "multipart/form-data" 且检测到文件上传字段 → is_file_upload = True
- │     - POST 且无有效请求体（非 multipart 且 content-length=0，或空 JSON body 带 query 参数）
+ │     - POST 且无请求体（非 multipart 且 (content-length=0 或有 query 参数)）
  │       → is_need_urlencode = True（application/x-www-form-urlencoded 传参）
  │
  └─ URL 匹配：
@@ -313,9 +313,9 @@ flowchart TD
  │
  └── 所有参数添加默认值:
        string → ""
-       integer → 0
-       number → 0.0
-       boolean → False
+       integer → None（分页参数由配置提供默认值，如 pageNum=1、pageSize=10）
+       number → None
+       boolean → None
        array → []
        object → {}
 ```

@@ -1,8 +1,8 @@
-{% if async_mode %}        async with {{ function_name }}({{ param_var }}={{ param_var }}, headers=self.headers) as r:
+{% if async_mode %}        async with {{ function_name }}({{ param_var_name }}={{ param_var_name }}, headers=self.headers) as r:
             assert r.status == 200
             data = await r.json()
             assert data['code'] == 200
-{% else %}        with {{ function_name }}({{ param_var }}={{ param_var }}, headers=self.headers) as r:
+{% else %}        with {{ function_name }}({{ param_var_name }}={{ param_var_name }}, headers=self.headers) as r:
             assert r.status_code == 200
             data = r.json()
             assert data['code'] == 200

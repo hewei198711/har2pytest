@@ -1,7 +1,7 @@
 @allure.severity(Severity.{{ severity }})
 @allure.feature('{{ service_package }}')
 @allure.story('{{ api_url }}')
-{% if description %}{{ description }}
+{% if api_description %}{{ api_description }}
 {% endif %}class TestClass:
 
     @property

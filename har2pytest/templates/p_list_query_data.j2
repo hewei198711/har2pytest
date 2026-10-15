@@ -1,0 +1,3 @@
+    list_query_data = {
+{% for key, value in data_items %}        "{{ key }}": {{ value }},
+{% endfor %}    }

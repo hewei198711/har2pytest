@@ -7,6 +7,7 @@ from typing import Any
 
 import aiohttp
 
+from .config import APIConfig
 from .logger import logger
 from .models import SwaggerInfo
 from .url_matcher import URLMatcher
@@ -263,6 +264,14 @@ class SwaggerHandler:
             api_info.description = method_data.get("description", "") or method_data.get("summary", "")
 
             parameters = method_data.get("parameters", [])
+            # 复用 _extract_params_from_swagger 提取类型感知默认值
+            query_params, post_data, _, _, path_params, _ = self._extract_params_from_swagger(
+                parameters, swagger_data
+            )
+            api_info.param_defaults.update(query_params)
+            api_info.param_defaults.update(path_params)
+            if isinstance(post_data, dict):
+                api_info.param_defaults.update(post_data)
             for param in parameters:
                 param_name = param.get("name", "")
                 # 描述统一压成单行：多行 description 会破坏生成的注释/docstring/allure 标题
@@ -274,8 +283,13 @@ class SwaggerHandler:
                     if param_name and param_desc:
                         api_info.parameters[param_name] = param_desc
                 elif "schema" in param:
+                    schema = param["schema"]
                     # body 参数：统一使用递归提取嵌套描述（支持 $ref 和 properties）
-                    self._extract_nested_descriptions(param["schema"], swagger_data, api_info.parameters)
+                    self._extract_nested_descriptions(schema, swagger_data, api_info.parameters)
+                    # 裸类型 body（无 $ref/properties，如 {"type": "string"}）：
+                    # 递归提取覆盖不到，直接用参数名+描述兜底
+                    if param_name and param_desc and not ("$ref" in schema or "properties" in schema):
+                        api_info.parameters[param_name] = param_desc
 
         return api_info
 
@@ -307,29 +321,45 @@ class SwaggerHandler:
 
             if param_in == "query":
                 has_query_param = True
-                query_params[param_name] = self._get_default_value(param_type)
+                query_params[param_name] = self._get_default_value(param_type, param_name)
                 if param_desc:
                     param_descriptions[param_name] = param_desc
             elif param_in == "body" and "schema" in param:
                 has_body_param = True
-                post_data = self._extract_body_params(param["schema"], swagger_data)
-                # 递归提取body参数的嵌套描述
                 schema = param["schema"]
+                post_data = self._extract_body_params(schema, swagger_data)
+                # 递归提取body参数的嵌套描述
                 self._extract_nested_descriptions(schema, swagger_data, param_descriptions)
+                # 裸类型 body（无 $ref/properties，如 {"type": "string"}）：
+                # 上述两个递归提取均覆盖不到，此处兜底补齐默认值与参数说明，
+                # 避免下游因 post_data 为空误判为 urlencode 而丢失该 body 参数
+                if (
+                    isinstance(post_data, dict)
+                    and param_name
+                    and not post_data
+                    and not ("$ref" in schema or "properties" in schema)
+                ):
+                    post_data[param_name] = self._get_default_value(schema.get("type", "string"), param_name)
+                    if param_desc:
+                        param_descriptions[param_name] = param_desc
             elif param_in == "path":
                 # 处理路径参数
-                path_params[param_name] = self._get_default_value(param_type)
+                path_params[param_name] = self._get_default_value(param_type, param_name)
                 if param_desc:
                     param_descriptions[param_name] = param_desc
 
         return query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions
 
-    def _get_default_value(self, param_type: str) -> Any:
+    def _get_default_value(self, param_type: str, param_name: str | None = "") -> Any:
         """
         根据参数类型获取默认值
 
+        integer/number 类型默认返回 None（表示未填写），分页参数（由
+        ``APIConfig.get_pagination_default_value`` 判定）例外返回配置默认值。
+
         Args:
             param_type: 参数类型
+            param_name: 参数名称（用于分页参数等特殊处理）
 
         Returns:
             Any: 默认值
@@ -337,11 +367,15 @@ class SwaggerHandler:
         if param_type in ("string",):
             return ""
         elif param_type in ("integer", "int"):
-            return 0
+            if param_name:
+                pagination_default = APIConfig.get_pagination_default_value(param_name)
+                if pagination_default is not None:
+                    return pagination_default
+            return None
         elif param_type in ("number", "float"):
-            return 0.0
+            return None
         elif param_type == "boolean":
-            return False
+            return None
         elif param_type == "array":
             return []
         elif param_type == "object":
@@ -410,14 +444,14 @@ class SwaggerHandler:
             definition = self._resolve_schema_ref(schema["$ref"], swagger_data)
             if definition and "properties" in definition:
                 for prop_name, prop_info in definition["properties"].items():
-                    body_params[prop_name] = self._extract_param_value(prop_info, swagger_data)
+                    body_params[prop_name] = self._extract_param_value(prop_info, swagger_data, prop_name=prop_name)
         elif "properties" in schema:
             for prop_name, prop_info in schema["properties"].items():
-                body_params[prop_name] = self._extract_param_value(prop_info, swagger_data)
+                body_params[prop_name] = self._extract_param_value(prop_info, swagger_data, prop_name=prop_name)
 
         return body_params
 
-    def _extract_param_value(self, prop_info: dict[str, Any], swagger_data: dict[str, Any], _seen: set[str] | None = None) -> Any:
+    def _extract_param_value(self, prop_info: dict[str, Any], swagger_data: dict[str, Any], _seen: set[str] | None = None, prop_name: str = "") -> Any:
         """
         递归提取参数值，处理嵌套对象和数组
 
@@ -425,6 +459,7 @@ class SwaggerHandler:
             prop_info: 属性信息
             swagger_data: 完整的Swagger文档数据
             _seen: 已解析的 $ref（内部递归防环用，自引用模型不会无限递归）
+            prop_name: 属性名称（用于分页参数等特殊处理）
 
         Returns:
             Any: 参数值（可能是基本类型、对象或数组）
@@ -443,7 +478,7 @@ class SwaggerHandler:
                 _seen.add(ref)
                 result = {}
                 for nested_name, nested_info in definition["properties"].items():
-                    result[nested_name] = self._extract_param_value(nested_info, swagger_data, _seen)
+                    result[nested_name] = self._extract_param_value(nested_info, swagger_data, _seen, prop_name=nested_name)
                 _seen.discard(ref)
                 return result
 
@@ -451,7 +486,7 @@ class SwaggerHandler:
             if "properties" in prop_info:
                 result = {}
                 for nested_name, nested_info in prop_info["properties"].items():
-                    result[nested_name] = self._extract_param_value(nested_info, swagger_data, _seen)
+                    result[nested_name] = self._extract_param_value(nested_info, swagger_data, _seen, prop_name=nested_name)
                 return result
             return {}
         elif prop_type == "array":
@@ -465,17 +500,17 @@ class SwaggerHandler:
                     _seen.add(ref)
                     result = {}
                     for nested_name, nested_info in definition["properties"].items():
-                        result[nested_name] = self._extract_param_value(nested_info, swagger_data, _seen)
+                        result[nested_name] = self._extract_param_value(nested_info, swagger_data, _seen, prop_name=nested_name)
                     _seen.discard(ref)
                     return [result]
             elif "properties" in items:
                 result = {}
                 for nested_name, nested_info in items["properties"].items():
-                    result[nested_name] = self._extract_param_value(nested_info, swagger_data, _seen)
+                    result[nested_name] = self._extract_param_value(nested_info, swagger_data, _seen, prop_name=nested_name)
                 return [result]
             return []
         else:
-            return self._get_default_value(prop_type)
+            return self._get_default_value(prop_type, prop_name)
 
     def _extract_nested_descriptions(
         self,

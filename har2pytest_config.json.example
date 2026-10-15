@@ -41,19 +41,20 @@
         "callback",
         "jsonp"
     ],
-    "PAGINATION_PARAMS": [
-        "pageNum",
-        "pageSize"
-    ],
+    "PAGINATION_PARAMS": {
+        "pageNum": 1,
+        "pageSize": 10
+    },
     "LIST_QUERY_KEYWORDS": [
         "列表"
     ],
     "LIST_QUERY_EXCLUDE_KEYWORDS": [
-        "详情"
+        "详情",
+        "导出"
     ],
     "TESTCASE_PROFILES": [
-        { "url": "/mgmt/order/orderList", "mode": "list_query" },
-        { "url": "/mgmt/order/{orderNo}", "mode": "complex_scenario" },
+        { "url": "/mobile/order/List", "mode": "list_query" },
+        { "url": /mobile/order/{orderNo}", "mode": "complex_scenario" },
         { "url": "/mall/order/*", "mode": "auto", "keywords": ["列表"], "exclude_keywords": ["详情"] }
     ],
     "STATE_VALUE_PATTERNS": [

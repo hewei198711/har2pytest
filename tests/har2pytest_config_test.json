@@ -34,9 +34,13 @@
   "REQUIRED_HEADERS": {
     "authorization": "f\"token {os.environ['token']}\""
   },
-  "PAGINATION_PARAMS": [
-    "pageNum",
-    "pageSize"
+  "PAGINATION_PARAMS": {
+    "pageNum": 1,
+    "pageSize": 10
+  },
+  "TIME_PARAMS": [
+    "starttime",
+    "endtime"
   ],
   "DEFAULT_API_DIR": "apis",
   "TESTCASE_DIR": "testcases",

@@ -6,7 +6,7 @@
 
 | 模式 | 入口方法 | 参数来源 | 适用场景 |
 |------|---------|---------|---------|
-| **parametrized_list** | `generate_parametrized_list_testcases()` | HAR 文件 | 列表查询接口的 pytest 参数化测试 |
+| **parametrized_list** | `generate_parametrized_list_testcases()` | api.json 元数据 | 列表查询接口的 pytest 参数化测试 |
 | **complex_scenario** | `generate_scenario_testcase()` | HAR 文件 | 多步骤业务流程的链路测试 |
 | **batch** | `generate_batch_testcases()` | API 文件 / HAR 文件 | 批量从 API 定义文件或 HAR 文件直接生成测试用例 |
 
@@ -22,24 +22,18 @@
 
 ```mermaid
 flowchart TD
-    A[generate_parametrized_list_testcases<br/>har_file_path, task_id, target_url?, overwrite?] --> B[match_api_files_for_har<br/>har_file_path]
-    B --> C[循环每个匹配的 api_file]
-    C --> D{overwrite? 或文件不存在?}
-    D -->|否 且文件已存在| E[跳过该文件]
-    D -->|是 或文件不存在| F[generate_parametrized_test_content<br/>har_file_path, api_file, task_id]
-    F --> G{has_har?}
-    G -->|Yes| H[har_parser.extract_requests_from_har]
-    H --> I[_extract_requests_for_url<br/>按 URL 筛选请求]
-    I --> J[normalize_params_for_parametrization<br/>合并、去重、分组]
-    J --> K{param_items 为空?}
-    G -->|No| L[无 HAR → 直接到 K]
-    K -->|是 & 非HAR模式| M[_build_param_items_from_api<br/>从 API 文件构建参数]
-    K -->|是 & HAR模式无参数| N[返回 None 跳过]
-    K -->|否| O[_generate_test_case_imports]
-    M --> O
-    O --> P[_generate_test_case_description]
-    P --> R[_generate_parametrized_test_methods]
-    R --> S[write_test_file 写入文件]
+    A[generate_parametrized_list_testcases<br/>api_files_list, task_id?, overwrite?] --> B[遍历每个 api_file]
+    B --> C{overwrite? 或文件不存在?}
+    C -->|否 且文件已存在| D[跳过该文件]
+    C -->|是 或文件不存在| E[generate_parametrized_test_content<br/>api_file, task_id]
+    E --> F[从 api.json 读取元数据<br/>param_values + har_param_values]
+    F --> G[build_param_items_from_api<br/>构建参数化条目]
+    G --> H{param_items 为空?}
+    H -->|是| I[返回 None 跳过]
+    H -->|否| J[_generate_test_case_imports]
+    J --> K[_generate_test_case_description]
+    K --> L[_generate_parametrized_test_methods]
+    L --> M[write_test_file 写入文件]
 ```
 
 ### 详细步骤
@@ -47,43 +41,26 @@ flowchart TD
 #### Step 1: `generate_parametrized_list_testcases()`
 
 ```
-输入: har_file_path, task_id, target_url?, overwrite=False
- └─ 校验 HAR 文件存在
- └─ match_api_files_for_har() → 获取匹配的 API 文件列表
+输入: api_files_list, task_id?, overwrite=False
  └─ 遍历每个 api_file:
-      ├─ 若有 target_url，跳过不匹配的 API
       ├─ 若 overwrite=False 且文件已存在 → 跳过
       ├─ 调用 generate_parametrized_test_content() 生成内容
       └─ write_test_file() 写入文件
 ```
 
-#### Step 2: `match_api_files_for_har()`
+#### Step 2: `generate_parametrized_test_content()`
 
 ```
-输入: har_file_path
- └─ har_parser.extract_requests_from_har() 提取所有请求
- └─ 遍历请求，为每个 URL 准备 URLMatcher（绑定 Swagger 文档）
- └─ _get_all_api_files() 扫描 api_dir 获取所有 API 文件
- └─ URLMatcher.find_matching_api_file() 逐个 URL 匹配
- └─ 返回去重后的 API 文件路径列表
-```
-
-#### Step 3: `generate_parametrized_test_content()`
-
-```
-输入: har_file_path?, api_file, task_id
- └─ _get_api_file_info(api_file) → 获取 function_name, url, params, data, param_remarks
+输入: api_file, task_id
+ └─ parse_api_file(api_file) → 获取 function_name, url, params, data, param_remarks, param_values, har_param_values
  └─ _extract_api_info(api_file) → feature_name, story_name
  └─ 合并 api_info["params"] 和 api_info["data"] 得到 api_params
  │
- ├─ [参数来源判断]
- │  ├─ has_har = har_file_path 存在且文件存在
- │  ├─ has_har=True:
- │  │    ├─ har_parser.extract_requests_from_har() 提取请求
- │  │    ├─ _extract_requests_for_url() 按 URL 过滤并合并参数
- │  │    └─ normalize_params_for_parametrization() 标准化
- │  └─ has_har=False:
- │       └─ _build_param_items_from_api(api_params, ...) 从 API 文件构建
+ ├─ [参数来源]
+ │  └─ merged_pv = api_info.param_values + api_info.har_param_values
+ │     （param_values 来自 Swagger 类型感知默认值，har_param_values 来自 HAR 派生枚举元数据）
+ │
+ ├─ build_param_items_from_api(api_params, merged_pv) → 构建参数化条目
  │
  ├─ 无参数 → 返回 None
  │
@@ -93,36 +70,24 @@ flowchart TD
      └─ _generate_parametrized_test_methods(param_items, ...)
 ```
 
-#### Step 4: `_extract_requests_for_url()`
+#### Step 3: `build_param_items_from_api()`
 
 ```
-输入: requests, api_url
- └─ URLMatcher.normalize_url() 标准化 URL
- └─ 遍历请求，筛选 URL 匹配的请求
- └─ merge_request_params() 合并 query_params 和 post_data
- └─ 收集有效参数名到 all_params
- └─ 记录第一个匹配的请求方法
- └─ 返回 (all_params, all_requests_params, request_method)
-```
-
-#### Step 5: `normalize_params_for_parametrization()`
-
-```
-输入: requests_params, param_remarks?
- └─ 遍历每个请求的参数:
-      ├─ 过滤分页参数
-      ├─ 分离有效参数(other_params 为无效参数)
-      ├─ 单参数 → 按参数名分组收集 values
-      └─ 多参数(>1) → 按排序后的逗号连接名组合，以元组收集 values
- └─ 遍历分组结果:
-      ├─ 状态参数 → _parse_state_values() 从备注解析状态枚举值
-      └─ 普通参数 → deduplicate_values() 去重
+输入: api_params, merged_pv
+ └─ 遍历 api_params 中的每个参数:
+      ├─ 过滤分页参数、时间参数
+      ├─ 从 merged_pv 中获取该参数的枚举值
+      ├─ 单值参数 → 跳过（不参与参数化）
+      ├─ 多值参数 → 构建 {param_name: values, other_params: {...}}
+      └─ 组合参数（>1 个有效参数）→ 按排序后的逗号连接名组合
  └─ 返回 [{param_name: values, other_params: {...}}, ...]
 ```
 
+> **说明**：`merged_pv` 由 `api_info.param_values`（Swagger 类型感知默认值）和 `api_info.har_param_values`（HAR 派生枚举元数据）合并而成。测试生成阶段不直接解析 HAR 文件，而是从 `api.json` 元数据中读取预计算的参数值。
+
 > **回退机制**：若参数化模式无可用参数（所有参数均无法提取有效值），会回退调用 `generate_scenario_test_content()` 生成场景测试；场景模式也无内容时才最终跳过。
 
-#### Step 6: `_generate_parametrized_test_methods()`
+#### Step 4: `_generate_parametrized_test_methods()`
 
 ```
 输入: param_items, api_description, function_name, request_method, param_remarks
@@ -195,20 +160,19 @@ class TestClass:
 ```mermaid
 flowchart TD
     A[generate_scenario_testcase<br/>har_file_path, target_url, task_id, overwrite?] --> B[校验 HAR 文件存在]
-    B --> C{overwrite? 或文件不存在?}
-    C -->|否 且文件已存在| D[返回 None 跳过]
-    C -->|是 或文件不存在| E[har_parser.extract_requests_from_har<br/>一次解析HAR]
-    E --> F[match_api_files_for_har<br/>传入预解析请求列表]
-    F --> G[URLMatcher.find_matching_api_file<br/>target_url → 定位目标API]
-    G --> H[generate_scenario_test_content<br/>har_file_path, api_files, task_id, target_api_file]
-    H --> I[_get_requests_from_source<br/>优先HAR/回退API文件]
-    I --> J[_generate_test_case_imports<br/>多函数]
-    J --> K[_extract_api_info<br/>feature_name, story_name]
-    K --> L[_generate_test_case_description<br/>severity=CRITICAL]
-    L --> N[_generate_scenario_test_method_definition]
-    N --> O[_generate_scenario_step_functions<br/>遍历requests]
-    O --> P[生成步骤调用]
-    P --> Q[write_test_file 写入文件]
+    B --> C[har_parser.extract_requests_from_har<br/>一次解析HAR]
+    C --> D[match_api_files_for_har<br/>传入预解析请求列表]
+    D --> E[URLMatcher.find_matching_api_file<br/>target_url → 定位目标API]
+    E --> F{overwrite? 或文件不存在?}
+    F -->|否 且文件已存在| G[返回 None 跳过]
+    F -->|是 或文件不存在| H[generate_scenario_test_content<br/>api_files, task_id, target_api_file, all_requests]
+    H --> I[_generate_test_case_imports<br/>多函数]
+    I --> J[_extract_api_info<br/>feature_name, story_name]
+    J --> K[_generate_test_case_description<br/>severity=CRITICAL]
+    K --> L[_generate_scenario_test_method_definition]
+    L --> M[_generate_scenario_step_functions<br/>遍历requests]
+    M --> N[生成步骤调用]
+    N --> O[write_test_file 写入文件]
 ```
 
 ### 详细步骤
@@ -222,18 +186,16 @@ flowchart TD
  └─ match_api_files_for_har(har_file_path, all_requests) → 传入预解析请求列表
  └─ URLMatcher.find_matching_api_file(target_url, api_files) → 目标 API 文件
  └─ 若 overwrite=False 且文件已存在 → 返回 None 跳过
- └─ generate_scenario_test_content() → 生成内容
- └─ 输出文件名: test{function_name}.py
+ └─ generate_scenario_test_content(api_files, task_id, target_api_file, all_requests) → 生成内容
+ └─ 输出文件名: test_{function_name}.py
  └─ write_test_file() 写入文件
 ```
 
 #### Step 2: `generate_scenario_test_content()`
 
 ```
-输入: har_file_path?, api_files, task_id?, target_api_file?
- └─ _get_requests_from_source(har_file_path, api_files, target_api_file)
- │    ├─ HAR 存在: har_parser.extract_requests_from_har() → 请求列表
- │    └─ 无 HAR: 从 API 文件构建模拟请求信息
+输入: api_files, task_id?, target_api_file?, all_requests
+ └─ all_requests 即 HAR 解析后的请求列表（场景模式始终有 HAR 输入）
  │
  ├─ _generate_test_case_imports(api_files)
  │    └─ 多函数模式: 按服务包分组导入，不导入 pytest
@@ -246,10 +208,9 @@ flowchart TD
  ├─ _generate_scenario_test_method_definition(target_api_file)
  │    ├─ @allure.title("接口描述")
  │    └─ def test_funcname(self):
- │       test_data = {}
  │
- ├─ _generate_scenario_step_functions(content, requests, api_files)
- │    └─ 遍历 requests (按 HAR 请求顺序 = 业务流程顺序):
+ ├─ _generate_scenario_step_functions(content, all_requests, api_files)
+ │    └─ 遍历 all_requests (按 HAR 请求顺序 = 业务流程顺序):
  │         ├─ URLMatcher.find_matching_api_file(url, api_files) → 匹配
  │         ├─ _generate_step_function_name → step_funcname / step_N_funcname
  │         ├─ @allure.step("描述")
@@ -260,7 +221,6 @@ flowchart TD
  │         │         ├─ GET → params=
  │         │         └─ 无参数 → 直接调用
  │         └─ assert...
- │            test_data['xxx'] = r.json()
  │
  └─ 生成步骤调用
       └─ step_func1()
@@ -288,9 +248,6 @@ class TestClass:
     @allure.title("商品下单流程")
     def test_submit_order(self):
 
-        # 初始化测试数据字典，用于在步骤间传递数据
-        test_data = {}
-
         @allure.step("用户登录")
         def step_login():
             data = {"username": "test", "password": "123456"}
@@ -298,7 +255,6 @@ class TestClass:
                 assert r.status_code == 200
                 data = r.json()
                 assert data['code'] == 200
-                test_data['token'] = data['data']['token']
 
         @allure.step("获取商品列表")
         def step_list_page():
@@ -307,16 +263,14 @@ class TestClass:
                 assert r.status_code == 200
                 data = r.json()
                 assert data['code'] == 200
-                test_data['product_list'] = data
 
         @allure.step("提交订单")
         def step_submit_order():
-            data = {"product_id": test_data['product_list']['data'][0]['id']}
+            data = {"product_id": "10086"}
             with submit_order(data=data) as r:
                 assert r.status_code == 200
                 data = r.json()
                 assert data['code'] == 200
-                test_data['order_id'] = data['data']['order_id']
 
         # 执行所有测试步骤
         step_login()
@@ -364,8 +318,8 @@ flowchart TD
     E -->|是| F["跳过 skipped++"]
     D -->|是| G["_resolve_testcase_mode<br/>TESTCASE_PROFILES / 关键字启发式"]
     E -->|否| G
-    G -->|parametrized| H["generate_parametrized_test_content<br/>har_file_path 可选"]
-    G -->|scenario| I["generate_scenario_test_content<br/>har_file_path 可选"]
+    G -->|parametrized| H["generate_parametrized_test_content<br/>api_file, task_id"]
+    G -->|scenario| I["generate_scenario_test_content<br/>api_files, task_id, target_api_file, all_requests"]
     H --> J["write_test_file 同步写入<br/>（任务间并行调度）"]
     I --> J
     J --> K["汇总结果"]
@@ -381,16 +335,16 @@ flowchart TD
  │     ├─ 目录 → 扫描所有 .py 文件
  │     ├─ .har 文件 → 解析 HAR 提取请求，匹配对应的 API 文件
  │     └─ 普通文件 → 直接添加
- └─ output_dir = get_output_dir(self.output_dir, task_id)
+ └─ 输出目录: os.makedirs(self.output_dir, exist_ok=True)
  └─ 异步并行处理（asyncio.gather）:
       ├─ 每个 api_file 独立任务 process_single():
       │    ├─ 检查文件是否存在 → "skipped"
-      │    ├─ _get_api_file_info() → 检查 function_name → "failed"
+      │    ├─ parse_api_file() → 检查 function_name → "failed"
       │    ├─ 若 overwrite=False 且测试文件已存在 → "skipped"
       │    ├─ 判断模式: _resolve_testcase_mode(api_file)
-      │    │    ├─ parametrized → generate_parametrized_test_content(har_file_path, api_file, task_id)
-      │    │    └─ scenario → generate_scenario_test_content(har_file_path, [api_file], task_id, api_file)
-      │    │    有 HAR 时其请求驱动参数提取；无 HAR 自动回落从 API 文件提取
+      │    │    ├─ parametrized → generate_parametrized_test_content(api_file, task_id)
+      │    │    └─ scenario → generate_scenario_test_content([api_file], task_id, api_file, all_requests)
+      │    │    参数来源统一从 api.json 元数据读取（param_values + har_param_values）
       │    └─ write_test_file() 同步写入（任务间并行调度）→ "generated"
       └─ 汇总所有结果 → {total, skipped, generated, failed, generated_files}
  └─ await format_directory(output_dir) → 批量 ruff 格式化
@@ -402,12 +356,11 @@ flowchart TD
 #### 与模式一/二的关键区别
 
 batch 模式单独运行时没有单份 HAR 作为整个批量任务的输入；传入 HAR 文件时
-其请求会先匹配对应 API 文件并驱动参数提取，无 HAR 时参数来源回落 API 文件：
+其请求会先匹配对应 API 文件，测试生成阶段统一从 api.json 元数据读取参数值：
 
 | 组件 | parametrized_list(batch) | complex_scenario(batch) |
 |------|------------------------|------------------------|
-| **参数来源** | HAR（传入时）→ `_extract_requests_for_url`；无 HAR → `_build_param_items_from_api(api_params, ..., is_batch_mode=True)` | HAR（传入时）→ 提取请求；无 HAR → `_get_requests_from_source(None, ...)` 从 API 文件构建 |
-| **API 参数处理** | 包含空值参数（`is_batch_mode=True`） | 直接使用 API 文件的 params/data |
+| **参数来源** | `build_param_items_from_api(api_params, merged_pv)` 从 api.json 读取预计算枚举值 | HAR 请求（场景模式始终需要 HAR 输入） |
 | **导入语句** | `import pytest`（单函数） | 不导入 pytest（多函数） |
 | **severity** | NORMAL | CRITICAL |
 | **测试方法** | `@pytest.mark.parametrize` 参数化方法 | `@allure.step` 嵌套步骤函数 |
@@ -447,9 +400,9 @@ class TestClass:
 
 | 维度 | parametrized_list | complex_scenario | batch |
 |------|------------------|-----------------|-------|
-| **输入** | HAR + API 文件 | HAR + API 文件 | API 文件列表/目录 或 HAR 文件 |
-| **参数来源** | HAR 请求 | HAR 请求（按业务流程顺序） | API 文件定义 |
-| **是否需要 HAR** | 是 | 是 | 否（支持 HAR 输入） |
+| **输入** | API 文件（参数从 api.json 元数据读取） | HAR + API 文件 | API 文件列表/目录 或 HAR 文件 |
+| **参数来源** | api.json 元数据（param_values + har_param_values） | HAR 请求（按业务流程顺序） | api.json 元数据（parametrized）/ HAR 请求（scenario） |
+| **是否需要 HAR** | 否（从 api.json 元数据读取） | 是 | 否（支持 HAR 输入） |
 | **输出** | 每匹配 API 一个文件（CLI 传 `--url` 时为一个） | 单文件 | 多文件（每 API 一个） |
 | **overwrite 参数** | 跳过已存在文件 | 返回 None 跳过 | 跳过已存在文件 |
 | **测试框架** | pytest + allure | pytest + allure | pytest + allure |
@@ -467,11 +420,11 @@ class TestClass:
 
 | 方法 | 功能 | 被调用者 |
 |------|------|---------|
-| `_get_api_file_info()` | 带缓存的 API 文件解析 | 所有模式 |
+| `utils.parse_api_file()` | API 文件解析（带缓存） | 所有模式 |
 | `_get_all_api_files()` | 扫描 API 目录 | parametrized_list, scenario |
-| `_extract_service_package()` | 从路径提取服务包名 | 所有模式 |
+| `utils.extract_service_package()` | 从路径提取服务包名 | 所有模式 |
 | `_is_valid_param()` | 判断参数值有效性 | 所有模式 |
-| `_parse_state_values()` | 从备注解析状态枚举值 | 所有模式 |
+| `utils.parse_state_values()` | 从备注解析状态枚举值 | 所有模式 |
 | `_generate_test_case_imports()` | 生成导入语句 | 所有模式 |
 | `_generate_test_case_description()` | 生成 allure 描述 | 所有模式 |
 | `_generate_step_function_body()` | 生成步骤函数体 | scenario |

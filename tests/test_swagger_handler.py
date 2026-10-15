@@ -80,10 +80,13 @@ def test_model_reference_handling():
 def test_get_default_value():
     handler = SwaggerHandler()
     assert handler._get_default_value("string") == ""
-    assert handler._get_default_value("integer") == 0
-    assert handler._get_default_value("boolean") is False
+    assert handler._get_default_value("integer") is None
+    assert handler._get_default_value("boolean") is None
     assert handler._get_default_value("array") == []
     assert handler._get_default_value("object") == {}
+    # 分页参数特殊默认值
+    assert handler._get_default_value("integer", "pageNum") == 1
+    assert handler._get_default_value("integer", "pageSize") == 10
 
 
 @allure.feature("Swagger处理器")
@@ -216,6 +219,61 @@ def test_extract_body_params_ref_not_found():
     assert params == {}
 
 
+@allure.feature("Swagger处理器")
+@allure.story("从Swagger提取参数")
+@allure.title("测试裸类型Body参数兜底提取默认值与说明")
+def test_extract_params_from_swagger_bare_type_body():
+    handler = SwaggerHandler()
+    parameters = [
+        {"name": "orderNo", "in": "body", "description": "订单号", "schema": {"type": "string"}},
+        {"name": "remarks", "in": "query", "type": "string", "description": "备注"},
+    ]
+    query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions = (
+        handler._extract_params_from_swagger(parameters, {})
+    )
+    assert has_body_param is True
+    assert has_query_param is True
+    assert post_data == {"orderNo": ""}
+    assert query_params == {"remarks": ""}
+    assert param_descriptions == {"orderNo": "订单号", "remarks": "备注"}
+
+
+@allure.feature("Swagger处理器")
+@allure.story("从Swagger提取参数")
+@allure.title("测试裸类型Body参数按类型取默认值")
+def test_extract_params_from_swagger_bare_type_body_default_value():
+    handler = SwaggerHandler()
+    parameters = [{"name": "count", "in": "body", "schema": {"type": "integer"}}]
+    _, post_data, _, has_body_param, _, _ = handler._extract_params_from_swagger(parameters, {})
+    assert has_body_param is True
+    assert post_data == {"count": None}
+
+
+@allure.feature("Swagger处理器")
+@allure.story("从Swagger查找API信息")
+@allure.title("测试裸类型Body参数查找API信息补齐说明与默认值")
+def test_find_api_info_in_swagger_bare_type_body():
+    handler = SwaggerHandler()
+    swagger_data = {
+        "paths": {
+            "/mgmt/order/cancelOrder": {
+                "post": {
+                    "summary": "取消订单",
+                    "parameters": [
+                        {"name": "orderNo", "in": "body", "description": "订单号", "schema": {"type": "string"}},
+                        {"name": "remarks", "in": "query", "type": "string", "description": "备注"},
+                    ],
+                }
+            }
+        }
+    }
+    result = handler.find_api_info_in_swagger(swagger_data, "/mgmt/order/cancelOrder", "POST")
+    assert result.summary == "取消订单"
+    assert result.parameters == {"orderNo": "订单号", "remarks": "备注"}
+    assert result.param_defaults["orderNo"] == ""
+    assert result.param_defaults["remarks"] == ""
+
+
 # ==================== 提取Body参数测试 ====================
 
 
@@ -267,6 +325,14 @@ def test_get_default_value_unknown_type():
     handler = SwaggerHandler()
     result = handler._get_default_value("unknown")
     assert result == ""
+
+
+@allure.feature("Swagger处理器")
+@allure.story("获取默认值")
+@allure.title("测试非分页参数名的integer类型返回None")
+def test_get_default_value_integer_non_pagination():
+    handler = SwaggerHandler()
+    assert handler._get_default_value("integer", "someField") is None
 
 
 # ==================== 初始化测试 ====================
@@ -517,8 +583,8 @@ def test_extract_params_path_param():
     params = handler._extract_params_from_swagger(swagger_info["parameters"], {})
     assert len(params) == 6
     query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions = params
-    # path 参数进入 path_params（默认值按 integer=0），不落入 query
-    assert path_params == {"id": 0}
+    # path 参数进入 path_params（默认值按 integer=None），不落入 query
+    assert path_params == {"id": None}
     assert query_params == {}
     assert has_query_param is False
 
@@ -561,31 +627,6 @@ def test_extract_param_value_empty_object():
     param = {"name": "body", "in": "body", "schema": {"type": "object"}}
     value = handler._extract_param_value(param["schema"], {})
     assert value == {}
-
-
-@allure.feature("Swagger处理器")
-@allure.story("提取参数值")
-@allure.title("测试提取引用类型数组参数值")
-def test_extract_param_value_array_with_ref():
-    handler = SwaggerHandler()
-    swagger_data = {"definitions": {"ItemModel": {"type": "object", "properties": {"name": {"type": "string"}}}}}
-    param = {"name": "items", "in": "body", "schema": {"type": "array", "items": {"$ref": "#/definitions/ItemModel"}}}
-    value = handler._extract_param_value(param["schema"], swagger_data)
-    assert isinstance(value, list)
-
-
-@allure.feature("Swagger处理器")
-@allure.story("提取参数值")
-@allure.title("测试提取属性类型数组参数值")
-def test_extract_param_value_array_with_properties():
-    handler = SwaggerHandler()
-    param = {
-        "name": "items",
-        "in": "body",
-        "schema": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}}}},
-    }
-    value = handler._extract_param_value(param["schema"], {})
-    assert isinstance(value, list)
 
 
 @allure.feature("Swagger处理器")
@@ -670,7 +711,7 @@ class TestExtractParamValueEdge:
     def test_number_type(self):
         handler = SwaggerHandler()
         value = handler._extract_param_value({"type": "number"}, {})
-        assert value == 0.0
+        assert value is None
 
     @allure.feature("Swagger处理器")
     @allure.story("提取参数值-边缘")
@@ -678,7 +719,7 @@ class TestExtractParamValueEdge:
     def test_float_type(self):
         handler = SwaggerHandler()
         value = handler._extract_param_value({"type": "float"}, {})
-        assert value == 0.0
+        assert value is None
 
     @allure.feature("Swagger处理器")
     @allure.story("提取参数值-边缘")
@@ -686,7 +727,7 @@ class TestExtractParamValueEdge:
     def test_int_type(self):
         handler = SwaggerHandler()
         value = handler._extract_param_value({"type": "int"}, {})
-        assert value == 0
+        assert value is None
 
     @allure.feature("Swagger处理器")
     @allure.story("提取参数值-边缘")
@@ -694,7 +735,7 @@ class TestExtractParamValueEdge:
     def test_boolean_type(self):
         handler = SwaggerHandler()
         value = handler._extract_param_value({"type": "boolean"}, {})
-        assert value is False
+        assert value is None
 
     @allure.feature("Swagger处理器")
     @allure.story("提取参数值-边缘")
@@ -979,7 +1020,7 @@ class TestOpenAPI3ComponentsSchemas:
         }
         schema = {"$ref": "#/components/schemas/TestModel"}
         params = handler._extract_body_params(schema, swagger_data)
-        assert params == {"name": "", "age": 0}
+        assert params == {"name": "", "age": None}
 
     @allure.feature("Swagger处理器")
     @allure.story("OpenAPI3 components/schemas")

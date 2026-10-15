@@ -29,8 +29,13 @@ class APIConfig:
         # NOTE: 默认配置值包含 f-string 代码，运行时通过 eval 求值。请确保配置文件来源可信。
         "REQUIRED_HEADERS": {"authorization": "f\"bearer {os.environ.get('token', '')}\""},
         "HEADERS_TO_INCLUDE": {},
-        # 列表查询用例，这些参数不进行参数化处理
-        "PAGINATION_PARAMS": [],
+        # 分页参数配置：字典格式 {参数名: 默认值}
+        # 例如 {"pageNum": 1, "pageSize": 10}
+        # 键用于子串匹配判定是否为分页参数，值作为参数化排除后的默认值
+        # 列表格式已废弃，加载时会警告并转换为空字典
+        "PAGINATION_PARAMS": {},
+        # 时间类参数关键字（包含匹配，不区分大小写），用于时间对组合传参
+        "TIME_PARAMS": [],
         # 测试用例目录 - 必需配置，必须在配置文件中指定
         "TESTCASE_DIR": "testcases",
         # 服务映射配置 - 必需配置，必须在配置文件中指定
@@ -100,6 +105,21 @@ class APIConfig:
         # 转换集合类型
         if isinstance(config.get("INVALID_PARAMS"), list):
             config["INVALID_PARAMS"] = set(config["INVALID_PARAMS"])
+
+        # 校验 PAGINATION_PARAMS：仅支持字典格式
+        pagination_params = config.get("PAGINATION_PARAMS")
+        if isinstance(pagination_params, list):
+            raise ValueError(
+                "配置文件格式错误：PAGINATION_PARAMS 仅支持字典格式，请使用字典格式。\n"
+                "旧格式（已废弃）：\n"
+                '    "PAGINATION_PARAMS": ["pageNum", "pageSize"]\n'
+                "新格式：\n"
+                '    "PAGINATION_PARAMS": {\n'
+                '        "pageNum": 1,\n'
+                '        "pageSize": 10\n'
+                "    }\n"
+                "字典键用于判定是否为分页参数（子串匹配），值作为参数化排除后的默认值。"
+            )
 
         # 检查 HEADERS_TO_INCLUDE 是否为字典，如果不是则报错
         if not isinstance(config.get("HEADERS_TO_INCLUDE"), dict):
@@ -225,8 +245,56 @@ class APIConfig:
         return cls.get_config("HEADERS_TO_INCLUDE")
 
     @classmethod
-    def PAGINATION_PARAMS(cls) -> list:
-        return cls.get_config("PAGINATION_PARAMS")
+    def PAGINATION_PARAMS(cls) -> dict:
+        """返回分页参数字典（参数名 -> 默认值）。
+
+        仅支持字典格式配置。若内部存储为非字典值，返回空字典。
+        """
+        value = cls.get_config("PAGINATION_PARAMS")
+        if not isinstance(value, dict):
+            return {}
+        return value
+
+    @classmethod
+    def is_pagination_param(cls, param_name: str) -> bool:
+        """判断参数名是否包含任一分页参数关键字（不区分大小写）。
+
+        以 ``PAGINATION_PARAMS`` 字典的键作为关键字做子串匹配。
+        空配置时返回 False（不再有内置默认回退）。
+        """
+        name_lower = param_name.lower()
+        return any(key.lower() in name_lower for key in cls.PAGINATION_PARAMS().keys())
+
+    @classmethod
+    def get_pagination_default_value(cls, param_name: str) -> Any | None:
+        """获取分页参数的默认值。
+
+        从 ``PAGINATION_PARAMS`` 配置中按参数名查找默认值（不区分大小写）。
+        配置示例：``{"pageNum": 1, "pageSize": 10}``。
+
+        Args:
+            param_name: 参数名称
+
+        Returns:
+            分页参数的默认值，或 None（表示非分页参数或配置中未指定）
+        """
+        if not param_name:
+            return None
+        name_lower = param_name.lower()
+        for key, value in cls.PAGINATION_PARAMS().items():
+            if key.lower() == name_lower:
+                return value
+        return None
+
+    @classmethod
+    def TIME_PARAMS(cls) -> list:
+        return cls.get_config("TIME_PARAMS")
+
+    @classmethod
+    def is_time_param(cls, param_name: str) -> bool:
+        """判断参数名是否包含任一时间参数关键字（不区分大小写）。"""
+        name_lower = param_name.lower()
+        return any(p.lower() in name_lower for p in cls.TIME_PARAMS())
 
     @classmethod
     def TESTCASE_DIR(cls) -> str:
@@ -292,5 +360,8 @@ class APIConfig:
             return cls.DEFAULT_API_DIR()
 
         first_segment = match.group(1).lower()
-        # 从预计算的小写键映射中 O(1) 查找对应的服务包
-        return cls._service_mapping_lower.get(first_segment, cls.DEFAULT_API_DIR())
+        # 先求默认值：触发配置懒加载（_load_config 内填充小写键映射），
+        # 再从预计算的小写键映射中 O(1) 查找。若先读映射再求默认值，
+        # 配置未加载的首次调用会拿到空映射而恒回退默认目录
+        default = cls.DEFAULT_API_DIR()
+        return cls._service_mapping_lower.get(first_segment, default)

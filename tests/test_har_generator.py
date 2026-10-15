@@ -10,7 +10,7 @@ import allure
 import pytest
 
 from har2pytest.api_generator import APIGenerator
-from har2pytest.har_generator import generate_api_files_from_har
+from har2pytest.har_generator import _compute_constant_params, generate_api_files_from_har
 
 # ==================== Fixtures ====================
 
@@ -208,3 +208,177 @@ async def test_generate_api_files_duplicate_request_skipped(tmp_path, caplog):
 
     assert len(files) == 1
     assert "跳过" in caplog.text
+
+
+# ==================== _compute_constant_params 单元测试 ====================
+
+
+@allure.feature("HAR生成器")
+@allure.story("常量参数计算")
+@allure.title("空快照列表返回空字典")
+def test_compute_constant_params_empty():
+    assert _compute_constant_params([]) == {}
+
+
+@allure.feature("HAR生成器")
+@allure.story("常量参数计算")
+@allure.title("所有请求值相同的参数被识别为常量")
+def test_compute_constant_params_all_same():
+    snapshots = [
+        {"header": "1", "isDisSelfStoreOrder": "0", "keyword": "A"},
+        {"header": "1", "isDisSelfStoreOrder": "0", "keyword": "B"},
+        {"header": "1", "isDisSelfStoreOrder": "0", "keyword": "C"},
+    ]
+    result = _compute_constant_params(snapshots)
+    assert result["header"] == "1"
+    assert result["isDisSelfStoreOrder"] == "0"
+    assert "keyword" not in result  # keyword 有不同值
+
+
+@allure.feature("HAR生成器")
+@allure.story("常量参数计算")
+@allure.title("值不同但都出现的不算常量参数")
+def test_compute_constant_params_different_values():
+    snapshots = [
+        {"header": "1", "type": "A"},
+        {"header": "1", "type": "B"},
+    ]
+    result = _compute_constant_params(snapshots)
+    assert result == {"header": "1"}  # type 有不同值，不是常量
+
+
+@allure.feature("HAR生成器")
+@allure.story("常量参数计算")
+@allure.title("只在部分请求出现的参数不算常量")
+def test_compute_constant_params_not_in_all_requests():
+    snapshots = [
+        {"header": "1", "extra": "x"},
+        {"header": "1"},
+        {"header": "1"},
+    ]
+    result = _compute_constant_params(snapshots)
+    # header 在 3/3 请求中出现且值相同 → 常量
+    assert result["header"] == "1"
+    # extra 只在 1/3 请求中出现，不足 50% → 非常量
+    assert "extra" not in result
+
+
+@allure.feature("HAR生成器")
+@allure.story("常量参数计算")
+@allure.title("单条快照中所有参数都是常量")
+def test_compute_constant_params_single_snapshot():
+    snapshots = [{"a": 1, "b": "hello"}]
+    result = _compute_constant_params(snapshots)
+    assert result == {"a": 1, "b": "hello"}
+
+
+@allure.feature("HAR生成器")
+@allure.story("常量参数计算")
+@allure.title("list/dict 类型值不崩溃且能正确识别为常量")
+def test_compute_constant_params_unhashable_values():
+    snapshots = [
+        {"header": "1", "orderStatusList": [1, 2], "filter": {"type": "a"}},
+        {"header": "1", "orderStatusList": [1, 2], "filter": {"type": "a"}},
+        {"header": "1", "orderStatusList": [1, 2], "filter": {"type": "a"}},
+    ]
+    result = _compute_constant_params(snapshots)
+    assert result["header"] == "1"
+    assert result["orderStatusList"] == [1, 2]
+    assert result["filter"] == {"type": "a"}
+
+
+@allure.feature("HAR生成器")
+@allure.story("常量参数计算")
+@allure.title("list 值不同时不算常量")
+def test_compute_constant_params_unhashable_different():
+    snapshots = [
+        {"orderStatusList": [1, 2]},
+        {"orderStatusList": [3, 4]},
+        {"orderStatusList": [1, 2]},
+    ]
+    result = _compute_constant_params(snapshots)
+    assert "orderStatusList" not in result
+
+
+@allure.feature("HAR生成器")
+@allure.story("常量参数计算")
+@allure.title("空值（空字符串、None）不被收录为常量参数")
+def test_compute_constant_params_excludes_empty_values():
+    snapshots = [
+        {"header": "1", "serialNo": "", "evaluates": "", "discountLevelList": ""},
+        {"header": "1", "serialNo": "", "evaluates": "", "discountLevelList": ""},
+        {"header": "1", "serialNo": "", "evaluates": "", "discountLevelList": ""},
+    ]
+    result = _compute_constant_params(snapshots)
+    assert result == {"header": "1"}
+    assert "serialNo" not in result
+    assert "evaluates" not in result
+    assert "discountLevelList" not in result
+
+
+@allure.feature("HAR生成器")
+@allure.story("常量参数计算")
+@allure.title("50% 阈值边界：恰好半数不算常量，超过半数算常量")
+def test_compute_constant_params_threshold_boundary():
+    # header 在 2/4 = 50% 请求中出现：不超过阈值 → 不算常量
+    snapshots_4 = [
+        {"header": "1", "x": "1"},
+        {"header": "1", "x": "2"},
+        {"y": "3"},
+        {"z": "4"},
+    ]
+    result = _compute_constant_params(snapshots_4)
+    assert "header" not in result  # 恰好 50%，不满足 > threshold
+
+    # header 在 3/4 = 75% 请求中出现且值相同：超过阈值 → 算常量
+    snapshots_4_majority = [
+        {"header": "1"},
+        {"header": "1"},
+        {"header": "1"},
+        {"other": "x"},
+    ]
+    result = _compute_constant_params(snapshots_4_majority)
+    assert result["header"] == "1"  # 3/4 > 50%
+
+
+# ==================== _compute_har_param_values 单元测试 ====================
+
+
+@allure.feature("HAR生成器")
+@allure.story("参数枚举值计算")
+@allure.title("测试 _compute_har_param_values 单参数收录")
+def test_compute_har_param_values_single_param():
+    from har2pytest.har_generator import _compute_har_param_values
+
+    snapshots = [{"keyword": "A"}, {"keyword": "B"}, {"keyword": "C"}]
+    result = _compute_har_param_values(snapshots, {})
+    assert result["keyword"] == ["A", "B", "C"]
+
+
+@allure.feature("HAR生成器")
+@allure.story("参数枚举值计算")
+@allure.title("测试 _compute_har_param_values 组合参数收录为元组列表")
+def test_compute_har_param_values_combo_param():
+    from har2pytest.har_generator import _compute_har_param_values
+
+    snapshots = [
+        {"type": "A", "size": "1"},
+        {"type": "B", "size": "2"},
+    ]
+    result = _compute_har_param_values(snapshots, {})
+    # 组合参数键以逗号连接
+    combo_key = next((k for k in result if "," in k), None)
+    assert combo_key is not None
+    assert all(isinstance(v, tuple) for v in result[combo_key])
+
+
+@allure.feature("HAR生成器")
+@allure.story("参数枚举值计算")
+@allure.title("测试 _compute_har_param_values 单值参数仍被收录")
+def test_compute_har_param_values_single_value_included():
+    from har2pytest.har_generator import _compute_har_param_values
+
+    snapshots = [{"type": "A"}, {"type": "A"}, {"type": "A"}]
+    result = _compute_har_param_values(snapshots, {})
+    # _compute_har_param_values 本身不过滤常量参数，单值仍收录
+    assert result["type"] == ["A"]

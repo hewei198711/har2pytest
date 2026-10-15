@@ -13,7 +13,15 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
-from .api_metadata import VALUE_FIELDS, read_api_metadata
+from .api_metadata import (
+    CONSTANT_PARAMS_FIELD,
+    HAR_PARAM_VALUES_FIELD,
+    HAR_PARAMS_FIELD,
+    HAR_TIME_PAIRS_FIELD,
+    VALUE_FIELDS,
+    read_api_metadata,
+)
+from .config import APIConfig
 from .logger import logger
 from .models import APIFileInfo, ParsedRequestInfo
 
@@ -88,22 +96,7 @@ def deduplicate_values(values: list[Any]) -> list[Any]:
     return unique_values
 
 
-def get_output_dir(base_output_dir: str) -> str:
-    """获取输出目录路径。
-
-    如果目录不存在则创建。
-
-    Args:
-        base_output_dir: 基础输出目录。
-
-    Returns:
-        str: 输出目录的完整路径。
-    """
-    os.makedirs(base_output_dir, exist_ok=True)
-    return base_output_dir
-
-
-def write_test_file(filepath: str, content: str):
+def write_test_file(filepath: str, content: str) -> None:
     """写入 Python 文件（不格式化）。
 
     仅将内容写入文件，不进行 ruff 格式化。
@@ -156,6 +149,166 @@ async def format_directory(dir_path: str) -> None:
     await _run_ruff(["format", "--no-respect-gitignore", dir_path], "format")
 
 
+def parse_state_values(remark: str) -> list[int] | list[str]:
+    """从参数备注中解析参数化取值。
+
+    支持内置 5 种提取模式，并可通过配置 STATE_VALUE_PATTERNS 扩展。
+    所有模式统一遍历，首个匹配成功即返回。
+
+    Args:
+        remark: 参数备注字符串
+
+    Returns:
+        参数化取值列表（整数或字符串）
+    """
+    # 箭头模式单独提取：用于优先预检查，避免被冒号模式误匹配
+    # 例如 "经营模式 1->1:3押货 2->85折押货" 应解析为 [1, 2] 而非被冒号模式匹配到 [1]
+    arrow_pattern = r"(?<!\w)(-?\d+)\s*[-\u2192>]"  # 匹配段首数字后跟箭头或破折号（如 1->描述、1→描述、-5->待收礼）
+
+    # 内置匹配模式：(类型, 正则)
+    # 注意：模式 0/4 添加 (?<!\w) 负向后行断言，避免匹配嵌入单词中的数字（如 "H5、APP" 中的 5）
+    # 注意：模式 5 使用 (?<![a-zA-Z0-9_]) 而非 (?<!\w)，因为 Python 3 的 \w 匹配中文字符
+    # 注意：箭头模式（原 index 1）已单独提取，此处不再包含
+    builtin_patterns = [
+        ("int", r"(?<!\w)(-?\d+)\s*[:\uff1a\u3001\u3002.]"),  # 匹配段首数字后跟冒号、顿号或点号（如 1.产品编码）
+        ("str", r"(\w+)\s*->"),  # 匹配文本后跟箭头（如 health->上海健康 ev->企业微信）
+        ("bracket_int", r"\((.*?)\)"),  # 匹配括号内的连续数字
+        ("int", r"(?<!\w)(\d+)(?=[\u4e00-\u9fff])"),  # 匹配段首数字后直接跟中文（如 1待审核 2审核通过）
+        ("int", r"(?<![a-zA-Z0-9_])(\d)(?!\d)"),  # 匹配嵌在中文中的单个数字（如 转赠方式1指定2扫码）
+    ]
+
+    # 合并配置扩展模式
+    all_patterns = list(builtin_patterns)
+    for pattern_config in APIConfig.STATE_VALUE_PATTERNS():
+        if isinstance(pattern_config, str):
+            all_patterns.append(("int", pattern_config))
+        elif isinstance(pattern_config, dict):
+            all_patterns.append((pattern_config.get("type", "int"), pattern_config.get("regex", "")))
+
+    # 箭头格式优先预检查
+    arrow_matches = re.findall(arrow_pattern, remark)
+    if arrow_matches:
+        arrow_values = []
+        for m in arrow_matches:
+            try:
+                arrow_values.append(int(m))
+            except ValueError:
+                pass
+        if arrow_values:
+            return list(dict.fromkeys(arrow_values))
+
+    # 统一遍历，首个匹配成功即返回
+    for pattern_type, pattern in all_patterns:
+        if not pattern:
+            continue
+
+        if pattern_type == "bracket_int":
+            m = re.search(pattern, remark)
+            if m:
+                numbers = re.findall(r"-?\d+", m.group(1))
+                if numbers:
+                    return list(dict.fromkeys(int(n) for n in numbers))
+            continue
+
+        matches = re.findall(pattern, remark)
+        if not matches:
+            continue
+
+        if pattern_type == "str":
+            text_matches = [m for m in matches if not m.isdigit()]
+            if text_matches:
+                return list(dict.fromkeys(text_matches))
+        else:
+            values = []
+            for match in matches:
+                try:
+                    values.append(int(match))
+                except ValueError:
+                    pass
+            if values:
+                return list(dict.fromkeys(values))
+
+    return []
+
+
+def build_param_values(param_remarks: dict[str, str]) -> dict[str, list[Any]]:
+    """从参数备注字典中解析所有参数的枚举值。
+
+    Args:
+        param_remarks: 参数备注字典
+
+    Returns:
+        参数枚举值字典（如 {"getType": [1,2,3], "platform": [1,2,4]}）
+    """
+    param_values: dict[str, list[Any]] = {}
+    for param_name, remark in param_remarks.items():
+        values = parse_state_values(remark)
+        if values:
+            param_values[param_name] = values
+    return param_values
+
+
+def build_time_pairs(param_remarks: dict[str, str]) -> dict[str, dict[str, str]]:
+    """从参数备注字典中识别时间参数对并提取元数据。
+
+    通过 TIME_PARAMS 配置关键字检测时间参数，按基础名分组后配对
+    start/end 参数，并从备注中提取日期格式。
+
+    Args:
+        param_remarks: 参数备注字典
+
+    Returns:
+        时间对元数据字典（如 {"getTime": {"start": "getTimeStartTime",
+        "end": "getTimeEndTime", "format": "yyyy-MM-dd"}}）
+    """
+    # 按基础名分组：base -> {"start": param_name, "end": param_name}
+    groups: dict[str, dict[str, str]] = {}
+    for param_name in param_remarks:
+        if not APIConfig.is_time_param(param_name):
+            continue
+        name_lower = param_name.lower()
+        # 尝试剥离 end/start 后缀（先 end 后 start，避免 startswith 误匹配）
+        for suffix in ("endtime", "starttime", "end", "start"):
+            if name_lower.endswith(suffix):
+                base = param_name[:len(param_name) - len(suffix)]
+                pair_type = "end" if suffix in ("endtime", "end") else "start"
+                groups.setdefault(base, {})[pair_type] = param_name
+                break
+
+    # 只保留同时有 start 和 end 的配对，提取日期格式
+    time_pairs: dict[str, dict[str, str]] = {}
+    for base, params in groups.items():
+        if "start" in params and "end" in params:
+            start_remark = param_remarks.get(params["start"], "")
+            fmt = _extract_date_format_from_remark(start_remark)
+            time_pairs[base] = {
+                "start": params["start"],
+                "end": params["end"],
+                "format": fmt,
+            }
+    return time_pairs
+
+
+def _extract_date_format_from_remark(remark: str) -> str:
+    """从参数备注中提取日期格式（括号内的 yyyy/MM/dd 等）并转换为 strftime 格式。
+
+    Args:
+        remark: 参数备注文本（如 "领取时间开始时间(yyyy-MM-dd)"）
+
+    Returns:
+        strftime 格式字符串（如 "%Y-%m-%d"）；未找到时默认 "%Y-%m-%d"
+    """
+    match = re.search(r"[\(\uff08]([^\)\uff09]+)[\)\uff09]", remark)
+    if not match:
+        return "%Y-%m-%d"
+    fmt = match.group(1)
+    # Java 风格日期格式 → Python strftime
+    fmt = fmt.replace("yyyy", "%Y").replace("yy", "%y")
+    fmt = fmt.replace("MM", "%m").replace("dd", "%d")
+    fmt = fmt.replace("HH", "%H").replace("mm", "%M").replace("ss", "%S")
+    return fmt
+
+
 # ===========================================================================
 # API 模块结构化读取（元数据唯一入口）
 #
@@ -169,36 +322,34 @@ async def format_directory(dir_path: str) -> None:
 _API_FILE_CACHE = {}
 
 
-def clear_api_file_cache():
+def clear_api_file_cache() -> None:
     """清除 API 文件解析缓存。"""
     _API_FILE_CACHE.clear()
 
 
-# 模块级赋值可携带的参数/头名称（与 API 元数据 VALUE_FIELDS 单一来源，见 api_metadata）
+# headers 字段名（用于区分合并策略：headers 仅接受 dict 整体合并，其余字段非 dict 时整体替换）
 _API_HEADER_ASSIGN = "headers"
-_API_DATA_ASSIGNS = tuple(f for f in VALUE_FIELDS if f != _API_HEADER_ASSIGN)
 _API_CURRENT_FIELDS = VALUE_FIELDS
 
 
-def _normalize_field_value(key: str, current: Any, value: Any) -> Any:
-    """当前值字段的统一规则：headers 仅接受 dict（整体合并）；params/data/files 为 dict 时合并、
-    非 dict（如 JSON 数组 body）时整体替换。返回要写入的新值。
+def _normalize_field_value(current: Any, value: Any) -> Any:
+    """当前值字段的统一规则：dict 时合并、非 dict 时整体替换。返回要写入的新值。
+
+    注意：headers 非 dict 值的过滤由调用方 _apply_current_field 提前处理，此处不再重复判断。
     """
     if isinstance(value, dict):
         base = current if isinstance(current, dict) else {}
         merged = dict(base)
         merged.update(value)
         return merged
-    if key == _API_HEADER_ASSIGN:
-        return current  # headers 忽略非 dict 值（保持现状）
-    return value  # 其余字段非 dict 整体替换
+    return value  # 非 dict 整体替换
 
 
 def _apply_current_field(result: APIFileInfo, key: str, value: Any) -> None:
     """把 headers/params/data/files 的当前值应用到解析结果（规则同 _normalize_field_value）。"""
     if key == _API_HEADER_ASSIGN and not isinstance(value, dict):
         return
-    merged = _normalize_field_value(key, getattr(result, key), value)
+    merged = _normalize_field_value(getattr(result, key), value)
     setattr(result, key, merged)
 
 
@@ -244,6 +395,32 @@ def parse_api_file(filepath: str) -> APIFileInfo:
     if isinstance(remarks, dict):
         # 历史元数据里的描述可能含换行（Swagger 多行 description），读取时统一压成单行
         result.param_remarks.update({key: sanitize_remark(value) for key, value in remarks.items()})
+    # 读取参数枚举值（param_values）
+    param_vals = metadata.get("param_values")
+    if isinstance(param_vals, dict):
+        result.param_values.update(param_vals)
+    # 读取时间参数对元数据（time_pairs）；HAR 派生元数据（har_time_pairs）只
+    # 补齐 time_pairs 中不存在的基础名（Swagger 备注提取的格式更准确，优先）
+    time_pairs_data = metadata.get("time_pairs")
+    if isinstance(time_pairs_data, dict):
+        result.time_pairs.update(time_pairs_data)
+    har_time_pairs_data = metadata.get(HAR_TIME_PAIRS_FIELD)
+    if isinstance(har_time_pairs_data, dict):
+        for base, info in har_time_pairs_data.items():
+            if base not in result.time_pairs and isinstance(info, dict):
+                result.time_pairs[base] = info
+    # 读取常量参数
+    cp = metadata.get(CONSTANT_PARAMS_FIELD)
+    if isinstance(cp, dict):
+        result.constant_params = dict(cp)
+    # 读取 HAR 参数枚举值
+    hpv = metadata.get(HAR_PARAM_VALUES_FIELD)
+    if isinstance(hpv, dict):
+        result.har_param_values.update(hpv)
+    # 读取 HAR 参数基线值
+    hp = metadata.get(HAR_PARAMS_FIELD)
+    if isinstance(hp, dict):
+        result.har_params.update(hp)
     # 当前值字段（headers/params/data/files）：仅取元数据中提供的字段
     for key in _API_CURRENT_FIELDS:
         meta_value = metadata.get(key)
@@ -289,7 +466,7 @@ def format_headers_for_python(headers: dict[str, str]) -> str:
     Returns:
         str: 格式化后的 Python 代码字符串。
     """
-    return format_params_for_python(headers, header_value_formatter, inline=False)
+    return format_params_for_python(headers, header_value_formatter)
 
 
 def format_params_for_python(
@@ -325,7 +502,8 @@ def format_params_for_python(
     if comments is None:
         comments = {}
 
-    indent_str = " " * indent
+    # inline 模式不加缩进，多行模式按 indent 参数缩进
+    indent_str = "" if inline else " " * indent
     items = []
     for key, value in params.items():
         full_key = f"{key_prefix}.{key}" if key_prefix else key
@@ -355,7 +533,7 @@ def format_params_for_python(
             items.append(f"{indent_str}{key_literal}: {formatted_value},")
 
     if inline:
-        return "{" + ", ".join(items) + "}"
+        return "{" + " ".join(items) + "}"
     # 闭合花括号需要移除一层缩进（4个空格）
     closing_brace_indent = " " * max(0, indent - 4)
     return "{\n" + "\n".join(items) + "\n" + closing_brace_indent + "}"
@@ -407,6 +585,29 @@ def sanitize_param_name(name: str) -> str:
     safe = re.sub(r"\W", "_", name)
     if keyword.iskeyword(safe):
         safe += "_"
-    if not safe or not (safe[0].isalpha() or safe[0] == "_"):
+    # 纯数字或下划线开头时加 param_ 前缀，确保为合法标识符
+    if not (safe[0].isalpha() or safe[0] == "_"):
         safe = "param_" + safe
     return safe
+
+
+def extract_service_package(api_file: str, api_dir: str) -> str | None:
+    """从 API 文件路径中提取服务包名称。
+
+    Args:
+        api_file: API 文件路径
+        api_dir: API 目录根路径
+
+    Returns:
+        相对 api_dir 的首段目录名（服务包名）；文件直接位于 api_dir 下
+        或路径无法相对化时返回 None。
+    """
+    try:
+        rel_path = os.path.relpath(api_file, api_dir)
+    except ValueError:
+        return None
+    module_path = rel_path.removesuffix(".py").replace("\\", "/")
+    parts = module_path.split("/")
+    if len(parts) > 1:
+        return parts[0]
+    return None

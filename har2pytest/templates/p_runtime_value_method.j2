@@ -1,0 +1,19 @@
+    @allure.title("{{ api_description }}: {{ title_param }} 查询")
+{{ def_prefix }}test_{{ idx }}_{{ function_name }}(self):
+{{ body_indent }}{{ param_var_name }} = {
+{% for key, value in data_items %}{{ body_indent }}    "{{ key }}": {{ value }},
+{% endfor %}{{ body_indent }}}
+{{ body_indent }}{{ with_keyword }} {{ function_name }}({{ param_var_name }}={{ param_var_name }}, headers=self.headers) as r:
+{{ body_indent }}    assert r.{{ status_attr }} == 200
+{{ body_indent }}    data = {{ json_call }}
+{{ body_indent }}    assert data["code"] == 200
+{% if search_enabled %}{{ body_indent }}    # 验证返回数据符合搜索条件（降级：若 test_0 未收集到值则跳过验证）
+{{ body_indent }}    if self.list_query_data["{{ param_name }}"]:
+{{ body_indent }}        resp_data = data.get("data")
+{{ body_indent }}        items = resp_data.get("list", []) if isinstance(resp_data, dict) else []
+{{ body_indent }}        for item in items:
+{{ body_indent }}            if isinstance(item, dict):
+{{ body_indent }}                for k, v in item.items():
+{{ body_indent }}                    if k.lower() == "{{ param_name_lower }}":
+{{ body_indent }}                        {{ verify_assert }}
+{% endif %}

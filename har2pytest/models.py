@@ -17,11 +17,13 @@ class SwaggerInfo:
         description: API 描述（通常为接口名称或详细说明）
         parameters: 参数说明字典，键为参数名（支持 dotted key），值为描述文本
         summary: API 摘要信息
+        param_defaults: 参数类型感知默认值（string→"", integer→None 等）
     """
 
     description: str = ""
     parameters: dict[str, str] = field(default_factory=dict)
     summary: str = ""
+    param_defaults: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -81,22 +83,32 @@ class APIFileInfo:
     用于测试用例生成时使用 API 文件的原始参数和备注信息。
 
     Attributes:
-        function_name: 函数名（不含下划线前缀）
+        function_name: 函数名（来自文件名去后缀，不含下划线前缀）
         description: 接口描述
         url: 接口 URL
         param_remarks: 参数备注字典（支持 dotted key）
+        param_values: 从备注中解析出的参数枚举值字典（如 {"getType": [1,2,3]}）
+        time_pairs: 时间参数对元数据（如 {"getTime": {"start": "getTimeStartTime", "end": "getTimeEndTime", "format": "yyyy-MM-dd"}}）
         headers: 请求头字典
         params: 参数值字典
         data: data 参数值
         files: files 参数值
+        constant_params: 常量参数（在超过 50% 的 HAR 请求中值都相同的参数）
+        har_param_values: HAR 参数枚举值字典（从所有 HAR 快照收集的去重值列表）
+        har_params: HAR 参数基线值字典（常量参数 + 首条请求的所有参数值）
     """
 
     function_name: str | None = None
     description: str = ""
     url: str | None = None
     param_remarks: dict[str, str] = field(default_factory=dict)
+    param_values: dict[str, list[Any]] = field(default_factory=dict)
+    time_pairs: dict[str, dict[str, str]] = field(default_factory=dict)
     headers: dict[str, str] = field(default_factory=dict)
     params: dict[str, Any] = field(default_factory=dict)
     data: Any = field(default_factory=dict)
     files: dict[str, Any] = field(default_factory=dict)
+    constant_params: dict[str, Any] = field(default_factory=dict)
+    har_param_values: dict[str, list[Any]] = field(default_factory=dict)
+    har_params: dict[str, Any] = field(default_factory=dict)
  

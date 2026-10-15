@@ -14,12 +14,14 @@ def _restore_config_env():
     """每个测试前后自动保存/恢复环境变量与配置缓存，确保测试间隔离。"""
     original_env = os.environ.get("HAR2PYTEST_CONFIG")
     original_config = APIConfig._config
+    original_warned = APIConfig._config_warned
     yield
     if original_env is not None:
         os.environ["HAR2PYTEST_CONFIG"] = original_env
     else:
         os.environ.pop("HAR2PYTEST_CONFIG", None)
     APIConfig._config = original_config
+    APIConfig._config_warned = original_warned
     APIConfig._load_config()
 
 
@@ -60,8 +62,23 @@ def test_default_config(test_config):
         "content-type": "application/json;charset=UTF-8",
     }
     assert APIConfig.REQUIRED_HEADERS() == {"authorization": "f\"token {os.environ['token']}\""}
-    # 分页参数
-    assert APIConfig.PAGINATION_PARAMS() == ["pageNum", "pageSize"]
+    # 分页参数（字典格式：参数名 -> 默认值）
+    assert APIConfig.PAGINATION_PARAMS() == {"pageNum": 1, "pageSize": 10}
+    # 分页参数包含匹配（不区分大小写）
+    assert APIConfig.is_pagination_param("pageNum") is True
+    assert APIConfig.is_pagination_param("PageSize") is True
+    assert APIConfig.is_pagination_param("currentPageNum") is True
+    assert APIConfig.is_pagination_param("keyword") is False
+    # 分页参数默认值（从 PAGINATION_PARAMS 字典读取）
+    assert APIConfig.get_pagination_default_value("pageNum") == 1
+    assert APIConfig.get_pagination_default_value("PAGENUM") == 1
+    assert APIConfig.get_pagination_default_value("pageSize") == 10
+    assert APIConfig.get_pagination_default_value("keyword") is None
+    # 时间参数
+    assert APIConfig.TIME_PARAMS() == ["starttime", "endtime"]
+    assert APIConfig.is_time_param("getTimeStartTime") is True
+    assert APIConfig.is_time_param("endTime") is True
+    assert APIConfig.is_time_param("keyword") is False
     # PATH_URLS
     assert len(APIConfig.PATH_URLS()) == 5
     assert "/mobile/dashbord/{usrId}" in APIConfig.PATH_URLS()
@@ -69,6 +86,45 @@ def test_default_config(test_config):
     assert APIConfig.LIST_QUERY_EXCLUDE_KEYWORDS() == []
     # 单接口测试模式配置（测试配置未设置，回退默认空列表）
     assert APIConfig.TESTCASE_PROFILES() == []
+
+
+@allure.feature("配置管理")
+@allure.story("分页参数格式校验")
+@allure.title("测试 PAGINATION_PARAMS 列表格式抛出 ValueError")
+@allure.description("旧版列表格式 PAGINATION_PARAMS 应直接抛出 ValueError 并提示新格式")
+def test_pagination_params_list_raises_value_error(tmp_config):
+    with pytest.raises(ValueError, match="PAGINATION_PARAMS 仅支持字典格式"):
+        tmp_config({
+            "BASE_URLS": ["https://test.example.com"],
+            "SERVICE_MAPPING": {"t": "t"},
+            "SWAGGER_DOC_URLS": {"t": "https://t.example.com/sw"},
+            "PAGINATION_PARAMS": ["pageNum", "pageSize"],  # 旧版列表格式
+        })
+        # 触发配置加载（tmp_config 仅重置缓存，不主动加载）
+        APIConfig._load_config()
+
+
+@allure.feature("配置管理")
+@allure.story("分页参数字典格式")
+@allure.title("测试 PAGINATION_PARAMS 字典格式")
+@allure.description("新版字典格式 PAGINATION_PARAMS 同时提供判定关键字与默认值")
+def test_pagination_params_dict_format(tmp_config):
+    tmp_config({
+        "BASE_URLS": ["https://test.example.com"],
+        "SERVICE_MAPPING": {"t": "t"},
+        "SWAGGER_DOC_URLS": {"t": "https://t.example.com/sw"},
+        "PAGINATION_PARAMS": {"pageNum": 1, "pageSize": 20, "pageLimit": 20},
+    })
+    # 字典键用于子串匹配
+    assert APIConfig.is_pagination_param("pageNum") is True
+    assert APIConfig.is_pagination_param("PageSize") is True
+    assert APIConfig.is_pagination_param("pageLimit") is True
+    assert APIConfig.is_pagination_param("keyword") is False
+    # 字典值作为默认值返回
+    assert APIConfig.get_pagination_default_value("pageNum") == 1
+    assert APIConfig.get_pagination_default_value("pageSize") == 20
+    assert APIConfig.get_pagination_default_value("PAGELIMIT") == 20
+    assert APIConfig.get_pagination_default_value("keyword") is None
 
 
 @allure.feature("配置管理")
@@ -165,6 +221,16 @@ def test_determine_service_package(test_config):
     assert APIConfig.determine_service_package(None) == "apis"
 
 
+@allure.feature("配置管理")
+@allure.story("服务包判断")
+@allure.title("测试配置未加载时首次调用服务包判断也能命中映射")
+def test_determine_service_package_first_call_cold_start(test_config, monkeypatch):
+    # 模拟冷启动：配置缓存与预计算映射均未初始化
+    APIConfig._config = None
+    monkeypatch.setattr(APIConfig, "_service_mapping_lower", {})
+    assert APIConfig.determine_service_package("/mobile/trade/orderCommit") == "mobile_application"
+
+
 # ==================== 配置异常分支测试 ====================
 
 
@@ -237,3 +303,76 @@ def test_warn_missing_config_when_file_absent():
     APIConfig.get_config("BASE_URLS")
 
     assert APIConfig._config_warned is True
+
+
+# ==================== 配置访问器边界测试 ====================
+
+
+@allure.feature("配置管理")
+@allure.story("配置访问器")
+@allure.title("测试 get_config 不存在的 key 返回 None")
+def test_get_config_nonexistent_key_returns_none(test_config):
+    assert APIConfig.get_config("NONEXISTENT_KEY") is None
+
+
+@allure.feature("配置管理")
+@allure.story("分页参数")
+@allure.title("测试 get_pagination_default_value 空字符串输入返回 None")
+def test_get_pagination_default_value_empty_input(test_config):
+    assert APIConfig.get_pagination_default_value("") is None
+
+
+@allure.feature("配置管理")
+@allure.story("配置加载")
+@allure.title("测试 INVALID_PARAMS 列表自动转换为集合")
+def test_invalid_params_converted_to_set(tmp_config):
+    tmp_config({
+        "BASE_URLS": ["https://test.example.com"],
+        "SERVICE_MAPPING": {"t": "t"},
+        "SWAGGER_DOC_URLS": {"t": "https://t.example.com/sw"},
+        "INVALID_PARAMS": ["sign", "token"],
+    })
+    APIConfig._load_config()
+    result = APIConfig.INVALID_PARAMS()
+    assert isinstance(result, set)
+    assert result == {"sign", "token"}
+
+
+@allure.feature("配置管理")
+@allure.story("时间参数")
+@allure.title("测试 TIME_PARAMS 为空时 is_time_param 始终返回 False")
+def test_is_time_param_empty_config(tmp_config):
+    tmp_config({
+        "BASE_URLS": ["https://test.example.com"],
+        "SERVICE_MAPPING": {"t": "t"},
+        "SWAGGER_DOC_URLS": {"t": "https://t.example.com/sw"},
+        "TIME_PARAMS": [],
+    })
+    APIConfig._load_config()
+    assert APIConfig.is_time_param("starttime") is False
+    assert APIConfig.is_time_param("anything") is False
+
+
+@allure.feature("配置管理")
+@allure.story("配置缺失警告")
+@allure.title("测试 _warn_missing_config 只警告一次（幂等性）")
+def test_warn_missing_config_only_once():
+    # 显式指向不存在的路径，确保 _warn_missing_config 被触发
+    os.environ["HAR2PYTEST_CONFIG"] = "/nonexistent/path/config.json"
+    APIConfig._config = None
+    APIConfig._config_warned = False
+
+    APIConfig.get_config("BASE_URLS")
+    assert APIConfig._config_warned is True
+
+    # 重置 _config 但保留 _config_warned = True，再次加载不应重复警告
+    APIConfig._config = None
+    APIConfig.get_config("BASE_URLS")
+    assert APIConfig._config_warned is True  # 仍然只警告一次
+
+
+@allure.feature("配置管理")
+@allure.story("服务包判断")
+@allure.title("测试 determine_service_package 根路径回退到默认 API 目录")
+def test_determine_service_package_root_path(test_config):
+    assert APIConfig.determine_service_package("/") == "apis"

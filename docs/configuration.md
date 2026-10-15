@@ -32,7 +32,7 @@
 
 | 配置项 | 类型 | 默认 | 说明 |
 |--------|------|------|------|
-| `HEADERS_TO_INCLUDE` | dict | `{}` | 需保留的请求头白名单（**空 = 不过滤，保留全部**）；只检查键名做过滤，值无实际作用 |
+| `HEADERS_TO_INCLUDE` | dict | `{}` | 需保留的请求头白名单（**空 = 只保留 content-type、content-length 和 REQUIRED_HEADERS**）；只检查键名做过滤，值无实际作用 |
 | `REQUIRED_HEADERS` | dict | 见默认 | 每个接口都会补上的默认请求头（值可为 f-string 模板） |
 
 ### 列表查询判定

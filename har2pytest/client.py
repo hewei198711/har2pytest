@@ -393,10 +393,10 @@ class AsyncResponseContext:
         final_verify = verify if verify is not None else self._client.default_verify
         final_raise = raise_for_status if raise_for_status is not None else self._client.raise_for_status
 
-        # 发起请求（aiohttp 不支持 verify=；用 ssl=True/False 控制证书校验）
+        # 发起请求（aiohttp/yarl 不接受 None 查询参数值，过滤掉以对齐 requests 行为）
         request_kwargs = {}
         if params is not None:
-            request_kwargs["params"] = params
+            request_kwargs["params"] = {k: v for k, v in params.items() if v is not None}
         if json_data is not None:
             request_kwargs["json"] = json_data
         if data is not None:

@@ -507,23 +507,41 @@ class TestFindMatchingApiFileEdge:
 
     @allure.feature("URL匹配器")
     @allure.story("查找匹配API文件-边缘")
-    @allure.title("测试API文件无URL")
-    def test_api_fileno_url(self, tmp_path):
+    @allure.title("测试API文件缺少元数据时跳过")
+    def test_api_file_no_metadata_skipped(self, tmp_path):
+        # 无 .api.json 元数据 → parse_api_file 抛 ValueError → 候选文件被跳过
         api_dir = tmp_path / "apis"
         api_dir.mkdir()
 
-        api_file = api_dir / "no_url.py"
+        api_file = api_dir / "no_meta.py"
         api_file.write_text(
-            '''def no_url(data=data, token=token):
+            '''def no_meta(data=data, token=token):
     """
-    无URL
+    无元数据
     """
-    url = None
+    url = "/api/user/info"
     headers = {}
     return client.get(url=url, headers=headers, params=data)
 ''',
             encoding="utf-8",
         )
+
+        result = URLMatcher.find_matching_api_file("/api/user/info", [str(api_file)])
+        assert result is None
+
+    @allure.feature("URL匹配器")
+    @allure.story("查找匹配API文件-边缘")
+    @allure.title("测试API文件元数据url为空时作为无效文件跳过")
+    def test_api_file_empty_url_skipped(self, tmp_path):
+        # .api.json 存在但 url 为空 → parse_api_file 抛 ValueError → 候选文件被跳过
+        # （parse_api_file 对 url 做 if not url: raise ValueError 校验）
+        api_dir = tmp_path / "apis"
+        api_dir.mkdir()
+
+        api_file = api_dir / "empty_url.py"
+        api_file.write_text("def empty_url(): pass\n", encoding="utf-8")
+        meta = {"function_name": "empty_url", "url": "", "description": "空URL", "method": "GET"}
+        (api_dir / "empty_url.api.json").write_text(json.dumps(meta), encoding="utf-8")
 
         result = URLMatcher.find_matching_api_file("/api/user/info", [str(api_file)])
         assert result is None

@@ -42,9 +42,6 @@ def test_init_default_output_dir():
     assert generator.url_matcher is not None
 
 
-# ==================== 检查 API 是否存在测试 ====================
-
-
 @allure.feature("API 生成器")
 @allure.story("初始化")
 @allure.title("测试自定义输出目录初始化")
@@ -54,10 +51,9 @@ def test_init_custom_output_dir(tmp_path):
     assert generator.output_dir == custom_dir
 
 
-@allure.feature("API 生成器")
-@allure.story("检查 API 是否存在")
+# ==================== 检查 API 是否存在测试 ====================
 @allure.title("测试 API 文件不存在")
-def test_check_api_exists_not_found(monkeypatch, tmp_path):
+def test_check_api_exists_not_found(tmp_path):
     generator = APIGenerator(output_dir=str(tmp_path))
     assert not generator.check_api_exists("/api/test_endpoint", "test_service")
 
@@ -167,7 +163,7 @@ def test_parse_request_info_file_upload(generator):
     assert result3.is_json_content is False
 
 
-# ==================== 生成导入语句测试 ====================
+# ==================== 解析请求信息测试 ====================
 
 
 @allure.feature("API 生成器")
@@ -270,7 +266,7 @@ def test_generate_params_string_list_body(generator):
 
 
 @allure.feature("API 生成器")
-@allure.story("解析请求信息")
+@allure.story("处理参数")
 @allure.title("测试 PUT 带 JSON body 时识别为 JSON 请求（回归：请求体分类仅在 POST 分支生效）")
 def test_parse_request_info_put_json_body(generator):
     request_info = ParsedRequestInfo(
@@ -288,7 +284,7 @@ def test_parse_request_info_put_json_body(generator):
 
 
 @allure.feature("API 生成器")
-@allure.story("解析请求信息")
+@allure.story("处理参数")
 @allure.title("测试非 POST 写方法 query 参数走 params（回归：DELETE/PUT query 属于 URL 语义）")
 def test_parse_request_info_delete_query_only(generator):
     request_info = ParsedRequestInfo(
@@ -307,7 +303,7 @@ def test_parse_request_info_delete_query_only(generator):
 
 
 @allure.feature("API 生成器")
-@allure.story("解析请求信息")
+@allure.story("处理参数")
 @allure.title("测试 REQUIRED_HEADERS 大小写不敏感覆盖，不产生重复头")
 def test_parse_request_info_required_headers_case_insensitive(monkeypatch):
     # 临时替换 REQUIRED_HEADERS 为测试值，避免直接访问 _config 私有属性
@@ -964,7 +960,8 @@ def test_generate_api_file_writes_sidecar(tmp_path):
 
     sidecar = filepath[: -len(".py")] + ".api.json"
     assert os.path.isfile(sidecar)
-    data = json.load(open(sidecar, encoding="utf-8"))
+    with open(sidecar, encoding="utf-8") as f:
+        data = json.load(f)
     assert data["url"] == "/api/hello"
     assert data["method"] == "GET"
     assert data["function_name"] == "api_hello"
@@ -1013,14 +1010,60 @@ def test_generate_apis_from_swagger_same_path_multi_method(tmp_path, monkeypatch
         "member_role_put.py",
     ]
     # 首个 method 用原名，内容确定（GET/POST）
-    plain = open(output_dir / "order_application" / "member_purchaseExchangeOrder_returnInfo.py", encoding="utf-8").read()
+    with open(output_dir / "order_application" / "member_purchaseExchangeOrder_returnInfo.py", encoding="utf-8") as f:
+        plain = f.read()
     assert "client.get(" in plain
-    suffixed = open(output_dir / "order_application" / "member_purchaseExchangeOrder_returnInfo_post.py", encoding="utf-8").read()
+    with open(output_dir / "order_application" / "member_purchaseExchangeOrder_returnInfo_post.py", encoding="utf-8") as f:
+        suffixed = f.read()
     assert "client.post(" in suffixed
-    put_content = open(output_dir / "order_application" / "member_role_put.py", encoding="utf-8").read()
+    with open(output_dir / "order_application" / "member_role_put.py", encoding="utf-8") as f:
+        put_content = f.read()
     assert "client.put(" in put_content
     assert any("改用方法后缀生成" in record.getMessage() for record in caplog.records)
     assert any("跳过不支持的HTTP方法: HEAD" in record.getMessage() for record in caplog.records)
+
+
+@allure.feature("API 生成器")
+@allure.story("端到端生成")
+@allure.title("测试裸类型Body参数不丢失且不误走urlencode")
+def test_generate_apis_from_swagger_bare_type_body(tmp_path, monkeypatch):
+    output_dir = tmp_path / "apis"
+    generator = APIGenerator(output_dir=str(output_dir))
+    doc = {
+        "swagger": "2.0",
+        "paths": {
+            "/mgmt/order/cancelOrder": {
+                "post": {
+                    "summary": "取消订单",
+                    "parameters": [
+                        {"name": "orderNo", "in": "body", "description": "订单号", "schema": {"type": "string"}},
+                        {"name": "remarks", "in": "query", "type": "string", "description": "备注"},
+                    ],
+                }
+            }
+        },
+    }
+
+    async def fake_get_swagger_doc(url):
+        return doc
+
+    monkeypatch.setattr(generator.swagger_handler, "get_swagger_doc", fake_get_swagger_doc)
+    files = asyncio.run(
+        generator.generate_apis_from_swagger("https://example.com/member/doc.html", force_overwrite=True, service_package="member")
+    )
+
+    assert len(files) == 1
+    filepath = files[0]
+    with open(filepath, encoding="utf-8") as f:
+        content = f.read()
+    # 裸类型 body 参数 orderNo 不得丢失，且不得误判为 urlencode
+    assert '"orderNo": ""' in content
+    assert "urlencode" not in content
+    assert "client.post(url=url, json=data" in content
+    with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
+        meta = json.load(f)
+    assert meta["data"] == {"remarks": "", "orderNo": ""}
+    assert meta["param_remarks"] == {"orderNo": "订单号", "remarks": "备注"}
 
 
 @allure.feature("API 生成器")
@@ -1039,11 +1082,180 @@ def test_generate_api_file_put_method(tmp_path):
     filepath = asyncio.run(generator.generate_api_file(request_info))
 
     assert filepath is not None
-    content = open(filepath, encoding="utf-8").read()
+    with open(filepath, encoding="utf-8") as f:
+        content = f.read()
     assert "client.put(" in content
-    data = json.load(open(filepath[: -len(".py")] + ".api.json", encoding="utf-8"))
+    with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
+        data = json.load(f)
     assert data["method"] == "PUT"
     assert data["data"] == {"name": "管理员"}
+
+
+@allure.feature("API 生成器")
+@allure.story("端到端生成")
+@allure.title("测试 HAR 场景 POST body 接口 har_params 记录 data 实际值")
+def test_generate_api_file_har_post_body_har_params(tmp_path):
+    generator = APIGenerator(output_dir=str(tmp_path / "apis"))
+    request_info = ParsedRequestInfo(
+        method="POST",
+        url="/mgmt/order/cancelOrder",
+        query_params={"remarks": "111"},
+        post_data={"orderNo": "SG002000260616000137"},
+        headers={"content-type": "application/json"},
+    )
+
+    filepath = asyncio.run(
+        generator.generate_api_file(
+            request_info,
+            constant_params={"orderNo": "SG002000260616000137"},
+        )
+    )
+
+    assert filepath is not None
+    with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
+        meta = json.load(f)
+    # POST 的实际请求参数落在 data（query 先、body 覆盖同名），har_params 应记录该基线
+    assert meta["har_params"] == {"remarks": "111", "orderNo": "SG002000260616000137"}
+
+
+@allure.feature("API 生成器")
+@allure.story("端到端生成")
+@allure.title("测试 HAR 场景 GET 接口 har_params 记录 params 实际值")
+def test_generate_api_file_har_get_har_params(tmp_path):
+    generator = APIGenerator(output_dir=str(tmp_path / "apis"))
+    request_info = ParsedRequestInfo(
+        method="GET",
+        url="/seckill/product/api/getStockInfo",
+        query_params={"serialNo": "TS001"},
+    )
+
+    filepath = asyncio.run(
+        generator.generate_api_file(
+            request_info,
+            constant_params={"serialNo": "TS001"},
+        )
+    )
+
+    assert filepath is not None
+    with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
+        meta = json.load(f)
+    assert meta["har_params"] == {"serialNo": "TS001"}
+
+
+@allure.feature("API 生成器")
+@allure.story("端到端生成")
+@allure.title("测试 HAR 场景 POST body 带路径参数时 har_params 合并两键")
+def test_generate_api_file_har_post_body_with_path_har_params(tmp_path):
+    generator = APIGenerator(output_dir=str(tmp_path / "apis"))
+    request_info = ParsedRequestInfo(
+        method="POST",
+        url="/mgmt/order/orderInfo/SG002",
+        post_data={"remarks": "111"},
+        headers={"content-type": "application/json"},
+        path_params={"orderNo": "SG002"},
+    )
+    # 自包含 swagger_info：避免依赖真实 Swagger 文档（删除后 URL 模板匹配
+    # 无法提取路径参数，导致 har_params 合并断言受环境耦合影响）
+    swagger_info = SwaggerInfo(
+        parameters={"remarks": "备注", "orderNo": "订单号"},
+        param_defaults={"remarks": "", "orderNo": ""},
+    )
+
+    filepath = asyncio.run(
+        generator.generate_api_file(
+            request_info,
+            swagger_info=swagger_info,
+            constant_params={"remarks": "111"},
+        )
+    )
+
+    assert filepath is not None
+    with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
+        meta = json.load(f)
+    # POST + 路径参数时 params（路径实际值）与 data（body 实际值）两键并存，合并收录
+    assert meta["har_params"] == {"orderNo": "SG002", "remarks": "111"}
+
+
+@allure.feature("API 生成器")
+@allure.story("端到端生成")
+@allure.title("测试 HAR 场景 har_params 补齐 har_param_values 中缺失的单参数键")
+def test_generate_api_file_har_params_backfill_missing_keys(tmp_path):
+    generator = APIGenerator(output_dir=str(tmp_path / "apis"))
+    request_info = ParsedRequestInfo(
+        method="GET",
+        url="/mgmt/order/orderList",
+        query_params={"header": "1", "pageNum": "1"},
+    )
+    swagger_info = SwaggerInfo(
+        parameters={"header": "表头", "orderNo": "订单号"},
+        param_defaults={"header": "", "orderNo": ""},
+    )
+
+    filepath = asyncio.run(
+        generator.generate_api_file(
+            request_info,
+            swagger_info=swagger_info,
+            constant_params={"header": "1"},
+            har_param_values={"orderNo": ["GH001"], "header,orderTypes": [["1", "2"]]},
+        )
+    )
+
+    assert filepath is not None
+    with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
+        meta = json.load(f)
+    # orderNo 不在首条请求基线（query_params），应补齐 ""；组合键不补
+    assert meta["har_params"] == {"header": "1", "pageNum": "1", "orderNo": ""}
+
+
+@allure.feature("API 生成器")
+@allure.story("端到端生成")
+@allure.title("测试 HAR 场景从参数基线配对时间对写入 har_time_pairs")
+def test_generate_api_file_har_time_pairs(tmp_path):
+    generator = APIGenerator(output_dir=str(tmp_path / "apis"))
+    request_info = ParsedRequestInfo(
+        method="GET",
+        url="/mgmt/order/orderList",
+        query_params={"pageNum": "1", "commitStartTime": "2026-06-01", "commitEndTime": "2026-06-30"},
+    )
+    swagger_info = SwaggerInfo(
+        parameters={"pageNum": "页码", "commitStartTime": "提交开始时间", "commitEndTime": "提交结束时间"},
+        param_defaults={"pageNum": "", "commitStartTime": "", "commitEndTime": ""},
+    )
+
+    filepath = asyncio.run(
+        generator.generate_api_file(
+            request_info,
+            swagger_info=swagger_info,
+            constant_params={"pageNum": "1"},
+        )
+    )
+
+    assert filepath is not None
+    with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
+        meta = json.load(f)
+    # 无 Swagger 备注可提取格式，默认 %Y-%m-%d；按基础名 commit 配对 start/end
+    assert meta["har_time_pairs"] == {
+        "commit": {"start": "commitStartTime", "end": "commitEndTime", "format": "%Y-%m-%d"},
+    }
+
+
+@allure.feature("API 生成器")
+@allure.story("端到端生成")
+@allure.title("测试非 HAR 场景不写 har_params 字段")
+def test_generate_api_file_non_har_no_har_params(tmp_path):
+    generator = APIGenerator(output_dir=str(tmp_path / "apis"))
+    request_info = ParsedRequestInfo(
+        method="GET",
+        url="/mgmt/order/orderList",
+        query_params={"pageNum": 1},
+    )
+
+    filepath = asyncio.run(generator.generate_api_file(request_info))
+
+    assert filepath is not None
+    with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
+        meta = json.load(f)
+    assert "har_params" not in meta
 
 
 @allure.feature("API 生成器")
@@ -1069,7 +1281,8 @@ def test_generate_apis_from_swagger_basepath_not_duplicated(tmp_path, monkeypatc
     files = asyncio.run(generator.generate_apis_from_swagger("https://example.com/member/doc.html", force_overwrite=True, service_package="member"))
 
     assert len(files) == 1
-    content = open(files[0], encoding="utf-8").read()
+    with open(files[0], encoding="utf-8") as f:
+        content = f.read()
     assert 'url = "/member/activity/ActivityWithOutEnding"' in content
     assert "/member/member/" not in content
     # 文件名同理不带重复前缀
@@ -1121,10 +1334,12 @@ def test_generate_api_file_patch_method(tmp_path):
     filepath = asyncio.run(generator.generate_api_file(request_info))
 
     assert filepath is not None
-    content = open(filepath, encoding="utf-8").read()
+    with open(filepath, encoding="utf-8") as f:
+        content = f.read()
     assert "client.patch(" in content
     assert "json=data" in content
-    meta = json.load(open(filepath[: -len(".py")] + ".api.json", encoding="utf-8"))
+    with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
+        meta = json.load(f)
     assert meta["method"] == "PATCH"
     assert meta["data"] == {"update": "value"}
 
@@ -1145,11 +1360,13 @@ def test_generate_api_file_upload_e2e(tmp_path):
     filepath = asyncio.run(generator.generate_api_file(request_info))
 
     assert filepath is not None
-    content = open(filepath, encoding="utf-8").read()
+    with open(filepath, encoding="utf-8") as f:
+        content = f.read()
     assert "build_multipart_data" in content
     assert "from har2pytest.client import client, build_multipart_data" in content
     assert "client.post(" in content
-    meta = json.load(open(filepath[: -len(".py")] + ".api.json", encoding="utf-8"))
+    with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
+        meta = json.load(f)
     assert meta["method"] == "POST"
     assert meta["files"] == {"storageType": "PublicCloud", "file": "(binary)"}
 
@@ -1170,11 +1387,13 @@ def test_generate_api_file_urlencoded_e2e(tmp_path):
     filepath = asyncio.run(generator.generate_api_file(request_info))
 
     assert filepath is not None
-    content = open(filepath, encoding="utf-8").read()
+    with open(filepath, encoding="utf-8") as f:
+        content = f.read()
     assert "from urllib.parse import urlencode" in content
     assert "data = urlencode(data)" in content
     assert "client.post(url=url, data=data, headers=headers)" in content
-    meta = json.load(open(filepath[: -len(".py")] + ".api.json", encoding="utf-8"))
+    with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
+        meta = json.load(f)
     assert meta["method"] == "POST"
     assert meta["data"] == {"key": "value"}
 
@@ -1193,3 +1412,56 @@ def test_generate_apis_from_swagger_empty_doc(tmp_path, monkeypatch):
     files = asyncio.run(generator.generate_apis_from_swagger("https://example.com/doc.html", force_overwrite=True))
 
     assert files == []
+
+
+# ==================== 静态方法与辅助函数测试 ====================
+
+
+@allure.feature("API 生成器")
+@allure.story("静态方法")
+@allure.title("测试 _build_full_path 拼接与去重逻辑")
+@pytest.mark.parametrize(
+    "path,base_path,expected",
+    [
+        ("/role", "/api", "/api/role"),
+        ("/api/role", "/api", "/api/role"),
+        ("/role", "", "/role"),
+        ("/role", "/", "/role"),
+    ],
+)
+def test_build_full_path(generator, path, base_path, expected):
+    assert APIGenerator._build_full_path(path, base_path) == expected
+
+
+@allure.feature("API 生成器")
+@allure.story("处理文件上传")
+@allure.title("测试 _handle_multipart_form 无文件上传的 multipart 表单")
+def test_handle_multipart_form(generator):
+    result = generator._handle_multipart_form()
+    content = "\n".join(result)
+    assert "data" in content
+
+
+@allure.feature("API 生成器")
+@allure.story("处理参数")
+@allure.title("测试 _module_value_snapshot 参数快照")
+def test_module_value_snapshot(generator):
+    parsed_info = ParsedRequestInfo(
+        method="GET",
+        url="/api/test",
+        query_params={"id": 1},
+        post_data={},
+        headers={"Authorization": "Bearer token"},
+    )
+    snapshot = generator._module_value_snapshot(parsed_info)
+    assert snapshot["params"] == {"id": 1}
+    assert "headers" in snapshot
+
+
+@allure.feature("API 生成器")
+@allure.story("生成函数定义")
+@allure.title("测试 _docstring_first_line 缺省返回 TODO 占位")
+def test_docstring_first_line_default(generator):
+    swagger_info = SwaggerInfo()
+    result = generator._docstring_first_line(swagger_info)
+    assert result == "TODO: 添加接口描述"

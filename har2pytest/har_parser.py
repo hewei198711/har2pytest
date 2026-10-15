@@ -69,7 +69,7 @@ class HARParser:
             with open(har_file_path, encoding="utf-8") as f:
                 har_data = json.load(f)
         except FileNotFoundError:
-            logger.info(f"HAR文件不存在: {har_file_path}")
+            logger.warning(f"HAR文件不存在: {har_file_path}")
             return []
         except json.JSONDecodeError as e:
             logger.error(f"HAR文件JSON格式错误: {str(e)}")
@@ -235,17 +235,16 @@ class HARParser:
             dict[str, str]: 过滤后的 headers 字典。
         """
         include = APIConfig.HEADERS_TO_INCLUDE()
-        if not include:
-            return headers
         # content-type/content-length 是请求体元数据，下游据此判定 json/multipart/空 body，
         # 即使未配置在白名单中也强制保留；REQUIRED_HEADERS 的键同样确保不被滤掉
         keep = {"content-type", "content-length"}
         for cfg in (include, APIConfig.REQUIRED_HEADERS()):
-            keys = cfg.keys() if isinstance(cfg, dict) else cfg
-            keep.update(k.lower() for k in keys)
+            if cfg:
+                keys = cfg.keys() if isinstance(cfg, dict) else cfg
+                keep.update(k.lower() for k in keys)
         return {k: v for k, v in headers.items() if k.lower() in keep}
 
-    def print_api_summary(self, har_file_path: str):
+    def print_api_summary(self, har_file_path: str) -> None:
         """打印 API 请求摘要信息。
 
         Args:

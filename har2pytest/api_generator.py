@@ -13,14 +13,16 @@ from .models import ParsedRequestInfo, SwaggerInfo
 from .swagger_handler import SwaggerHandler
 from .url_matcher import URLMatcher
 from .utils import (
-    format_directory as _format_directory,
-)
-from .utils import (
+    build_param_values,
+    build_time_pairs,
     format_headers_for_python,
     format_parameter_value,
     format_params_for_python,
     sanitize_remark,
     write_test_file,
+)
+from .utils import (
+    format_directory as _format_directory,
 )
 
 _BODY_METHODS = ("POST", "PUT", "PATCH", "DELETE")
@@ -75,24 +77,16 @@ class APIGenerator:
             bool: 如果 API 文件已存在返回True，否则返回False
 
         Example:
-            exists = generator.check_api_exists("/mobile/trade/orderCommit", "mall_mobile_application")
+            exists = generator.check_api_exists("/mobile/trade/order", "mall_mobile_application")
             # 如果文件存在返回True，否则返回False
         """
         function_name = function_name or URLMatcher.generate_function_name(url)
         filename = f"{function_name}.py"
-
-        # 检查根目录是否存在
-        root_filepath = os.path.join(self.output_dir, filename)
-        if os.path.exists(root_filepath):
-            return True
-
-        # 检查服务包目录是否存在
+        # 候选路径：根目录 + 服务包目录（service_package 非默认时）
+        paths = [os.path.join(self.output_dir, filename)]
         if service_package != APIConfig.DEFAULT_API_DIR():
-            package_filepath = os.path.join(self.output_dir, service_package, filename)
-            if os.path.exists(package_filepath):
-                return True
-
-        return False
+            paths.append(os.path.join(self.output_dir, service_package, filename))
+        return any(os.path.exists(p) for p in paths)
 
     def _parse_request_info(self, request_info: ParsedRequestInfo) -> ParsedRequestInfo:
         """解析请求信息"""
@@ -134,7 +128,7 @@ class APIGenerator:
                 is_file_upload = _find_file_upload_key(post_data) is not None
             elif not content_type and request_info.content_type:
                 # 没有 content-type 请求头时回退到 postData.mimeType
-                mime = (request_info.content_type or "").lower()
+                mime = request_info.content_type.lower()
                 if "application/json" in mime:
                     is_json_content = True
                 elif mime.startswith("multipart/form-data"):
@@ -185,7 +179,9 @@ class APIGenerator:
         swagger_doc: dict[str, Any] | None = None,
         function_name_suffix: str | None = None,
         service_package: str | None = None,
-    ):
+        constant_params: dict[str, Any] | None = None,
+        har_param_values: dict[str, list[Any]] | None = None,
+    ) -> str | None:
         """生成 API 文件（异步）
 
         Args:
@@ -269,6 +265,45 @@ class APIGenerator:
         if description == "TODO: 添加接口描述":
             description = ""
         current_values = self._module_value_snapshot(parsed_info)
+        param_remarks_dict = dict(meta_swagger.parameters or {})
+        param_values = build_param_values(param_remarks_dict)
+        time_pairs = build_time_pairs(param_remarks_dict)
+        # HAR 场景：params 纯粹来自 Swagger 定义（类型感知默认值），
+        # 实际请求值写入 har_params（与 Swagger 的 params 完全分离）
+        is_har = constant_params is not None
+        # HAR 实际请求参数基线：GET 的参数落在 params（query+path），
+        # POST 的落在 data（query+body），两键可能并存（如 POST body + 路径参数），
+        # 因此合并而非二选一，避免 POST 接口 har_params 恒为 null
+        har_params = None
+        har_time_pairs = None
+        if is_har:
+            har_params = {}
+            for key in ("params", "data"):
+                value = current_values.get(key)
+                if isinstance(value, dict):
+                    har_params.update(value)
+            # 补齐 har_param_values 中未出现在首条请求基线的单参数键（值为 ""），
+            # 保证键集合完整：参数化枚举覆盖的参数名可能只出现在部分请求中
+            # （如 orderNo 仅个别请求携带），缺失会让下游 list_query_data 缺键
+            # （收集期 KeyError）且方法体 params 缺参数定义（组合键不补）
+            if har_param_values:
+                for pn in har_param_values:
+                    if "," not in pn and pn not in har_params:
+                        har_params[pn] = ""
+            # HAR 场景从参数基线自行配对时间对（无 Swagger 备注可提取格式，
+            # 默认 %Y-%m-%d），写入 har_time_pairs 供测试生成动态计算时间参数
+            har_time_pairs = build_time_pairs({name: "" for name in har_params}) or None
+        # 以 param_remarks 为基准（保证所有 Swagger 定义的参数都在），
+        # 用类型感知默认值覆盖（缺失的参数字符串兜底）
+        swagger_params: dict[str, Any] = {
+            name: meta_swagger.param_defaults.get(name, "")
+            for name in param_remarks_dict
+        }
+        if not is_har:
+            # 非 HAR 场景：params 包含请求实际值（无 har_params 字段）
+            request_params = current_values.get("params") or {}
+            if isinstance(request_params, dict):
+                swagger_params.update(request_params)
         meta_file = write_api_metadata(
             filepath,
             function_name=function_name,
@@ -276,11 +311,17 @@ class APIGenerator:
             description=description,
             method=parsed_info.method or method,
             service_package=service_package,
-            param_remarks=dict(meta_swagger.parameters or {}),
-            params=current_values.get("params"),
+            param_remarks=param_remarks_dict,
+            param_values=param_values,
+            time_pairs=time_pairs,
+            params=swagger_params,
             data=current_values.get("data"),
             files=current_values.get("files"),
             headers=current_values.get("headers"),
+            constant_params=constant_params,
+            har_param_values=har_param_values,
+            har_params=har_params,
+            har_time_pairs=har_time_pairs,
         )
         if meta_file:
             logger.debug(f"已写入 API 元数据: {meta_file}")
@@ -748,7 +789,7 @@ class APIGenerator:
 
                 # 写回文件
                 with open(package_init_path, "w", encoding="utf-8") as f:
-                    _ = f.write("\n".join(content))
+                    f.write("\n".join(content))
 
                 logger.info(f"更新服务包索引文件: {package_init_path}")
             else:
@@ -759,8 +800,16 @@ class APIGenerator:
         if not os.path.exists(main_init_path):
             # 创建空白的 __init__.py 文件
             with open(main_init_path, "w", encoding="utf-8") as f:
-                _ = f.write("")
+                f.write("")
             logger.info(f"创建主目录索引文件: {main_init_path}")
+
+    @staticmethod
+    def _build_full_path(path: str, base_path: str) -> str:
+        """构建完整的 URL 路径：若 path 已包含 base_path 则原样返回，否则拼接。"""
+        base_prefix = base_path.rstrip("/") if base_path else ""
+        if base_prefix and not (path == base_prefix or path.startswith(base_prefix + "/")):
+            return base_prefix + "/" + path.lstrip("/")
+        return path
 
     def _operation_target_key(self, path: str, base_path: str, service_package: str | None = None) -> str:
         """返回该 operation 将写入的目标标识 ``服务包/函数名``（用于去重同名文件）。
@@ -773,10 +822,7 @@ class APIGenerator:
         Returns:
             str: ``<service_package>/<function_name>`` 形式的目标标识。
         """
-        full_path = path
-        base_prefix = base_path.rstrip("/") if base_path else ""
-        if base_prefix and not (path == base_prefix or path.startswith(base_prefix + "/")):
-            full_path = base_prefix + "/" + path.lstrip("/")
+        full_path = self._build_full_path(path, base_path)
         info = self.url_matcher.get_url_info(full_path)
         pattern = info["pattern"] or full_path
         pkg = service_package or APIConfig.determine_service_package(pattern)
@@ -888,13 +934,7 @@ class APIGenerator:
                 """处理单个 API 路径和方法的文件生成。"""
                 task_start = time.time()
                 try:
-                    # 构建完整的URL路径；paths 可能已包含 basePath（springfox 常见：basePath=/admin
-                    # 且键为 /admin/xxx），此时不再重复拼接
-                    full_path = path
-                    base_prefix = base_path.rstrip("/") if base_path else ""
-                    if base_prefix and not (path == base_prefix or path.startswith(base_prefix + "/")):
-                        full_path = base_prefix + "/" + path.lstrip("/")
-
+                    full_path = self._build_full_path(path, base_path)
                     logger.debug(f"  [任务开始] {method.upper()} {full_path}")
 
                     # 构建请求信息
@@ -921,12 +961,18 @@ class APIGenerator:
                     request_info.post_data = post_data
                     request_info.path_params = path_params
 
-                    # 提取 API 信息（包括描述和参数说明）
+                    # 提取 API 信息（包括描述、参数说明和类型感知默认值）。
+                    # param_defaults 与 find_api_info_in_swagger 保持同一填充顺序
+                    # （query → path → body），保证 params 字段类型感知默认值不退化
                     swagger_info = SwaggerInfo(
                         summary=method_data.get("summary", ""),
                         description=method_data.get("description", "") or method_data.get("summary", ""),
                         parameters=param_descriptions,
                     )
+                    swagger_info.param_defaults.update(query_params)
+                    swagger_info.param_defaults.update(path_params)
+                    if isinstance(post_data, dict):
+                        swagger_info.param_defaults.update(post_data)
 
                     # 判断是否需要urlencode
                     if method.upper() in _BODY_METHODS and has_query_param and not post_data and not has_body_param:

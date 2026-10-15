@@ -54,7 +54,7 @@ har2pytest testcase [har_file] --pattern <模式> [options]
 | `--mark` | `-m` | - | pytest 标记（如 `test_4291`），生成 `@pytest.mark.test_4291` |
 | `--output` | `-o` | `testcases` | 测试用例输出目录 |
 | `--api-dir` | - | `apis` | API 文件目录（用于匹配 API 文件） |
-| `--api-files` | - | `api_request.har` | batch 模式专用：API 文件目录或 HAR 文件，多个用逗号分隔 |
+| `--api-files` | - | `api_request.har` | batch 模式专用：API 文件或 HAR 文件，多个用逗号分隔 |
 | `--overwrite` | - | `False` | 强制覆盖已存在的测试用例文件 |
 | `--async` | - | `False` | 生成异步模式代码（async/await + async_client） |
 
@@ -143,8 +143,8 @@ har2pytest summary api_request.har
 ```json
 {
     "TESTCASE_PROFILES": [
-        { "url": "/mgmt/order/orderList", "mode": "list_query" },
-        { "url": "/mgmt/order/{orderNo}", "mode": "complex_scenario" },
+        { "url": "/mobile/order/List", "mode": "list_query" },
+        { "url": "/mobile/order/{orderNo}", "mode": "complex_scenario" },
         { "url": "/mall/order/*", "mode": "auto", "keywords": ["列表"], "exclude_keywords": ["详情"] }
     ]
 }
@@ -157,21 +157,26 @@ har2pytest/
 ├── har2pytest/              # 核心代码
 │   ├── __init__.py
 │   ├── __main__.py          # CLI 入口
+│   ├── allure_compat.py     # Allure 版本兼容层
 │   ├── api_generator.py     # API 文件生成 (APIGenerator)
 │   ├── api_metadata.py      # API 元数据 .api.json 读写（结构化事实源）
-│   ├── codegen.py           # Jinja2 渲染 + ast.parse 写盘前语法校验
-│   ├── templates/           # *.j2 代码生成模板
 │   ├── client.py            # HTTP 客户端 (Client, AsyncClient)
+│   ├── codegen.py           # Jinja2 渲染 + ast.parse 写盘前语法校验
 │   ├── config.py            # 配置管理 (APIConfig)
-│   ├── har_parser.py        # HAR 文件解析 (HARParser)
 │   ├── har_generator.py     # HAR → API 文件生成 (generate_api_files_from_har)
+│   ├── har_parser.py        # HAR 文件解析 (HARParser)
+│   ├── logger.py            # 日志配置
 │   ├── models.py            # 核心数据模型 (ParsedRequestInfo/SwaggerInfo/APIFileInfo)
+│   ├── param_builder.py     # 参数化条目构建（常量/分页/时间参数过滤）
+│   ├── parametrized_codegen.py # list_query 模式测试方法代码生成
 │   ├── pytest_utils.py      # pytest 工具 (retry_step 重试装饰器)
+│   ├── scenario_codegen.py  # complex_scenario 模式场景测试代码生成
 │   ├── swagger_handler.py   # Swagger 文档处理 (SwaggerHandler)
 │   ├── testcase_generator.py # 测试用例生成 (TestCaseGenerator)
+│   ├── time_pair.py         # 时间参数对处理（start/end 关联与 datetime 计算）
 │   ├── url_matcher.py       # URL 规范化与匹配 (URLMatcher)
 │   ├── utils.py             # 工具函数（parse_api_file / format_headers / deduplicate_values 等）
-│   └── logger.py            # 日志配置
+│   └── templates/           # *.j2 代码生成模板
 ├── docs/                    # 详细文档
 ├── tests/                   # 单元测试
 │   └── har2pytest_config_test.json  # 测试配置示例

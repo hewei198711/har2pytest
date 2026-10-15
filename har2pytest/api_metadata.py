@@ -23,10 +23,20 @@ from typing import Any
 
 METADATA_SUFFIX = ".api.json"
 
-_SAFE_FIELDS = ("function_name", "url", "description", "method", "service_package")
-
-# 写入/读取 API 元数据的“当前值”字段（utils 与 api_metadata 共用的单一来源）
+# 写入/读取 API 元数据的"当前值"字段（utils 与 api_metadata 共用的单一来源）
 VALUE_FIELDS = ("params", "data", "files", "headers")
+
+# HAR 分析得出的常量参数（在超过 50% 请求中值相同的参数）
+CONSTANT_PARAMS_FIELD = "constant_params"
+
+# HAR 分析得出的参数枚举值（每个参数的唯一值列表，从所有 HAR 快照收集）
+HAR_PARAM_VALUES_FIELD = "har_param_values"
+
+# HAR 分析得出的参数基线值（常量参数 + 首条请求的所有参数值）
+HAR_PARAMS_FIELD = "har_params"
+
+# HAR 分析得出的时间参数对（从 HAR 参数基线自行配对，无 Swagger 备注时格式默认 %Y-%m-%d）
+HAR_TIME_PAIRS_FIELD = "har_time_pairs"
 
 
 def metadata_path(py_filepath: str) -> str:
@@ -43,11 +53,17 @@ def write_api_metadata(
     method: str | None = None,
     service_package: str | None = None,
     param_remarks: dict[str, Any] | None = None,
+    param_values: dict[str, list[Any]] | None = None,
+    time_pairs: dict[str, dict[str, str]] | None = None,
     source: str | None = None,
     params: Any = None,
     data: Any = None,
     files: Any = None,
     headers: dict[str, Any] | None = None,
+    constant_params: dict[str, Any] | None = None,
+    har_param_values: dict[str, list[Any]] | None = None,
+    har_params: dict[str, Any] | None = None,
+    har_time_pairs: dict[str, dict[str, str]] | None = None,
 ) -> str | None:
     """为生成的 API 模块写入 API 元数据文件。
 
@@ -75,6 +91,18 @@ def write_api_metadata(
         payload[key] = value
     if param_remarks:
         payload["param_remarks"] = dict(param_remarks)
+    if param_values:
+        payload["param_values"] = dict(param_values)
+    if time_pairs:
+        payload["time_pairs"] = dict(time_pairs)
+    if constant_params:
+        payload[CONSTANT_PARAMS_FIELD] = dict(constant_params)
+    if har_param_values:
+        payload[HAR_PARAM_VALUES_FIELD] = dict(har_param_values)
+    if har_params:
+        payload[HAR_PARAMS_FIELD] = dict(har_params)
+    if har_time_pairs:
+        payload[HAR_TIME_PAIRS_FIELD] = dict(har_time_pairs)
     # 当前值字段：只跳过 None（允许空字典/空列表）
     current_values = {
         "params": params,

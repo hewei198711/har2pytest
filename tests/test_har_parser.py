@@ -39,7 +39,6 @@ def write_har(tmp_path):
 @allure.story("提取请求信息")
 @allure.title("测试从HAR文件提取请求信息")
 def test_extract_requests_from_har(write_har):
-    from har2pytest.config import APIConfig
 
     assert APIConfig._config is not None
     APIConfig._config["BASE_URLS"] = ["https://taobao.com/api"]
@@ -124,7 +123,6 @@ def test_filter_non_api_resource_type(write_har):
 @allure.story("过滤无效参数")
 @allure.title("测试过滤无效参数")
 def test_filter_invalid_params():
-    from har2pytest.config import APIConfig
 
     assert APIConfig._config is not None
     APIConfig._config["INVALID_PARAMS"] = {"sign", "timestamp"}
@@ -150,7 +148,6 @@ def test_filter_invalid_params():
 @allure.story("过滤无效参数")
 @allure.title("测试过滤JSON数组body中的无效参数")
 def test_filter_invalid_params_list():
-    from har2pytest.config import APIConfig
 
     assert APIConfig._config is not None
     APIConfig._config["INVALID_PARAMS"] = {"sign", "timestamp"}
@@ -181,7 +178,6 @@ def test_filter_invalid_params_empty_list():
 @allure.story("过滤无效参数")
 @allure.title("测试过滤混合类型列表")
 def test_filter_invalid_params_mixed_list():
-    from har2pytest.config import APIConfig
 
     assert APIConfig._config is not None
     APIConfig._config["INVALID_PARAMS"] = {"sign"}
@@ -207,7 +203,6 @@ def test_filter_invalid_params_mixed_list():
 @allure.story("过滤无效参数")
 @allure.title("测试过滤嵌套 dict 中的无效参数")
 def test_filter_invalid_params_nested_dict():
-    from har2pytest.config import APIConfig
 
     assert APIConfig._config is not None
     APIConfig._config["INVALID_PARAMS"] = {"sign", "token"}
@@ -261,7 +256,6 @@ def test_invalid_json(tmp_path):
 @allure.story("过滤Headers")
 @allure.title("测试过滤Headers功能")
 def test_filter_headers():
-    from har2pytest.config import APIConfig
 
     assert APIConfig._config is not None
     APIConfig._config["HEADERS_TO_INCLUDE"] = {"content-type": "", "authorization": ""}
@@ -287,9 +281,8 @@ def test_filter_headers():
 
 @allure.feature("HAR解析器")
 @allure.story("过滤Headers-无配置")
-@allure.title("测试没有配置HEADERS_TO_INCLUDE时返回所有headers")
+@allure.title("测试没有配置HEADERS_TO_INCLUDE时仍保留必需头")
 def test_filter_headers_no_config():
-    from har2pytest.config import APIConfig
 
     assert APIConfig._config is not None
     APIConfig._config["HEADERS_TO_INCLUDE"] = {}
@@ -297,14 +290,14 @@ def test_filter_headers_no_config():
 
     test_headers = {"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"}
     result = parser._filter_headers(test_headers)
-    assert result == test_headers
+    # 即使 HEADERS_TO_INCLUDE 为空，仍保留 content-type/content-length 和 REQUIRED_HEADERS
+    assert result == {"Content-Type": "application/json"}
 
 
 @allure.feature("HAR解析器")
 @allure.story("过滤Headers")
 @allure.title("测试 REQUIRED_HEADERS 大小写不敏感(必需头不被误滤)")
 def test_filter_headers_required_case_insensitive():
-    from har2pytest.config import APIConfig
 
     assert APIConfig._config is not None
     APIConfig._config["HEADERS_TO_INCLUDE"] = {"channel": ""}
@@ -679,7 +672,6 @@ def test_print_api_summary_statistics(write_har, caplog):
 @allure.story("queryString解析")
 @allure.title("测试 queryString 解析并过滤无效参数")
 def test_query_string_parsing_and_filtering(write_har):
-    from har2pytest.config import APIConfig
 
     assert APIConfig._config is not None
     APIConfig._config["INVALID_PARAMS"] = {"sign"}
@@ -706,3 +698,45 @@ def test_query_string_parsing_and_filtering(write_har):
     assert len(requests) == 1
     assert requests[0].query_params == {"keyword": "测试", "page": "1"}
     assert "sign" not in requests[0].query_params
+
+
+@allure.feature("HAR解析器")
+@allure.story("JSON解析工具")
+@allure.title("测试 _try_json_loads 有效JSON/无效JSON/空字符串")
+def test_try_json_loads_various_inputs():
+    parser = HARParser()
+    # 有效 JSON → 解析为 Python 对象
+    assert parser._try_json_loads('{"a": 1}') == {"a": 1}
+    assert parser._try_json_loads('[1, 2]') == [1, 2]
+    # 无效 JSON → 原样返回文本
+    assert parser._try_json_loads("not json") == "not json"
+    # 空字符串 → 无效 JSON，原样返回
+    assert parser._try_json_loads("") == ""
+
+
+@allure.feature("HAR解析器")
+@allure.story("键值对转换")
+@allure.title("测试 _name_value_to_dict 空值与重复 name 覆盖")
+def test_name_value_to_dict_edge_cases():
+    # 空值保留为空字符串
+    result = HARParser._name_value_to_dict([{"name": "key", "value": ""}])
+    assert result == {"key": ""}
+    # 重复 name：后值覆盖前值
+    result = HARParser._name_value_to_dict([
+        {"name": "a", "value": "1"},
+        {"name": "a", "value": "2"},
+    ])
+    assert result == {"a": "2"}
+    # 空列表返回空字典
+    assert HARParser._name_value_to_dict([]) == {}
+
+
+@allure.feature("HAR解析器")
+@allure.story("HAR文件加载")
+@allure.title("测试 HAR 文件缺少 log 键时返回空列表")
+def test_load_entries_missing_log_key(tmp_path):
+    har_path = tmp_path / "no_log.har"
+    har_path.write_text(json.dumps({"other": "data"}), encoding="utf-8")
+    parser = HARParser()
+    requests = parser.extract_requests_from_har(str(har_path))
+    assert len(requests) == 0

@@ -118,7 +118,7 @@ flowchart TD
 
 | in 值 | 参数类型 | 存储位置 | 生成示例 |
 |-------|---------|---------|---------|
-| `query` | 查询参数 | `query_params` | `pageNum: 0, pageSize: 0` |
+| `query` | 查询参数 | `query_params` | `pageNum: None, pageSize: None`（分页参数由配置提供默认值） |
 | `path` | 路径参数 | `path_params` | `id: ""` → URL 模板 `{params['id']}` |
 | `body` | 请求体 | `post_data` | `{"keyword": "", "pageNum": 0}` |
 | `formData` | 表单参数 | 不提取 | 代码静默忽略 |
@@ -131,11 +131,11 @@ flowchart TD
 ```python
 类型映射:
     string  → ""
-    integer → 0
-    int     → 0
-    number  → 0.0
-    float   → 0.0
-    boolean → False
+    integer → None（分页参数由配置提供默认值，如 pageNum=1、pageSize=10）
+    int     → None（同上）
+    number  → None
+    float   → None
+    boolean → None
     array   → []
     object  → {}
 ```
@@ -186,8 +186,8 @@ flowchart TD
 ```python
 post_data = {
     "keyword": "",
-    "pageNum": 0,
-    "pageSize": 0,
+    "pageNum": None,
+    "pageSize": None,
     "statusList": [],
 }
 ```
@@ -257,7 +257,7 @@ post_data = {
     "items": [
         {
             "skuId": "",
-            "quantity": 0
+            "quantity": None
         }
     ]
 }

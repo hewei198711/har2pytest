@@ -1,5 +1,6 @@
 """测试 har2pytest.__main__ 模块中 CLI 命令分发、参数校验与各处理函数的功能与边界。"""
 
+import json
 import logging
 import sys
 from types import SimpleNamespace
@@ -181,6 +182,34 @@ async def test_handle_testcase_batch_missing_api_files(caplog):
     assert "必须指定 --api-files 参数" in caplog.text
 
 
+@allure.feature("CLI入口")
+@allure.story("testcase参数校验")
+@allure.title("测试list_query模式har_file为空时拒绝执行")
+async def test_handle_testcase_list_query_empty_har(caplog):
+    caplog.set_level(logging.ERROR, logger="har2pytest")
+
+    result = await main_module.handle_testcase(_tc_args(pattern="list_query", har_file="", url="/api/test"))
+
+    assert result is None
+    assert "必须指定 HAR 文件" in caplog.text
+
+
+@allure.feature("CLI入口")
+@allure.story("testcase参数校验")
+@allure.title("测试batch模式空HAR文件导致无有效API文件时拒绝执行")
+async def test_handle_testcase_batch_empty_har_no_valid_files(tmp_path, caplog):
+    caplog.set_level(logging.ERROR, logger="har2pytest")
+    empty_har = tmp_path / "empty.har"
+    empty_har.write_text(json.dumps({"log": {"entries": []}}), encoding="utf-8")
+
+    result = await main_module.handle_testcase(
+        _tc_args(pattern="batch", api_files=str(empty_har))
+    )
+
+    assert result is None
+    assert "没有找到有效的 API 文件" in caplog.text
+
+
 # ==================== handle_testcase 成功场景测试 ====================
 
 
@@ -315,6 +344,25 @@ async def test_handle_api(monkeypatch, tmp_path):
 
 @allure.feature("CLI入口")
 @allure.story("命令处理函数")
+@allure.title("测试handle_api未生成文件时不生成索引")
+async def test_handle_api_no_files(monkeypatch, tmp_path):
+    api_generator = MagicMock()
+    api_generator.swagger_handler.close = AsyncMock()
+    monkeypatch.setattr(main_module, "APIGenerator", MagicMock(return_value=api_generator))
+    monkeypatch.setattr(
+        main_module,
+        "generate_api_files_from_har",
+        AsyncMock(return_value=[]),
+    )
+
+    args = SimpleNamespace(har_file="test.har", output=str(tmp_path / "apis"), overwrite=False)
+    await main_module.handle_api(args)
+
+    api_generator.generate_index_file.assert_not_called()
+
+
+@allure.feature("CLI入口")
+@allure.story("命令处理函数")
 @allure.title("测试handle_summary打印HAR摘要")
 def test_handle_summary(monkeypatch):
     parser_instance = MagicMock()
@@ -328,44 +376,33 @@ def test_handle_summary(monkeypatch):
 
 @allure.feature("CLI入口")
 @allure.story("命令处理函数")
-@allure.title("测试handle_swagger生成API文件")
-async def test_handle_swagger(monkeypatch, tmp_path):
+@allure.title("测试handle_swagger生成API文件及索引条件")
+@pytest.mark.parametrize(
+    "generated,overwrite,path,expect_index",
+    [
+        ([], True, None, False),
+        (["apis/swagger_api.py"], False, "/pet/{petId}", True),
+    ],
+    ids=["no_files_no_index", "with_files_with_index"],
+)
+async def test_handle_swagger(monkeypatch, tmp_path, generated, overwrite, path, expect_index):
     api_generator = MagicMock()
     api_generator.swagger_handler.close = AsyncMock()
-    api_generator.generate_apis_from_swagger = AsyncMock(return_value=[])
+    api_generator.generate_apis_from_swagger = AsyncMock(return_value=generated)
     monkeypatch.setattr(main_module, "APIGenerator", MagicMock(return_value=api_generator))
 
     args = SimpleNamespace(
         swagger_url="https://example.com/api-docs",
         output=str(tmp_path / "apis"),
-        overwrite=True,
-        path=None,
-    )
-    await main_module.handle_swagger(args)
-
-    api_generator.generate_apis_from_swagger.assert_awaited_once_with("https://example.com/api-docs", True, None)
-    # 未生成文件时不生成索引
-    api_generator.generate_index_file.assert_not_called()
-
-
-@allure.feature("CLI入口")
-@allure.story("命令处理函数")
-@allure.title("测试handle_swagger生成文件后生成索引")
-async def test_handle_swagger_with_files(monkeypatch, tmp_path):
-    api_generator = MagicMock()
-    api_generator.swagger_handler.close = AsyncMock()
-    api_generator.generate_apis_from_swagger = AsyncMock(return_value=["apis/swagger_api.py"])
-    monkeypatch.setattr(main_module, "APIGenerator", MagicMock(return_value=api_generator))
-
-    args = SimpleNamespace(
-        swagger_url="https://example.com/api-docs",
-        output=str(tmp_path / "apis"),
-        overwrite=False,
-        path="/pet/{petId}",
+        overwrite=overwrite,
+        path=path,
     )
     await main_module.handle_swagger(args)
 
     api_generator.generate_apis_from_swagger.assert_awaited_once_with(
-        "https://example.com/api-docs", False, "/pet/{petId}"
+        "https://example.com/api-docs", overwrite, path
     )
-    api_generator.generate_index_file.assert_called_once_with(["apis/swagger_api.py"])
+    if expect_index:
+        api_generator.generate_index_file.assert_called_once_with(generated)
+    else:
+        api_generator.generate_index_file.assert_not_called()

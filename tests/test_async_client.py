@@ -47,6 +47,7 @@ def async_client_with_mock(mock_session, mock_response):
 # ==================== 初始化测试 ====================
 
 
+@allure.feature("异步客户端")
 @allure.story("初始化")
 @allure.title("测试 AsyncClient 初始化")
 def test_async_client_init():
@@ -60,58 +61,18 @@ def test_async_client_init():
 
 
 @allure.feature("异步客户端")
-@allure.story("GET请求")
-@allure.title("测试 AsyncClient.get 返回 AsyncResponseContext")
-def test_async_client_get_returns_context():
+@allure.story("HTTP方法上下文创建")
+@allure.title("测试各 HTTP 方法返回 AsyncResponseContext 并携带正确方法和 URL")
+@pytest.mark.parametrize(
+    "method_func,url,expected_method",
+    [("get", "/api/test", "GET"), ("post", "/api/test", "POST"), ("put", "/api/test", "PUT"), ("delete", "/api/resource/1", "DELETE"), ("patch", "/api/resource/1", "PATCH")],
+)
+def test_async_client_http_methods_return_context(method_func, url, expected_method):
     client = AsyncClient(base_url="https://example.com")
-    ctx = client.get("/api/test", params={"key": "value"})
+    ctx = getattr(client, method_func)(url)
     assert isinstance(ctx, AsyncResponseContext)
-    assert ctx._method == "GET"
-    assert ctx._url == "/api/test"
-
-
-@allure.feature("异步客户端")
-@allure.story("POST请求")
-@allure.title("测试 AsyncClient.post 返回 AsyncResponseContext")
-def test_async_client_post_returns_context():
-    client = AsyncClient(base_url="https://example.com")
-    ctx = client.post("/api/test", json={"key": "value"})
-    assert isinstance(ctx, AsyncResponseContext)
-    assert ctx._method == "POST"
-    assert ctx._url == "/api/test"
-
-
-@allure.feature("异步客户端")
-@allure.story("PUT请求")
-@allure.title("测试 AsyncClient.put 返回 AsyncResponseContext")
-def test_async_client_put_returns_context():
-    client = AsyncClient(base_url="https://example.com")
-    ctx = client.put("/api/test", json={"key": "value"})
-    assert isinstance(ctx, AsyncResponseContext)
-    assert ctx._method == "PUT"
-    assert ctx._url == "/api/test"
-
-
-@allure.feature("异步客户端")
-@allure.story("DELETE请求")
-@allure.title("测试 AsyncClient.delete 返回 AsyncResponseContext")
-def test_async_client_delete_returns_context():
-    client = AsyncClient(base_url="https://example.com")
-    ctx = client.delete("/api/resource/1")
-    assert isinstance(ctx, AsyncResponseContext)
-    assert ctx._method == "DELETE"
-    assert ctx._url == "/api/resource/1"
-
-
-@allure.feature("异步客户端")
-@allure.story("PATCH请求")
-@allure.title("测试 AsyncClient.patch 返回 AsyncResponseContext")
-def test_async_client_patch_returns_context():
-    client = AsyncClient(base_url="https://example.com")
-    ctx = client.patch("/api/resource/1", json={"name": "updated"})
-    assert isinstance(ctx, AsyncResponseContext)
-    assert ctx._method == "PATCH"
-    assert ctx._url == "/api/resource/1"
+    assert ctx._method == expected_method
+    assert ctx._url == url
 
 
 # ==================== 请求执行测试 ====================
@@ -188,21 +149,16 @@ async def test_async_response_context_assertion_failure_attaches_allure(async_cl
 @allure.feature("异步客户端")
 @allure.story("Allure 数据附加")
 @allure.title("测试 DEBUG 级别下断言成功时也附加 Allure 数据")
-async def test_async_response_context_success_attaches_allure_when_debug(async_client_with_mock):
+async def test_async_response_context_success_attaches_allure_when_debug(async_client_with_mock, caplog):
     ac, mock_resp = async_client_with_mock
 
-    # 设置 logger 为 DEBUG 级别以触发 Allure 附件
-    original_level = logger.level
-    logger.setLevel(logging.DEBUG)
-    try:
+    with caplog.at_level(logging.DEBUG, logger="har2pytest"):
         with patch("har2pytest.client.allure.attach") as mock_attach:
             async with ac.get("/api/test") as r:
                 assert r.status == 200
 
             # DEBUG 级别下，断言成功时也会附加 Allure 数据
             assert mock_attach.call_count >= 1
-    finally:
-        logger.setLevel(original_level)
 
 
 # ==================== Session 管理测试 ====================
@@ -427,3 +383,48 @@ async def test_async_response_context_per_request_raise_for_status(async_client_
         await ctx.__aenter__()
 
     mock_resp.release.assert_called_once()
+
+
+# ==================== 默认值与边界场景测试 ====================
+
+
+@allure.feature("异步客户端")
+@allure.story("初始化")
+@allure.title("测试 AsyncClient 默认参数值")
+def test_async_client_init_defaults():
+    client = AsyncClient()
+    assert client.base_url == ""
+    assert client.default_timeout == 30
+    assert client.raise_for_status is False
+    assert client.default_verify is False
+
+
+@allure.feature("异步客户端")
+@allure.story("响应体解析")
+@allure.title("测试 _parse_response_body 未知 Content-Type 回退文本读取")
+async def test_parse_response_body_unknown_content_type():
+    mock_resp = AsyncMock()
+    mock_resp.headers = {"Content-Type": "text/plain"}
+    mock_resp.text = AsyncMock(return_value="plain text response")
+
+    client = AsyncClient(base_url="https://example.com")
+    ctx = client.get("/api/test")
+
+    result = await ctx._parse_response_body(mock_resp)
+    assert result == "plain text response"
+
+
+@allure.feature("异步客户端")
+@allure.story("响应体解析")
+@allure.title("测试 _parse_response_body 所有读取方式均失败时返回兜底文本")
+async def test_parse_response_body_all_methods_fail():
+    mock_resp = AsyncMock()
+    mock_resp.headers = {"Content-Type": "application/json"}
+    mock_resp.json = AsyncMock(side_effect=Exception("json error"))
+    mock_resp.text = AsyncMock(side_effect=Exception("text error"))
+
+    client = AsyncClient(base_url="https://example.com")
+    ctx = client.get("/api/test")
+
+    result = await ctx._parse_response_body(mock_resp)
+    assert result == "[无法读取响应体]"

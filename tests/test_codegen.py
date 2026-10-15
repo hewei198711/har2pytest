@@ -1,5 +1,7 @@
 """测试 har2pytest.codegen 模块中 Jinja2 模板渲染与写盘前语法校验的功能与边界。"""
 
+from unittest.mock import patch
+
 import allure
 import pytest
 from jinja2 import TemplateNotFound, UndefinedError
@@ -48,8 +50,6 @@ def test_render_lines_splits_and_strips_trailing_newline():
 @allure.story("行列表渲染")
 @allure.title("测试 render_lines 空模板返回空列表")
 def test_render_lines_empty_template():
-    from unittest.mock import patch
-
     with patch("har2pytest.codegen.render", return_value=""):
         assert render_lines("any.j2") == []
 
@@ -66,7 +66,7 @@ def test_render_lines_assertions_template():
         "p_test_method_assertions.j2",
         async_mode=False,
         function_name="list_page",
-        param_var="params",
+        param_var_name="params",
         search_enabled=False,
         search_param="",
         search_var="",
@@ -89,18 +89,17 @@ def test_validate_python_valid():
 
 @allure.feature("代码生成")
 @allure.story("语法校验")
-@allure.title("测试 validate_python 校验非法 Python 抛出 ValueError")
-def test_validate_python_invalid_raises():
-    with pytest.raises(ValueError):
-        validate_python("def f(:\n", label="bad")
-
-
-@allure.feature("代码生成")
-@allure.story("语法校验")
-@allure.title("测试 validate_python 自定义 label 出现在错误信息中")
-def test_validate_python_label_in_error():
-    with pytest.raises(ValueError, match="my_module"):
-        validate_python("def f(:\n", label="my_module")
+@pytest.mark.parametrize(
+    "label,match_text",
+    [
+        ("bad", "bad"),
+        ("my_module", "my_module"),
+    ],
+)
+@allure.title("测试 validate_python 校验非法 Python 抛出 ValueError 且 label 出现在错误信息中")
+def test_validate_python_invalid_raises(label, match_text):
+    with pytest.raises(ValueError, match=match_text):
+        validate_python("def f(:\n", label=label)
 
 
 @allure.feature("代码生成")
@@ -111,3 +110,26 @@ def test_validate_python_exception_chain():
         validate_python("def f(:\n")
     assert exc_info.value.__cause__ is not None
     assert isinstance(exc_info.value.__cause__, SyntaxError)
+
+
+@allure.feature("代码生成")
+@allure.story("语法校验")
+@allure.title("测试 validate_python 默认 label 出现在错误信息中")
+def test_validate_python_default_label_in_error():
+    with pytest.raises(ValueError, match="generated code"):
+        validate_python("def f(:\n")
+
+
+@allure.feature("代码生成")
+@allure.story("语法校验")
+@allure.title("测试 validate_python 空字符串为合法 Python")
+def test_validate_python_empty_string():
+    validate_python("")
+
+
+@allure.feature("代码生成")
+@allure.story("行列表渲染")
+@allure.title("测试 render_lines 多行内容含内部空行")
+def test_render_lines_multiline_with_internal_blank():
+    with patch("har2pytest.codegen.render", return_value="line1\n\nline2\n"):
+        assert render_lines("any.j2") == ["line1", "", "line2"]

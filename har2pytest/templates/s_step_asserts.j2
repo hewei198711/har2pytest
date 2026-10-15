@@ -1,5 +1,4 @@
                 assert {{ status_attr }} == 200
                 data = {{ json_call }}
                 assert data['code'] == 200
-                test_data['{{ data_key }}'] = data['data']
 

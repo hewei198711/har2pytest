@@ -86,7 +86,7 @@ KILL_URLS = [
 #### Step 4: 过滤 Headers
 
 仅保留配置 `HEADERS_TO_INCLUDE` 中定义的 headers 和以下必要的 headers。
-**当 `HEADERS_TO_INCLUDE` 为空时（默认值即空 `{}`），不做过滤，保留全部 headers**：
+**当 `HEADERS_TO_INCLUDE` 为空时（默认值即空 `{}`），只保留 content-type、content-length 和 REQUIRED_HEADERS**：
 
 | Header | 说明 |
 |--------|------|

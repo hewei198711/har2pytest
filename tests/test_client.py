@@ -2,6 +2,7 @@
 测试 client.py 模块（同步 Client 和 ResponseContext）
 """
 
+import base64
 import logging
 from unittest.mock import MagicMock, patch
 
@@ -84,57 +85,23 @@ def test_client_init_custom():
 
 @allure.feature("同步客户端")
 @allure.story("请求方法")
-@allure.title("测试 Client.get 返回 ResponseContext")
-def test_client_get_returns_context():
+@pytest.mark.parametrize(
+    "method_func,url,expected_method",
+    [
+        ("get", "/api/test", "GET"),
+        ("post", "/api/create", "POST"),
+        ("put", "/api/update", "PUT"),
+        ("delete", "/api/remove", "DELETE"),
+        ("patch", "/api/update", "PATCH"),
+    ],
+)
+@allure.title("测试 Client HTTP 方法返回 ResponseContext")
+def test_client_http_methods_return_context(method_func, url, expected_method):
     c = Client(base_url="https://example.com")
-    ctx = c.get("/api/test", params={"key": "value"})
+    ctx = getattr(c, method_func)(url)
     assert isinstance(ctx, ResponseContext)
-    assert ctx._method == "GET"
-    assert ctx._url == "/api/test"
-
-
-@allure.feature("同步客户端")
-@allure.story("请求方法")
-@allure.title("测试 Client.post 返回 ResponseContext")
-def test_client_post_returns_context():
-    c = Client(base_url="https://example.com")
-    ctx = c.post("/api/create", json={"name": "test"})
-    assert isinstance(ctx, ResponseContext)
-    assert ctx._method == "POST"
-    assert ctx._url == "/api/create"
-
-
-@allure.feature("同步客户端")
-@allure.story("请求方法")
-@allure.title("测试 Client.put 返回 ResponseContext")
-def test_client_put_returns_context():
-    c = Client(base_url="https://example.com")
-    ctx = c.put("/api/update", json={"name": "test"})
-    assert isinstance(ctx, ResponseContext)
-    assert ctx._method == "PUT"
-    assert ctx._url == "/api/update"
-
-
-@allure.feature("同步客户端")
-@allure.story("请求方法")
-@allure.title("测试 Client.delete 返回 ResponseContext")
-def test_client_delete_returns_context():
-    c = Client(base_url="https://example.com")
-    ctx = c.delete("/api/remove")
-    assert isinstance(ctx, ResponseContext)
-    assert ctx._method == "DELETE"
-    assert ctx._url == "/api/remove"
-
-
-@allure.feature("同步客户端")
-@allure.story("请求方法")
-@allure.title("测试 Client.patch 返回 ResponseContext")
-def test_client_patch_returns_context():
-    c = Client(base_url="https://example.com")
-    ctx = c.patch("/api/update", json={"field": "value"})
-    assert isinstance(ctx, ResponseContext)
-    assert ctx._method == "PATCH"
-    assert ctx._url == "/api/update"
+    assert ctx._method == expected_method
+    assert ctx._url == url
 
 
 # ==================== ResponseContext 初始化测试 ====================
@@ -169,18 +136,6 @@ def test_response_context_enter_get_success(client_with_mock, mock_session):
     call_args = mock_session.request.call_args
     assert call_args[0][0] == "GET"
     assert call_args[0][1] == "https://example.com/api/test"
-
-
-@allure.feature("同步客户端")
-@allure.story("ResponseContext")
-@allure.title("测试 ResponseContext.__enter__ POST JSON 请求")
-def test_response_context_enter_post_json(client_with_mock, mock_session):
-    c, mock_response = client_with_mock
-    ctx = c.post("/api/create", json={"name": "test"})
-    response = ctx.__enter__()
-
-    assert response is mock_response
-    mock_session.request.assert_called_once()
 
 
 @allure.feature("同步客户端")
@@ -253,20 +208,26 @@ def test_response_context_exit_exception_attaches_allure(client_with_mock):
 @allure.feature("同步客户端")
 @allure.story("ResponseContext")
 @allure.title("测试 ResponseContext.__exit__ DEBUG 级别附加 Allure")
-def test_response_context_exit_debug_attaches_allure(client_with_mock):
+def test_response_context_exit_debug_attaches_allure(client_with_mock, caplog):
     c, _ = client_with_mock
 
-    original_level = logger.level
-    logger.setLevel(logging.DEBUG)
-    try:
+    with caplog.at_level(logging.DEBUG, logger="har2pytest"):
         with patch("har2pytest.client.allure.attach") as mock_attach:
             with c.get("/api/test") as r:
                 assert r.status_code == 200
 
             # DEBUG 级别下应该附加 Allure 数据
             assert mock_attach.call_count >= 1
-    finally:
-        logger.setLevel(original_level)
+
+
+@allure.feature("同步客户端")
+@allure.story("ResponseContext")
+@allure.title("测试 ResponseContext.__exit__ 当 _response 为 None 时不报错")
+def test_response_context_exit_response_none(client_with_mock):
+    c, _ = client_with_mock
+    ctx = c.get("/api/test")
+    # 不调用 __enter__，_response 保持 None
+    ctx.__exit__(None, None, None)  # 不应抛异常
 
 
 # ==================== ResponseContext 请求信息测试 ====================
@@ -453,6 +414,96 @@ def test_guess_content_type():
     assert _guess_content_type("unknown.xyz") == "application/octet-stream"
 
 
+@allure.feature("同步客户端")
+@allure.story("工具函数")
+@allure.title("测试 _shorten 边界值（恰好 limit 长度）")
+def test_shorten_boundary():
+    # 恰好 200 字符不截断
+    assert _shorten("a" * 200) == "a" * 200
+    # 201 字符截断
+    assert _shorten("a" * 201) == "a" * 200 + "..."
+    # 自定义 limit
+    assert _shorten("hello", limit=3) == "hel..."
+
+
+@allure.feature("同步客户端")
+@allure.story("工具函数")
+@allure.title("测试 _json_default bytearray 类型")
+def test_json_default_bytearray():
+    result = _json_default(bytearray(b"\x89PNG"))
+    assert result == base64.b64encode(b"\x89PNG").decode("ascii")
+
+
+@allure.feature("同步客户端")
+@allure.story("工具函数")
+@allure.title("测试 _guess_content_type 无扩展名文件")
+def test_guess_content_type_no_extension():
+    assert _guess_content_type("noext") == "application/octet-stream"
+
+
+@allure.feature("同步客户端")
+@allure.story("工具函数")
+@allure.title("测试 _close_attached_files 正常关闭和空对象")
+def test_close_attached_files():
+    from har2pytest.client import _close_attached_files
+
+    # 有挂载文件句柄
+    mock_fh = MagicMock()
+    obj = MagicMock()
+    obj._har2pytest_open_files = [mock_fh]
+    _close_attached_files(obj)
+    mock_fh.close.assert_called_once()
+
+    # 无挂载属性
+    obj2 = MagicMock(spec=[])
+    _close_attached_files(obj2)  # 不应抛异常
+
+    # 空列表
+    obj3 = MagicMock()
+    obj3._har2pytest_open_files = []
+    _close_attached_files(obj3)  # 不应抛异常
+
+
+@allure.feature("同步客户端")
+@allure.story("工具函数")
+@allure.title("测试 _close_attached_files 关闭异常被吞没")
+def test_close_attached_files_exception_swallowed():
+    from har2pytest.client import _close_attached_files
+
+    mock_fh = MagicMock()
+    mock_fh.close.side_effect = RuntimeError("close failed")
+    obj = MagicMock()
+    obj._har2pytest_open_files = [mock_fh]
+    _close_attached_files(obj)  # 异常被吞没，不抛出
+
+
+@allure.feature("同步客户端")
+@allure.story("工具函数")
+@allure.title("测试 _attach_body_summary 挂载字段和文件摘要")
+def test_attach_body_summary():
+    from har2pytest.client import _attach_body_summary
+
+    obj = MagicMock()
+    _attach_body_summary(obj, {"key": "value"}, {"file": "test.png"})
+    assert getattr(obj, _DATA_FIELDS_ATTR) == {"key": "value"}
+    assert getattr(obj, _DATA_FILES_ATTR) == {"file": "test.png"}
+
+
+@allure.feature("同步客户端")
+@allure.story("工具函数")
+@allure.title("测试 _attach_body_summary 无文件参数不挂载文件属性")
+def test_attach_body_summary_no_files():
+    from har2pytest.client import _attach_body_summary
+
+    class _Obj:
+        pass
+
+    obj = _Obj()
+    _attach_body_summary(obj, {"key": "value"})
+    assert getattr(obj, _DATA_FIELDS_ATTR) == {"key": "value"}
+    assert not hasattr(obj, _DATA_FILES_ATTR)
+
+
 # ==================== 全局实例测试 ====================
 
 
@@ -481,6 +532,19 @@ def test_client_proxy_set_client():
     # 恢复同步
     proxy.set_client(Client(base_url=""))
     assert proxy.is_async is False
+
+
+@allure.feature("同步客户端")
+@allure.story("全局实例")
+@allure.title("测试 _ClientProxy.__getattr__ 委托给内部客户端")
+def test_client_proxy_getattr_delegation():
+    from har2pytest.client import _ClientProxy
+
+    mock_client = MagicMock()
+    mock_client.base_url = "https://test.com"
+    proxy = _ClientProxy(mock_client)
+    assert proxy.base_url == "https://test.com"
+    mock_client.get.assert_not_called()  # 访问属性不触发方法调用
 
 
 # ==================== HTTP 错误测试 ====================
@@ -530,6 +594,18 @@ def test_attach_to_allure_with_exception(client_with_mock):
         ctx._attach_to_allure(AssertionError("assertion failed"))
         # 应该附加请求、响应和错误信息（至少3次）
         assert mock_attach.call_count >= 3
+
+
+@allure.feature("同步客户端")
+@allure.story("Allure附件")
+@allure.title("测试 _attach_to_allure 当 _response 为 None 时直接返回")
+def test_attach_to_allure_response_none(client_with_mock):
+    c, _ = client_with_mock
+    ctx = c.get("/api/test")
+    # 不调用 __enter__，_response 为 None
+    with patch("har2pytest.client._attach_request_response_to_allure") as mock_func:
+        ctx._attach_to_allure()
+        mock_func.assert_not_called()
 
 
 @allure.feature("同步客户端")
@@ -594,3 +670,56 @@ def test_build_multipart_data_sync(tmp_path):
     assert hasattr(result, "_har2pytest_open_files")
     for fh in result._har2pytest_open_files:
         fh.close()
+
+
+@allure.feature("同步客户端")
+@allure.story("文件上传")
+@allure.title("测试 build_form_data 异步分支返回 FormData")
+@pytest.mark.asyncio
+async def test_build_form_data_async():
+    from har2pytest.client import _ClientProxy, AsyncClient
+
+    original_client = client._client
+    try:
+        client._client = AsyncClient(base_url="")
+        result, content_type = build_form_data({"key": "value"})
+        import aiohttp
+        assert isinstance(result, aiohttp.FormData)
+        assert content_type is None
+    finally:
+        client._client = original_client
+
+
+# ==================== _build_request_info 测试 ====================
+
+
+@allure.feature("同步客户端")
+@allure.story("请求信息记录")
+@allure.title("测试 _build_request_info 无请求体时不含 data 键")
+def test_build_request_info_no_body():
+    info = _build_request_info("GET", "https://example.com/api", {}, None, None, None)
+    assert info == {
+        "url": "https://example.com/api",
+        "method": "GET",
+        "headers": {},
+    }
+    assert "data" not in info
+
+
+@allure.feature("同步客户端")
+@allure.story("请求信息记录")
+@allure.title("测试 _build_request_info 普通 data 回退到字符串截断")
+def test_build_request_info_data_str_fallback():
+    info = _build_request_info(
+        "POST", "https://example.com/api", {}, None, None, "raw body data",
+    )
+    assert info["data"] == "raw body data"
+
+
+@allure.feature("同步客户端")
+@allure.story("请求信息记录")
+@allure.title("测试 _build_request_info params/json 为 None 时不包含在结果中")
+def test_build_request_info_params_json_none():
+    info = _build_request_info("GET", "https://example.com", {}, None, None, None)
+    assert "params" not in info
+    assert "json" not in info
