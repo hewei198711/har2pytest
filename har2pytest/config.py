@@ -58,6 +58,13 @@ class APIConfig:
         "TESTCASE_PROFILES": [],
         # 状态值提取的额外正则模式（补充内置4种模式）
         "STATE_VALUE_PATTERNS": [],
+        # 参数来源追踪配置（complex_scenario 步骤取值处理）：
+        # TRACK_PARAM_SOURCES 为 False 时步骤参数保持 HAR 字面值（旧行为）
+        "TRACK_PARAM_SOURCES": True,
+        # 值长度小于该值的参数不参与响应来源匹配（避免 "1"/"0" 等短值误匹配）
+        "PARAM_SOURCE_MIN_LENGTH": 4,
+        # 不参与来源追踪的参数名（如时间戳/签名类固定值）
+        "PARAM_SOURCE_IGNORE_KEYS": [],
     }
 
     # 初始化配置
@@ -331,6 +338,18 @@ class APIConfig:
     @classmethod
     def TESTCASE_PROFILES(cls) -> list[dict]:
         return cls.get_config("TESTCASE_PROFILES")
+
+    @classmethod
+    def TRACK_PARAM_SOURCES(cls) -> bool:
+        return cls.get_config("TRACK_PARAM_SOURCES")
+
+    @classmethod
+    def PARAM_SOURCE_MIN_LENGTH(cls) -> int:
+        return cls.get_config("PARAM_SOURCE_MIN_LENGTH")
+
+    @classmethod
+    def PARAM_SOURCE_IGNORE_KEYS(cls) -> list:
+        return cls.get_config("PARAM_SOURCE_IGNORE_KEYS")
 
     @classmethod
     def determine_service_package(cls, url: str | None) -> str:

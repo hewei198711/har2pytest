@@ -594,6 +594,8 @@ class TestCaseGenerator:
                 if APIConfig.is_time_param(pn):
                     filled[pn] = ""
             item["other_params"] = filled
+            # 数组类型参数（params 默认值为 list）在方法体中以 [值] 形式传参
+            item["is_array_param"] = isinstance(api_params.get(item["param_name"]), list)
         content.extend(
             gen_batch_parametrized_test_methods(
                 ctx, param_items, api_info.description, function_name, param_var_name,

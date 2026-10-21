@@ -32,6 +32,32 @@ def test_find_api_info_in_swagger():
 
 @allure.feature("Swagger处理器")
 @allure.story("从Swagger查找API信息")
+@allure.title("测试header参数不进入parameters")
+def test_find_api_info_header_param_excluded():
+    """in: header 参数（如 Authorization）不应被收进 parameters，
+    否则会以默认值空串写入 api.json 的 params，导致生成的测试用例
+    向无 params 参数的 API 函数传参（TypeError）。"""
+    handler = SwaggerHandler()
+    swagger_data = {
+        "paths": {
+            "/api/test": {
+                "get": {
+                    "summary": "测试API",
+                    "parameters": [
+                        {"name": "Authorization", "in": "header", "type": "string", "description": "令牌"},
+                        {"name": "id", "in": "query", "type": "string", "description": "ID参数"},
+                    ],
+                }
+            }
+        }
+    }
+    result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
+    assert result.parameters == {"id": "ID参数"}
+    assert "Authorization" not in result.param_defaults
+
+
+@allure.feature("Swagger处理器")
+@allure.story("从Swagger查找API信息")
 @allure.title("测试带BasePath查找API信息")
 def test_find_api_info_with_basepath():
     handler = SwaggerHandler()

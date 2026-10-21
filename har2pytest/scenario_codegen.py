@@ -13,8 +13,16 @@ import os
 from typing import Any
 
 from .codegen import render_lines
+from .config import APIConfig
 from .logger import logger
 from .models import APIFileInfo, ParsedRequestInfo
+from .step_values import (
+    StepValueContext,
+    build_scenario_value_plan,
+    make_step_key,
+    render_param_dict_code,
+    render_test_data_init,
+)
 from .url_matcher import URLMatcher
 from .utils import (
     extract_service_package,
@@ -53,23 +61,25 @@ def get_requests_from_source(
         return har_parser.extract_requests_from_har(har_file_path, filter_duplicate_url)
 
     requests: list[ParsedRequestInfo] = []
-    if target_api_file and os.path.exists(target_api_file):
-        api_info = parse_api_file(target_api_file)
-        if api_info:
-            if not api_info.url:
-                logger.error(
-                    f"API文件 {target_api_file} 元数据缺少 url 字段，跳过构建模拟请求"
-                )
-                return requests
-            request_info = ParsedRequestInfo(
-                url=api_info.url,
-                method="GET",
-                query_params=api_info.params,
-                post_data=api_info.data,
-                headers=api_info.headers,
-            )
-            requests.append(request_info)
-
+    if not (target_api_file and os.path.exists(target_api_file)):
+        return requests
+    api_info = parse_api_file(target_api_file)
+    if not api_info:
+        return requests
+    if not api_info.url:
+        logger.error(
+            f"API文件 {target_api_file} 元数据缺少 url 字段，跳过构建模拟请求"
+        )
+        return requests
+    requests.append(
+        ParsedRequestInfo(
+            url=api_info.url,
+            method="GET",
+            query_params=api_info.params,
+            post_data=api_info.data,
+            headers=api_info.headers,
+        )
+    )
     return requests
 
 
@@ -144,6 +154,9 @@ def gen_scenario_step_functions(
 ) -> list[str]:
     """生成场景测试步骤函数。
 
+    先匹配 API 文件并分配步骤名，再分析步骤取值计划（哪些参数取前序
+    步骤响应、哪些提升为用例级 test_data），最后生成各步骤函数。
+
     Args:
         render_ctx: 模板渲染上下文
         content: 内容列表（会被修改）
@@ -157,56 +170,98 @@ def gen_scenario_step_functions(
     step_functions: list[str] = []
     name_counters: dict[str, int] = {}
 
-    for i, request_info in enumerate(requests):
-        url = request_info.url
-        matched_api_file = URLMatcher.find_matching_api_file(url, api_files)
+    # 第一遍：匹配 API 文件并分配步骤名（步骤名确定后才能构建取值计划）
+    matched: list[tuple[str, APIFileInfo, ParsedRequestInfo]] = []
+    step_keys: list[str] = []
+    used_keys: set[str] = set()
+    function_step_keys: dict[str, str] = {}  # API 函数名 → 步骤键（同一 API 多次调用复用同一键）
+    for request_info in requests:
+        matched_api_file = URLMatcher.find_matching_api_file(request_info.url, api_files)
+        if not matched_api_file:
+            continue
+        api_info = parse_api_file(matched_api_file)
+        # 从 API 文件 URL 模板提取路径参数（如 /orderInfo/{orderNo} → orderNo），
+        # 使取值分析能把第一个步骤的路径参数提升为用例级 test_data 值
+        if api_info.url:
+            _, path_params = URLMatcher.match_url_pattern(request_info.url, api_info.url)
+            if path_params:
+                request_info.path_params = path_params
+        step_name = gen_step_function_name(api_info.function_name or "", name_counters)
+        step_functions.append(step_name)
+        # 同一 API 函数多次调用时复用同一键，不同 API 函数间保证键唯一
+        func_name = api_info.function_name or ""
+        if func_name in function_step_keys:
+            step_keys.append(function_step_keys[func_name])
+        else:
+            key = make_step_key(func_name, used_keys)
+            function_step_keys[func_name] = key
+            step_keys.append(key)
+        matched.append((step_name, api_info, request_info))
 
-        if matched_api_file:
-            api_info = parse_api_file(matched_api_file)
-            api_function_name = api_info.function_name or ""
-            api_description = api_info.description
-            step_name = gen_step_function_name(api_function_name, name_counters)
-            step_functions.append(step_name)
+    track_enabled = APIConfig.TRACK_PARAM_SOURCES()
 
-            step_prefix = "        async def " if render_ctx["async_mode"] else "        def "
-            content.extend(
-                render_lines(
-                    "s_step_heading.j2",
-                    step_description=api_description or "",
-                    step_prefix=step_prefix,
-                    step_name=step_name,
-                )
+    # 分析步骤取值计划，并在第一个步骤函数前插入 test_data 初始化
+    value_plan = build_scenario_value_plan(
+        [item[2] for item in matched], step_keys
+    )
+    if track_enabled:
+        content.extend(render_test_data_init(value_plan, indent=8))
+
+    # 步骤函数是测试方法内的嵌套函数，比方法定义多一级缩进
+    step_prefix = "    " + render_ctx["def_prefix"]
+
+    # 第二遍：生成步骤函数（heading + 函数体 + 断言与响应存储）
+    for (step_name, api_info, request_info), step_ctx in zip(matched, value_plan.steps):
+        api_function_name = api_info.function_name or ""
+        content.extend(
+            render_lines(
+                "s_step_heading.j2",
+                step_description=api_info.description or "",
+                step_prefix=step_prefix,
+                step_name=step_name,
             )
+        )
 
-            gen_step_function_body(
-                render_ctx, content, api_function_name, api_info, request_info, class_headers
-            )
+        gen_step_function_body(
+            render_ctx, content, api_function_name, api_info, request_info,
+            class_headers, value_ctx=step_ctx,
+        )
 
-            content.extend(
-                render_lines(
-                    "s_step_asserts.j2",
-                    status_attr=f"r.{render_ctx['status_attr']}",
-                    json_call=render_ctx["json_call"],
-                )
+        # 断言后存储本步骤响应供后续步骤引用；未被引用的响应不存储
+        # （避免无用响应常驻 test_data），关闭取值跟踪时保持旧输出
+        if track_enabled and step_ctx.store_response:
+            store_line = f"test_data[{step_ctx.step_key!r}] = data['data']"
+        else:
+            store_line = ""
+        content.extend(
+            render_lines(
+                "s_step_asserts.j2",
+                status_attr=f"r.{render_ctx['status_attr']}",
+                json_call=render_ctx["json_call"],
+                step_store_line=store_line,
             )
+        )
 
     return step_functions
 
 
 def gen_step_function_name(api_function_name: str, name_counters: dict[str, int]) -> str:
-    """生成步骤函数名称。"""
-    if api_function_name not in name_counters:
-        name_counters[api_function_name] = 0
-
-    count = name_counters[api_function_name]
-
+    """生成步骤函数名称（同一 API 函数第二次起加计数前缀）。"""
+    count = name_counters.get(api_function_name, 0)
+    name_counters[api_function_name] = count + 1
     if count == 0:
-        step_name = f"step_{api_function_name}"
-    else:
-        step_name = f"step_{count}_{api_function_name}"
+        return f"step_{api_function_name}"
+    return f"step_{count}_{api_function_name}"
 
-    name_counters[api_function_name] += 1
-    return step_name
+
+def _format_step_payload(
+    actual_values: dict[str, Any],
+    value_ctx: StepValueContext | None,
+) -> str:
+    """渲染步骤参数字典：有取值来源时按 test_data 引用渲染，否则普通格式化。"""
+    if value_ctx is not None and value_ctx.param_sources:
+        return render_param_dict_code(actual_values, value_ctx.param_sources, indent=16)
+    return format_params_for_python(actual_values, indent=16)
 
 
 def gen_step_function_body(
@@ -216,6 +271,7 @@ def gen_step_function_body(
     api_info: APIFileInfo,
     request_info: ParsedRequestInfo | None = None,
     class_headers: dict[str, Any] | None = None,
+    value_ctx: StepValueContext | None = None,
 ) -> None:
     """生成步骤函数体。
 
@@ -226,80 +282,54 @@ def gen_step_function_body(
         api_info: API 文件信息
         request_info: 解析后的请求信息（来自 HAR 文件，可选）
         class_headers: 类级别 headers
+        value_ctx: 步骤取值上下文（有取值来源时参数改用 test_data 引用）
     """
     api_files = api_info.files
     api_data = api_info.data
     api_params = api_info.params
 
+    # HAR 快照值：post_data 为列表时保留原样（如数组 JSON 体），
+    # 否则与 query_params 合并为字典（post_data 覆盖同名键）
     if request_info:
         har_query = request_info.query_params or {}
         har_post = request_info.post_data or {}
-        if isinstance(har_post, list):
-            har_values = har_post if har_post else {}
-        else:
-            har_values = {**har_post, **har_query} if (har_post or har_query) else {}
+        har_values = har_post if isinstance(har_post, list) else {**har_post, **har_query}
     else:
         har_values = {}
 
-    is_file_upload = bool(api_files)
-    ctx = render_ctx["with_keyword"]
+    har_values_dict = har_values if isinstance(har_values, dict) else {}
 
     header_lines, headers_arg = build_step_headers_arg(api_info.headers, class_headers or {})
     if header_lines:
         content.extend(header_lines)
 
-    if is_file_upload:
-        har_values_dict = har_values if isinstance(har_values, dict) else {}
-        actual_values = {**api_files, **har_values_dict} if har_values_dict else api_files
-        files_str = format_params_for_python(actual_values, indent=16)
-        content.extend(
-            render_lines(
-                "s_step_upload.j2",
-                files_code=files_str,
-                ctx=ctx,
-                function_name=api_function_name,
-                headers_arg=headers_arg,
-            )
-        )
+    # 先确定本步骤使用的模板与参数代码，再统一渲染调用行
+    if api_files:
+        files_str = format_params_for_python({**api_files, **har_values_dict}, indent=16)
+        template, code_kwargs = "s_step_upload.j2", {"files_code": files_str}
     elif api_data:
         if isinstance(api_data, dict) and isinstance(har_values, dict):
-            actual_values = {**api_data, **har_values} if har_values else api_data
-            data_str = format_params_for_python(actual_values, indent=16)
+            data_str = _format_step_payload({**api_data, **har_values}, value_ctx)
         elif isinstance(har_values, list):
             data_str = format_parameter_value(har_values)
         else:
             data_str = format_parameter_value(api_data)
-        content.extend(
-            render_lines(
-                "s_step_data.j2",
-                data_code=data_str,
-                ctx=ctx,
-                function_name=api_function_name,
-                headers_arg=headers_arg,
-            )
-        )
+        template, code_kwargs = "s_step_data.j2", {"data_code": data_str}
     elif api_params:
-        har_values_dict = har_values if isinstance(har_values, dict) else {}
-        actual_values = {**api_params, **har_values_dict} if har_values_dict else api_params
-        params_str = format_params_for_python(actual_values, indent=16)
-        content.extend(
-            render_lines(
-                "s_step_params.j2",
-                params_code=params_str,
-                ctx=ctx,
-                function_name=api_function_name,
-                headers_arg=headers_arg,
-            )
-        )
+        params_str = _format_step_payload({**api_params, **har_values_dict}, value_ctx)
+        template, code_kwargs = "s_step_params.j2", {"params_code": params_str}
     else:
-        content.extend(
-            render_lines(
-                "s_step_none.j2",
-                ctx=ctx,
-                function_name=api_function_name,
-                headers_arg=headers_arg,
-            )
+        template, code_kwargs = "s_step_none.j2", {}
+
+    content.extend(
+        render_lines(
+            template,
+            ctx=render_ctx["with_keyword"],
+            function_name=api_function_name,
+            headers_arg=headers_arg,
+            **code_kwargs,
         )
+    )
 
 
 # ==================== headers 差异对比 ====================
@@ -322,10 +352,11 @@ def build_step_headers_arg(
     if not diff:
         return [], "headers=self.headers"
 
+    # 无类级别 headers 时输出本步骤全部 headers，否则只输出差异部分
+    source = diff if class_headers else step_headers
+    diff_str = ", ".join(f'"{k}": {header_value_formatter(v)}' for k, v in source.items())
     if class_headers:
-        diff_str = ", ".join(f'"{k}": {header_value_formatter(v)}' for k, v in diff.items())
         line = f"            headers = {{**self.headers, {diff_str}}}"
     else:
-        diff_str = ", ".join(f'"{k}": {header_value_formatter(v)}' for k, v in step_headers.items())
         line = f"            headers = {{{diff_str}}}"
     return [line, ""], "headers=headers"

@@ -15,8 +15,30 @@ from har2pytest.codegen import render, render_lines, validate_python
 @allure.story("模板渲染")
 @allure.title("测试 render 渲染已有模板")
 def test_render_existing_template():
-    text = render("p_data_dict.j2", is_combination=False, param_name="keyword", param_safe="keyword", other_items=[])
+    text = render(
+        "p_data_dict.j2",
+        is_combination=False,
+        param_name="keyword",
+        param_safe="keyword",
+        other_items=[],
+        is_array_param=False,
+    )
     assert '"keyword": keyword,' in text
+
+
+@allure.feature("代码生成")
+@allure.story("模板渲染")
+@allure.title("测试 render 数组类型参数渲染为 [值]")
+def test_render_array_param_wraps_in_list():
+    text = render(
+        "p_data_dict.j2",
+        is_combination=False,
+        param_name="manualInterventionReasons",
+        param_safe="manualInterventionReasons",
+        other_items=[],
+        is_array_param=True,
+    )
+    assert '"manualInterventionReasons": [manualInterventionReasons],' in text
 
 
 @allure.feature("代码生成")
@@ -42,7 +64,14 @@ def test_render_strict_undefined_raises():
 @allure.story("行列表渲染")
 @allure.title("测试 render_lines 切分模板并去除末尾换行")
 def test_render_lines_splits_and_strips_trailing_newline():
-    lines = render_lines("p_data_dict.j2", is_combination=False, param_name="a", param_safe="a", other_items=[("b", "'x'")])
+    lines = render_lines(
+        "p_data_dict.j2",
+        is_combination=False,
+        param_name="a",
+        param_safe="a",
+        other_items=[("b", "'x'")],
+        is_array_param=False,
+    )
     assert lines == ['            "a": a,', '            "b": \'x\',']
 
 

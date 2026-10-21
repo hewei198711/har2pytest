@@ -20,8 +20,6 @@ from .utils import (
     format_params_for_python,
     sanitize_remark,
     write_test_file,
-)
-from .utils import (
     format_directory as _format_directory,
 )
 
@@ -201,35 +199,25 @@ class APIGenerator:
         # 服务包判定：显式指定优先（Swagger 命令场景），否则通过 URL 前缀匹配
         if service_package is None:
             service_package = APIConfig.determine_service_package(url)
-        # 如果已传入swagger_info，不需要获取Swagger文档
+
+        # 预加载 Swagger 文档（必须在 _parse_request_info 之前，以便 URL 匹配能使用 Swagger 路径模板）
+        if swagger_info is None and swagger_doc is None and service_package in APIConfig.SWAGGER_DOC_URLS():
+            swagger_doc = await self.swagger_handler.get_swagger_doc(
+                APIConfig.SWAGGER_DOC_URLS()[service_package]
+            )
+        self.url_matcher.swagger_data = swagger_doc
+
+        # 解析请求信息（两条路径共用）- 此时 swagger_data 已设置，可正确匹配路径参数
+        parsed_info = self._parse_request_info(request_info)
+        function_name = parsed_info.function_name
+        url_pattern = parsed_info.url_pattern or url
+
+        # 提取 Swagger 信息：未传入时从文档获取，已传入时保留路径参数
         if swagger_info is None:
-            # 获取整个Swagger文档（用于URL模板匹配和获取 API 信息）
-            if swagger_doc is None:
-                if service_package in APIConfig.SWAGGER_DOC_URLS():
-                    swagger_doc = await self.swagger_handler.get_swagger_doc(
-                        APIConfig.SWAGGER_DOC_URLS()[service_package]
-                    )
-
-            # 设置swagger_data到url_matcher
-            self.url_matcher.swagger_data = swagger_doc
-
-            # 解析请求信息，获取URL模式
-            parsed_info = self._parse_request_info(request_info)
-            url_pattern = parsed_info.url_pattern or url
-
-            # 获取特定URL的Swagger信息（summary、description、parameters）
             if swagger_doc:
                 swagger_info = self.swagger_handler.find_api_info_in_swagger(swagger_doc, url_pattern, method)
-
-            # 使用URLMatcher生成的函数名
-            function_name = parsed_info.function_name
-        else:
-            parsed_info = self._parse_request_info(request_info)
-            # 保留 swagger_handler 中提取的路径参数
-            if request_info.path_params:
-                parsed_info.path_params = request_info.path_params
-            function_name = parsed_info.function_name
-            url_pattern = parsed_info.url_pattern or url
+        elif request_info.path_params:
+            parsed_info.path_params = request_info.path_params
 
         # 检查文件是否存在（function_name_suffix 会改变目标文件名，需据此判断）
         if function_name_suffix:
@@ -242,11 +230,11 @@ class APIGenerator:
                 logger.info(f"接口已存在，强制覆盖: {method} {url_pattern}")
 
         # 生成文件路径
-        filename = f"{function_name}.py"
-        if service_package == APIConfig.DEFAULT_API_DIR():
-            filepath = os.path.join(self.output_dir, filename)
-        else:
-            filepath = os.path.join(self.output_dir, service_package, filename)
+        filepath = os.path.join(
+            self.output_dir,
+            "" if service_package == APIConfig.DEFAULT_API_DIR() else service_package,
+            f"{function_name}.py",
+        )
 
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
@@ -260,10 +248,8 @@ class APIGenerator:
         # （与 _process_parameters 渲染模块级赋值共用同一决策，无需二次解析）。
         # 无 swagger 文档（如纯 HAR 场景）时与 generate_file_content 一样用默认值
         meta_swagger = swagger_info if swagger_info is not None else self.DEFAULT_SWAGGER_INFO
-        description = self._docstring_first_line(meta_swagger)
-        # 没有 swagger 描述时不写 "TODO: 添加接口描述" 占位（避免冻结占位符当真实描述）
-        if description == "TODO: 添加接口描述":
-            description = ""
+        doc_first = self._docstring_first_line(meta_swagger)
+        description = "" if doc_first == "TODO: 添加接口描述" else doc_first
         current_values = self._module_value_snapshot(parsed_info)
         param_remarks_dict = dict(meta_swagger.parameters or {})
         param_values = build_param_values(param_remarks_dict)
@@ -329,14 +315,10 @@ class APIGenerator:
         return filepath
 
     @staticmethod
-    def _docstring_candidate(swagger_info: SwaggerInfo) -> str:
-        """返回 docstring 首段候选文本（summary 优先，其次 description，缺省 TODO 占位）。"""
-        return swagger_info.summary or swagger_info.description or "TODO: 添加接口描述"
-
-    @classmethod
-    def _docstring_first_line(cls, swagger_info: SwaggerInfo) -> str:
-        """返回生成 docstring 第一行（与旧 parse_api_file 提取语义一致）。"""
-        lines = [ln.strip() for ln in cls._docstring_candidate(swagger_info).splitlines() if ln.strip()]
+    def _docstring_first_line(swagger_info: SwaggerInfo) -> str:
+        """返回生成 docstring 第一行（summary 优先，其次 description，缺省 TODO 占位）。"""
+        text = swagger_info.summary or swagger_info.description or "TODO: 添加接口描述"
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         return lines[0] if lines else "TODO: 添加接口描述"
 
     def _generate_params_string(
@@ -467,7 +449,6 @@ class APIGenerator:
         params_section = []
 
         headers = parsed_info.headers
-        is_need_urlencode = parsed_info.is_need_urlencode
 
         param_name, param_data = self._determine_param_info(parsed_info)
 
@@ -487,15 +468,13 @@ class APIGenerator:
             params_section.insert(0, f"params = {formatted_path}")
             params_section.insert(1, "")
 
-        # 添加 headers 参数定义
-        formatted_headers = format_headers_for_python(headers)
-        if is_need_urlencode:
-            urlencode_headers = headers.copy()
-            urlencode_headers["content-type"] = "application/x-www-form-urlencoded; charset=UTF-8"
-            formatted_urlencode_headers = format_headers_for_python(urlencode_headers)
-            params_section.append(f"headers = {formatted_urlencode_headers}")
-        else:
-            params_section.append(f"headers = {formatted_headers}")
+        # 添加 headers 参数定义（urlencode 时追加 content-type）
+        headers_for_format = (
+            {**headers, "content-type": "application/x-www-form-urlencoded; charset=UTF-8"}
+            if parsed_info.is_need_urlencode
+            else headers
+        )
+        params_section.append(f"headers = {format_headers_for_python(headers_for_format)}")
 
         return params_section
 
@@ -630,7 +609,7 @@ class APIGenerator:
         func_params.append("headers=headers")
 
         # docstring 首段：summary 优先，其次 description，缺省 TODO 占位
-        doc_first = self._docstring_candidate(swagger_info)
+        doc_first = self._docstring_first_line(swagger_info)
 
         # 路径参数时 url 用 f-string 占位替换（值来自 params 路径默认值）；否则普通字符串
         if path_params and url_pattern:
@@ -686,7 +665,7 @@ class APIGenerator:
         Example:
             request_info = ParsedRequestInfo(
                 method="POST",
-                url="/mobile/trade/orderCommit",
+                url="/mobile/trade/order",
                 post_data={"productId": "123"},
                 headers={"content-type": "application/json"},
             )
@@ -744,16 +723,15 @@ class APIGenerator:
 
         # 为每个服务包生成索引文件
         for service_package, files in service_packages.items():
-            if service_package == APIConfig.DEFAULT_API_DIR():
-                # 根目录下的文件，直接使用 output_dir 作为包目录
-                package_dir = self.output_dir
-            else:
-                package_dir = os.path.join(self.output_dir, service_package)
+            package_dir = (
+                self.output_dir
+                if service_package == APIConfig.DEFAULT_API_DIR()
+                else os.path.join(self.output_dir, service_package)
+            )
             package_init_path = os.path.join(package_dir, "__init__.py")
 
             # 确保服务包目录存在
-            if not os.path.exists(package_dir):
-                os.makedirs(package_dir, exist_ok=True)
+            os.makedirs(package_dir, exist_ok=True)
 
             # 读取或创建服务包的 __init__.py 文件
             if os.path.exists(package_init_path):
@@ -765,10 +743,8 @@ class APIGenerator:
             # 收集需要添加的导入语句
             import_statements: list[str] = []
             for filepath in files:
-                module_path = os.path.relpath(filepath, self.output_dir).replace("\\", "/")
-                module_name = module_path.replace(".py", "").replace("/", ".")
-                # 获取模块名的最后一部分作为导入的函数名
-                last_part = module_name.split(".")[-1]
+                # 直接从文件路径提取模块名（最后一段去掉 .py）
+                last_part = os.path.splitext(os.path.basename(filepath))[0]
                 # 生成相对导入语句（如 from ._user_mgmt_order_page import _user_mgmt_order_page）
                 import_stmt = f"from .{last_part} import {last_part} # noqa: F401"
 

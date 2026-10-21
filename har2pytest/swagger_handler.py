@@ -278,7 +278,7 @@ class SwaggerHandler:
                 param_desc = sanitize_remark(param.get("description", ""))
                 param_in = param.get("in", "")
 
-                if param_in != "body":
+                if param_in in ("query", "path"):
                     # query/path 参数：直接添加描述
                     if param_name and param_desc:
                         api_info.parameters[param_name] = param_desc

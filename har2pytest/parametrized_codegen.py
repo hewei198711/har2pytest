@@ -272,8 +272,12 @@ def gen_list_query_data_class_attr(
 
         if param_name in param_values and param_values[param_name]:
             values = param_values[param_name]
-            # 单值参数解包为纯值，多值参数保持列表
-            rendered = repr(values[0]) if len(values) == 1 else repr(values)
+            # 单值参数解包为纯值，多值参数保持列表；数组类型参数（默认值为 list）
+            # 始终保持列表：方法体以 [值] 形式传参，parametrize 逐值迭代
+            if isinstance(param_value, list) or len(values) > 1:
+                rendered = repr(values)
+            else:
+                rendered = repr(values[0])
             data_items.append((param_name, rendered))
             continue
 
@@ -293,8 +297,8 @@ def gen_test_0_collect_response_data(
 
     发送默认查询（参数值已由调用方覆盖 constant_params），遍历响应收集字段值到
     list_query_data。分页参数优先使用传入的实际值（含 constant_params 覆盖值），
-    缺失时回退配置默认值；时间参数直接使用 api_params 中的 Swagger 默认值（如 ""），
-    datetime 表达式仅由 list_query_data 类属性提供，不注入 test_0 的 params 字典。
+    缺失时回退配置默认值；时间参数由调用方统一置 ""（datetime 表达式仅由
+    list_query_data 类属性提供），本函数直接透传 api_params 中的值。
 
     Args:
         render_ctx: 模板渲染上下文
@@ -440,7 +444,12 @@ def gen_batch_parametrized_test_methods(
             )
             content.extend(
                 gen_test_method_body(
-                    render_ctx, param_var_name, param_name, other_params, is_combination=is_combo
+                    render_ctx,
+                    param_var_name,
+                    param_name,
+                    other_params,
+                    is_combination=is_combo,
+                    is_array_param=item.get("is_array_param", False),
                 )
             )
             content.extend(
@@ -568,9 +577,10 @@ def gen_test_method_body(
     param_name: str,
     other_params: dict[str, Any],
     is_combination: bool,
+    is_array_param: bool = False,
 ) -> list[str]:
     """生成测试方法体。"""
-    ctx = build_param_dict_context(param_name, other_params, is_combination)
+    ctx = build_param_dict_context(param_name, other_params, is_combination, is_array_param)
     body_lines = render_lines(
         "p_method_body.j2",
         leading_blank=False,
@@ -581,7 +591,7 @@ def gen_test_method_body(
 
 
 def build_param_dict_context(
-    param_name: str, other_params: dict[str, Any], is_combination: bool
+    param_name: str, other_params: dict[str, Any], is_combination: bool, is_array_param: bool = False
 ) -> dict[str, Any]:
     """构建参数化数据字典模板的渲染上下文。"""
     if is_combination:
@@ -592,6 +602,7 @@ def build_param_dict_context(
     other_items = [(key, repr(value) if isinstance(value, str) else str(value)) for key, value in other_params.items()]
     return {
         "is_combination": is_combination,
+        "is_array_param": is_array_param,
         "other_items": other_items,
         **combo_ctx,
     }

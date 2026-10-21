@@ -67,5 +67,11 @@
     "PATH_URLS": [
         "/order/returnOrder/{id}",
         "/order/{orderId}/detail"
+    ],
+    "TRACK_PARAM_SOURCES": true,
+    "PARAM_SOURCE_MIN_LENGTH": 4,
+    "PARAM_SOURCE_IGNORE_KEYS": [
+        "sign",
+        "timestamp"
     ]
 }
