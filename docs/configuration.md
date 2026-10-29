@@ -65,6 +65,75 @@
 | `keywords` | list[str] | 可选，`auto` 模式下覆盖全局 `LIST_QUERY_KEYWORDS` |
 | `exclude_keywords` | list[str] | 可选，`auto` 模式下覆盖全局 `LIST_QUERY_EXCLUDE_KEYWORDS` |
 
+### complex_scenario 步骤取值（TRACK_PARAM_SOURCES 等）
+
+| 配置项 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| `TRACK_PARAM_SOURCES` | bool | `true` | complex_scenario 模式下追踪步骤参数取值来源：开启后步骤参数按前序响应引用、未命中参数提升为用例级 `test_data`；关闭时参数保持 HAR 录制值字面量 |
+| `PARAM_SOURCE_MIN_LENGTH` | int | `5 / 2` | 值匹配兜底的最短长度（内置常量）：数值型 5 字符、非数值（中文/字母）2 字符；低于门槛不参与，避免同值异义字段误引用 |
+| `PARAM_SOURCE_IGNORE_KEYS` | list[str] | `[]` | 不参与来源追踪的参数名（如时间戳/签名类固定值） |
+| `COLLECT_RESPONSE_APIS` | list[dict] | `[]` | 响应收集接口配置，见下文 |
+
+#### COLLECT_RESPONSE_APIS（响应收集接口）
+
+用于上传类接口：同一接口多次调用合并为一个带循环形参的步骤函数，每次调用的
+响应片段按 `append_path` 追加到 `test_data` 的 `collect_key` 列表，后续步骤的
+列表参数以列表推导引用（如附件 URL 列表）。
+
+```json
+{
+    "COLLECT_RESPONSE_APIS": [
+        {
+            "url": "/upload",
+            "collect_key": "upload",
+            "files_key": "files",
+            "file_field": "file",
+            "append_path": ["datas"]
+        }
+    ]
+}
+```
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `url` | str | 必填 | HAR 请求 URL 子串匹配（建议写去掉 `BASE_URLS` 前缀后的相对路径，如 `/upload`） |
+| `collect_key` | str | 必填 | `test_data` 中收集响应片段的列表键 |
+| `files_key` | str | `"files"` | `test_data` 中文件参数值列表的键（数量与接口调用次数一致，值取自各次请求的 `file_field` 录制值） |
+| `file_field` | str | `"file"` | 表单中文件字段名，渲染为步骤函数形参（执行段 `for file in test_data[files_key]` 逐文件传入） |
+| `append_path` | list[str] | `["datas"]` | 相对整个响应 JSON 的取值路径，追加到收集列表的片段 |
+
+生成的代码形态（以 `/upload` 为例）：
+
+```python
+test_data: dict = {
+    # ...
+    "storage_upload": [],
+    "files": ["data/1.png", "data/2.png", "data/3.png"],
+}
+
+@allure.step("")
+async def step_storage_upload(file):
+    files = {
+        "storageType": test_data["storageType"],
+        "clientKey": test_data["clientKey"],
+        "file": file,
+    }
+    async with storage_upload(files=files, headers=self.headers) as r:
+        assert r.status == 200
+        data = await r.json()
+        test_data["storage_upload"].append(data["datas"])
+
+# 执行所有测试步骤
+for file in test_data["files"]:
+    await step_storage_upload(file)
+# 后续步骤中列表参数以列表推导引用收集片段：
+# "attachmentUrlList": [i["fileUrlKey"] for i in test_data["storage_upload"]],
+```
+
+注意：收集接口的步骤函数不生成 `assert data['code'] == 200`（此类响应常无
+`code` 字段）；该接口的响应不参与普通取值引用，仅供列表推导投影匹配（列表
+参数元素与收集片段按同一字段对齐、元素数一致时命中）。
+
 ## HTTP 客户端行为
 
 - 同步用 `requests`（`Client`，默认 `default_verify=False`、`raise_for_status=False`，因此默认**不会**对 4xx/5xx 抛 `requests.HTTPError`，便于测试断言 `r.status_code`）。

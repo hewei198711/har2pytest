@@ -65,6 +65,18 @@ class APIConfig:
         "PARAM_SOURCE_MIN_LENGTH": 4,
         # 不参与来源追踪的参数名（如时间戳/签名类固定值）
         "PARAM_SOURCE_IGNORE_KEYS": [],
+        # 响应收集接口配置（complex_scenario）：同一接口多次调用合并为一个带循环
+        # 参数的步骤函数，每次调用的响应片段按 append_path 追加到 test_data 的
+        # collect_key 列表，供后续步骤以列表推导引用（如附件 URL 列表）。
+        # 每条: {"url": "/upload", "collect_key": "upload",
+        #        "files_key": "files", "file_field": "file", "append_path": ["datas"]}
+        #  - url: HAR 请求 URL 子串匹配（必填）
+        #  - collect_key: test_data 中收集响应片段的列表键（必填）
+        #  - files_key: test_data 中文件参数值列表的键（默认 "files"，
+        #    数量与接口调用次数一致，值取自各次请求的 file_field 录制值）
+        #  - file_field: 表单中文件字段名（默认 "file"），渲染为步骤函数形参
+        #  - append_path: 响应 data 下追加到收集列表的路径（默认 ["datas"]）
+        "COLLECT_RESPONSE_APIS": [],
     }
 
     # 初始化配置
@@ -352,6 +364,10 @@ class APIConfig:
         return cls.get_config("PARAM_SOURCE_IGNORE_KEYS")
 
     @classmethod
+    def COLLECT_RESPONSE_APIS(cls) -> list[dict]:
+        return cls.get_config("COLLECT_RESPONSE_APIS")
+
+    @classmethod
     def determine_service_package(cls, url: str | None) -> str:
         """根据 URL 判断所属的微服务包。
 
@@ -359,14 +375,14 @@ class APIConfig:
         确定该接口属于哪个微服务。
 
         Args:
-            url: 原始接口 URL，如 /mobile/trade/orderCommit。
+            url: 原始接口 URL，如 /mobile/demo/list。
 
         Returns:
-            str: 服务包名称，如 mall_mobile_application。
+            str: 服务包名称，如 demo_service_package。
 
         Example:
-            >>> APIConfig.determine_service_package("/mobile/trade/orderCommit")
-            'mall_mobile_application'
+            >>> APIConfig.determine_service_package("/mobile/demo/list")
+            'demo_service_package'
         """
 
         # 处理 None 或空字符串

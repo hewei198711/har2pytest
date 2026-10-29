@@ -191,8 +191,8 @@ def test_parse_request_info_urlencoded_empty_body(generator):
 def test_parse_request_info_post_empty_json_body_with_query_urlencode(generator):
     request_info = ParsedRequestInfo(
         method="POST",
-        url="/mobile/web/order/as/upgradeOrderVerify",
-        query_params={"orderNo": "SG014000260817001801"},
+        url="/demo/web/order/as/upgradeOrderVerify",
+        query_params={"orderNo": "SG000000000000000001"},
         post_data={},
         headers={"content-type": "application/json;charset=UTF-8", "content-length": "2"},
     )
@@ -876,15 +876,15 @@ def test_generate_function_definition_swagger_params_no_leak(generator):
 def test_determine_param_info_post_empty_body_with_query(generator):
     parsed_info = ParsedRequestInfo(
         method="POST",
-        url="/mobile/web/order/as/upgradeOrderVerify",
-        query_params={"orderNo": "SG014000260817001801"},
+        url="/demo/web/order/as/upgradeOrderVerify",
+        query_params={"orderNo": "SG000000000000000001"},
         post_data={},
         is_need_urlencode=True,
         headers={"content-type": "application/json"},
     )
     param_name, param_data = generator._determine_param_info(parsed_info)
     assert param_name == "data"
-    assert param_data == {"orderNo": "SG014000260817001801"}
+    assert param_data == {"orderNo": "SG000000000000000001"}
 
 
 @allure.feature("API 生成器")
@@ -897,21 +897,21 @@ def test_determine_param_info_post_empty_body_with_query(generator):
 def test_generate_function_definition_post_query_as_data(generator):
     parsed_info = ParsedRequestInfo(
         method="POST",
-        url="/mobile/web/order/as/upgradeOrderVerify",
-        query_params={"orderNo": "SG014000260817001801"},
+        url="/demo/web/order/as/upgradeOrderVerify",
+        query_params={"orderNo": "SG000000000000000001"},
         post_data={},
         is_file_upload=False,
         is_need_urlencode=True,
         is_json_content=False,
         path_params={},
-        url_pattern="/mobile/web/order/as/upgradeOrderVerify",
+        url_pattern="/demo/web/order/as/upgradeOrderVerify",
         headers={"content-type": "application/json"},
     )
     swagger_info = SwaggerInfo(parameters={"orderNo": "orderNo"})
     # 端到端验证：文件内容 = 参数定义(_process_parameters) + 函数定义(_generate_function_definition)
     content = generator.generate_file_content(parsed_info, "api_verify", swagger_info, parsed_info)
     assert "def api_verify(data=data, headers=headers)" in content
-    assert '"orderNo": "SG014000260817001801"' in content
+    assert '"orderNo": "SG000000000000000001"' in content
     assert "from urllib.parse import urlencode" in content
     assert "data = urlencode(data) # application/x-www-form-urlencoded传参需要特殊处理" in content
     assert "client.post(url=url, data=data, headers=headers)" in content
@@ -980,7 +980,7 @@ def test_generate_apis_from_swagger_same_path_multi_method(tmp_path, monkeypatch
         "swagger": "2.0",
         "basePath": "/member",
         "paths": {
-            "/purchaseExchangeOrder/returnInfo": {
+            "/demoExchange/returnInfo": {
                 "get": {"summary": "退货信息", "parameters": [], "responses": {}},
                 "post": {"summary": "提交退货信息", "parameters": [], "responses": {}},
             },
@@ -1004,16 +1004,16 @@ def test_generate_apis_from_swagger_same_path_multi_method(tmp_path, monkeypatch
 
     names = sorted(os.path.basename(f) for f in files)
     assert names == [
-        "member_purchaseExchangeOrder_returnInfo.py",
-        "member_purchaseExchangeOrder_returnInfo_post.py",
+        "member_demoExchange_returnInfo.py",
+        "member_demoExchange_returnInfo_post.py",
         "member_role.py",
         "member_role_put.py",
     ]
     # 首个 method 用原名，内容确定（GET/POST）
-    with open(output_dir / "order_application" / "member_purchaseExchangeOrder_returnInfo.py", encoding="utf-8") as f:
+    with open(output_dir / "order_application" / "member_demoExchange_returnInfo.py", encoding="utf-8") as f:
         plain = f.read()
     assert "client.get(" in plain
-    with open(output_dir / "order_application" / "member_purchaseExchangeOrder_returnInfo_post.py", encoding="utf-8") as f:
+    with open(output_dir / "order_application" / "member_demoExchange_returnInfo_post.py", encoding="utf-8") as f:
         suffixed = f.read()
     assert "client.post(" in suffixed
     with open(output_dir / "order_application" / "member_role_put.py", encoding="utf-8") as f:
@@ -1032,7 +1032,7 @@ def test_generate_apis_from_swagger_bare_type_body(tmp_path, monkeypatch):
     doc = {
         "swagger": "2.0",
         "paths": {
-            "/mgmt/order/cancelOrder": {
+            "/mgmt/order/demoAction": {
                 "post": {
                     "summary": "取消订单",
                     "parameters": [
@@ -1098,16 +1098,16 @@ def test_generate_api_file_har_post_body_har_params(tmp_path):
     generator = APIGenerator(output_dir=str(tmp_path / "apis"))
     request_info = ParsedRequestInfo(
         method="POST",
-        url="/mgmt/order/cancelOrder",
+        url="/mgmt/order/demoAction",
         query_params={"remarks": "111"},
-        post_data={"orderNo": "SG002000260616000137"},
+        post_data={"orderNo": "SG000000000000000002"},
         headers={"content-type": "application/json"},
     )
 
     filepath = asyncio.run(
         generator.generate_api_file(
             request_info,
-            constant_params={"orderNo": "SG002000260616000137"},
+            constant_params={"orderNo": "SG000000000000000002"},
         )
     )
 
@@ -1115,7 +1115,7 @@ def test_generate_api_file_har_post_body_har_params(tmp_path):
     with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
         meta = json.load(f)
     # POST 的实际请求参数落在 data（query 先、body 覆盖同名），har_params 应记录该基线
-    assert meta["har_params"] == {"remarks": "111", "orderNo": "SG002000260616000137"}
+    assert meta["har_params"] == {"remarks": "111", "orderNo": "SG000000000000000002"}
 
 
 @allure.feature("API 生成器")

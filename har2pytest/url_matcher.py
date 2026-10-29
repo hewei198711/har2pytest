@@ -101,8 +101,8 @@ class URLMatcher:
         # 也可能不含；两种形态都要尝试，否则"键含 basePath"的文档永远匹配不到模板。
         url_variants = [search_url] if search_url == url else [search_url, url]
 
-        # 先看是否存在“具体路径精确命中”：/mobile/returnOrder/page 这类实际存在的路径
-        # 不应被 /mobile/returnOrder/{id} 这类通配模板抢走（否则会生成错误 URL/函数名）
+        # 先看是否存在“具体路径精确命中”：/mobile/demoAction/page 这类实际存在的路径
+        # 不应被 /mobile/demoAction/{id} 这类通配模板抢走（否则会生成错误 URL/函数名）
         for variant in url_variants:
             if variant in paths:
                 full_path = self._ensure_base_path(variant, base_path)

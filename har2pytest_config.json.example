@@ -53,9 +53,9 @@
         "导出"
     ],
     "TESTCASE_PROFILES": [
-        { "url": "/mobile/order/List", "mode": "list_query" },
-        { "url": /mobile/order/{orderNo}", "mode": "complex_scenario" },
-        { "url": "/mall/order/*", "mode": "auto", "keywords": ["列表"], "exclude_keywords": ["详情"] }
+        { "url": "/demo/order/List", "mode": "list_query" },
+        { "url": "/demo/order/{orderNo}", "mode": "complex_scenario" },
+        { "url": "/demo/order/*", "mode": "auto", "keywords": ["列表"], "exclude_keywords": ["详情"] }
     ],
     "STATE_VALUE_PATTERNS": [
         "(-?\\d+)\\s*[:：]",
@@ -65,7 +65,7 @@
         }
     ],
     "PATH_URLS": [
-        "/order/returnOrder/{id}",
+        "/order/demoAction/{id}",
         "/order/{orderId}/detail"
     ],
     "TRACK_PARAM_SOURCES": true,
@@ -73,5 +73,14 @@
     "PARAM_SOURCE_IGNORE_KEYS": [
         "sign",
         "timestamp"
+    ],
+    "COLLECT_RESPONSE_APIS": [
+        {
+            "url": "/upload",
+            "collect_key": "upload",
+            "files_key": "files",
+            "file_field": "file",
+            "append_path": ["datas"]
+        }
     ]
 }

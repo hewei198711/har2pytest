@@ -192,13 +192,13 @@ headers = {
 }
 
 
-def order_export_handledDetail(data=data, headers=headers):
+def order_export_demoDetail(data=data, headers=headers):
     """
     明细导出
-    /order/export/handledDetail
+    /order/export/demoDetail
     """
 
-    url = "/order/export/handledDetail"
+    url = "/order/export/demoDetail"
     return client.post(url=url, json=data, headers=headers)
 ```
 
@@ -397,19 +397,19 @@ har2pytest api api_request.har --output apis --overwrite
 
 ```bash
 # 基本用法
-har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs
+har2pytest swagger https://example.com/sw/demo-application/v2/api-docs
 
 # 指定输出目录
-har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --output apis
+har2pytest swagger https://example.com/sw/demo-application/v2/api-docs --output apis
 
 # 强制覆盖已存在的文件
-har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --overwrite
+har2pytest swagger https://example.com/sw/demo-application/v2/api-docs --overwrite
 
 # 只生成指定路径的 API 文件
-har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --path /mgmt/user/list
+har2pytest swagger https://example.com/sw/demo-application/v2/api-docs --path /mgmt/user/list
 
 # 组合使用
-har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --output apis --overwrite --path /mgmt/user/list
+har2pytest swagger https://example.com/sw/demo-application/v2/api-docs --output apis --overwrite --path /mgmt/user/list
 ```
 
 ### 同步/异步统一说明
@@ -431,7 +431,7 @@ API 文件不再区分同步和异步模式，始终生成一套代码，运行�
 
 ```bash
 # 1. 从 Swagger 文档生成 API 文件（获得完整的接口列表和参数说明）
-har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs --output apis
+har2pytest swagger https://example.com/sw/demo-application/v2/api-docs --output apis
 
 # 2. 从 HAR 文件补充缺失的接口（覆盖 Swagger 中未定义的接口）
 har2pytest api api_request.har --output apis

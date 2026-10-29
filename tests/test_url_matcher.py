@@ -603,19 +603,19 @@ def test_template_match_basepath_shapes_equivalent():
 def test_exact_path_wins_over_wildcard_template():
     matcher = URLMatcher()
     matcher.swagger_data = {
-        "basePath": "/appStore",
+        "basePath": "/demoStore",
         "paths": {
-            "/mobile/returnOrder/page": {"get": {}},
-            "/mobile/returnOrder/{id}": {"get": {}},
+            "/mobile/demoAction/page": {"get": {}},
+            "/mobile/demoAction/{id}": {"get": {}},
         },
     }
 
-    exact = matcher.get_url_info("/appStore/mobile/returnOrder/page")
-    assert exact["pattern"] == "/appStore/mobile/returnOrder/page"
+    exact = matcher.get_url_info("/demoStore/mobile/demoAction/page")
+    assert exact["pattern"] == "/demoStore/mobile/demoAction/page"
     assert exact["path_params"] == {}
-    assert exact["function_name"] == "appStore_mobile_returnOrder_page"
+    assert exact["function_name"] == "demoStore_mobile_demoAction_page"
 
     # 具体取值（文档里没有该键）仍应命中模板并提取路径参数
-    templated = matcher.get_url_info("/appStore/mobile/returnOrder/12345")
-    assert templated["pattern"] == "/appStore/mobile/returnOrder/{id}"
+    templated = matcher.get_url_info("/demoStore/mobile/demoAction/12345")
+    assert templated["pattern"] == "/demoStore/mobile/demoAction/{id}"
     assert templated["path_params"] == {"id": "12345"}

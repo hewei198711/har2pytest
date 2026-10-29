@@ -132,8 +132,8 @@ BASE_URLS = [
 ```
 
 # 提取过程
-# 完整 URL: https://api.example.com/taobao/mobile/order/page?pageNum=1
-# 提取后  : /taobao/mobile/order/page
+# 完整 URL: https://api.example.com/demo/mobile/order/page?pageNum=1
+# 提取后  : /demo/mobile/order/page
 ```
 
 当未配置 `base_urls` 时，回退使用 `origin` header 进行提取。
@@ -188,7 +188,7 @@ HAR 文件的 JSON 结构如下所示：
                 "_resourceType": "xhr",          // 资源类型，用于过滤
                 "request": {
                     "method": "GET",
-                    "url": "https://api.example.com/taobao/mobile/order/page?pageNum=1&pageSize=10",
+                    "url": "https://api.example.com/demo/mobile/order/page?pageNum=1&pageSize=10",
                     "headers": [
                         { "name": "authorization", "value": "bearer xxx" },
                         { "name": "content-type", "value": "application/json" }
@@ -227,7 +227,7 @@ HAR 文件的 JSON 结构如下所示：
 
 ```python
 PATH_URLS = [
-    "/mobile/returnOrder/{id}",
+    "/mobile/demoAction/{id}",
     "/invt/order/{orderId}/detail",
     "/order/product/{productId}/sku/{skuId}",
 ]
@@ -238,12 +238,12 @@ PATH_URLS = [
 ### 方式 2：通过 Swagger 文档匹配
 
 ```
-完整 URL: /mobile/returnOrder/12345
+完整 URL: /mobile/demoAction/12345
 
-Swagger 路径: /mobile/returnOrder/{id}
+Swagger 路径: /mobile/demoAction/{id}
 
 匹配结果: { "id": "12345" }
-URL 模板: /mobile/returnOrder/{params['id']}
+URL 模板: /mobile/demoAction/{params['id']}
 ```
 
 流程：
@@ -269,7 +269,7 @@ HAR文件: api_request.har
 共发现 15 个API请求
 --------------------------------------------------------------------------------
  1. GET     200   123.45ms /mobile/order/page
- 2. POST    200   456.78ms /order/handledDetail
+ 2. POST    200   456.78ms /order/demoDetail
  3. GET     500    12.34ms /mobile/return/12345
 ...
 --------------------------------------------------------------------------------

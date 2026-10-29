@@ -41,12 +41,12 @@ def write_har(tmp_path):
 def test_extract_requests_from_har(write_har):
 
     assert APIConfig._config is not None
-    APIConfig._config["BASE_URLS"] = ["https://taobao.com/api"]
+    APIConfig._config["BASE_URLS"] = ["https://example.com/api"]
 
     har_path = write_har([{
         "_resourceType": "xhr",
         "request": {
-            "url": "https://taobao.com/api/user/login",
+            "url": "https://example.com/api/user/login",
             "method": "POST",
             "headers": [{"name": "Content-Type", "value": "application/json"}],
             "postData": {

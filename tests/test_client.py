@@ -23,7 +23,6 @@ from har2pytest.client import (
     build_multipart_data,
     client,
 )
-from har2pytest.logger import logger
 
 # ==================== Fixtures ====================
 
@@ -677,7 +676,7 @@ def test_build_multipart_data_sync(tmp_path):
 @allure.title("测试 build_form_data 异步分支返回 FormData")
 @pytest.mark.asyncio
 async def test_build_form_data_async():
-    from har2pytest.client import _ClientProxy, AsyncClient
+    from har2pytest.client import AsyncClient
 
     original_client = client._client
     try:

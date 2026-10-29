@@ -370,8 +370,8 @@ def test_service_package_roundtrip(tmp_path):
         str(py_file),
         url="/demo",
         method="GET",
-        service_package="mall_mobile_application",
+        service_package="demo_service_package",
     )
     data = read_api_metadata(str(py_file))
     assert data is not None
-    assert data["service_package"] == "mall_mobile_application"
+    assert data["service_package"] == "demo_service_package"

@@ -20,6 +20,8 @@ from .utils import (
     format_params_for_python,
     sanitize_remark,
     write_test_file,
+)
+from .utils import (
     format_directory as _format_directory,
 )
 
@@ -67,15 +69,15 @@ class APIGenerator:
         检查 API 接口文件是否已经存在
 
         Args:
-            url: 原始接口URL，如 /mobile/trade/orderCommit
-            service_package: 服务包名称，如 mall_mobile_application
+            url: 原始接口URL，如 /mobile/demo/list
+            service_package: 服务包名称，如 demo_service_package
             function_name: 目标函数名（缺省由 url 推导；同名多方法场景会带方法后缀）
 
         Returns:
             bool: 如果 API 文件已存在返回True，否则返回False
 
         Example:
-            exists = generator.check_api_exists("/mobile/trade/order", "mall_mobile_application")
+            exists = generator.check_api_exists("/mobile/demo/list", "demo_service_package")
             # 如果文件存在返回True，否则返回False
         """
         function_name = function_name or URLMatcher.generate_function_name(url)
@@ -665,11 +667,11 @@ class APIGenerator:
         Example:
             request_info = ParsedRequestInfo(
                 method="POST",
-                url="/mobile/trade/order",
+                url="/mobile/demo/list",
                 post_data={"productId": "123"},
                 headers={"content-type": "application/json"},
             )
-            content = generator.generate_file_content(request_info, "_mobile_trade_orderCommit")
+            content = generator.generate_file_content(request_info, "_mobile_demo_list")
             # 返回生成的文件内容
         """
         if swagger_info is None:
@@ -693,7 +695,7 @@ class APIGenerator:
         按照服务包分组，在每个服务包的__init__.py文件中添加对应的导入语句
 
         Args:
-            generated_files: 生成的文件路径列表，如 ["api/_mobile_product_search.py", "api/_mobile_trade_orderCommit.py"]
+            generated_files: 生成的文件路径列表，如 ["api/_demo_product_search.py", "api/_mobile_demo_list.py"]
 
         Returns:
             None: 生成的索引文件保存在output_dir/__init__.py
@@ -745,7 +747,7 @@ class APIGenerator:
             for filepath in files:
                 # 直接从文件路径提取模块名（最后一段去掉 .py）
                 last_part = os.path.splitext(os.path.basename(filepath))[0]
-                # 生成相对导入语句（如 from ._user_mgmt_order_page import _user_mgmt_order_page）
+                # 生成相对导入语句（如 from ._demo_user_page import _demo_user_page）
                 import_stmt = f"from .{last_part} import {last_part} # noqa: F401"
 
                 # 检查是否已存在该模块的导入（通过模块名匹配，避免多行导入和空格差异导致重复）

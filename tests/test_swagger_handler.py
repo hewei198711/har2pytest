@@ -282,7 +282,7 @@ def test_find_api_info_in_swagger_bare_type_body():
     handler = SwaggerHandler()
     swagger_data = {
         "paths": {
-            "/mgmt/order/cancelOrder": {
+            "/mgmt/order/demoAction": {
                 "post": {
                     "summary": "取消订单",
                     "parameters": [
@@ -293,7 +293,7 @@ def test_find_api_info_in_swagger_bare_type_body():
             }
         }
     }
-    result = handler.find_api_info_in_swagger(swagger_data, "/mgmt/order/cancelOrder", "POST")
+    result = handler.find_api_info_in_swagger(swagger_data, "/mgmt/order/demoAction", "POST")
     assert result.summary == "取消订单"
     assert result.parameters == {"orderNo": "订单号", "remarks": "备注"}
     assert result.param_defaults["orderNo"] == ""

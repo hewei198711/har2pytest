@@ -1,12 +1,12 @@
 {
   "BASE_URLS": [
-    "https://taobao.com/api"
+    "https://example.com/api"
   ],
   "KILL_URLS": [
-    "aliyuncs.com"
+    "blocked-cdn.example.com"
   ],
   "PATH_URLS": [
-    "/mobile/dashbord/{usrId}",
+    "/mobile/demo/{usrId}",
     "/mobile/{usrId}/{systemId}",
     "/order/{serialNo}",
     "/order/{cardNo}",
@@ -17,8 +17,8 @@
     "member": "order_application"
   },
   "SWAGGER_DOC_URLS": {
-    "mobile_application": "https://taobao.com/sw/mobile-application",
-    "order_application": "https://taobao.com/sw/order-application"
+    "mobile_application": "https://example.com/sw/mobile-application",
+    "order_application": "https://example.com/sw/order-application"
   },
   "INVALID_PARAMS": [
     "sign",

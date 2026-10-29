@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+from pathlib import Path
 
 import allure
 import pytest
@@ -13,6 +14,7 @@ from har2pytest.config import APIConfig
 from har2pytest.models import APIFileInfo, ParsedRequestInfo
 from har2pytest.param_builder import build_param_items_from_api, normalize_params_for_parametrization
 from har2pytest.parametrized_codegen import (
+    build_render_ctx,
     gen_allure_description,
     gen_parametrize_decorator,
     gen_parametrize_values,
@@ -81,7 +83,7 @@ def _write_api_sidecar(
     )
 
 
-def _make_har_entry(url, method="GET", headers=None, query_string=None, post_data=None, status=200, time_ms=100):
+def _make_har_entry(url, method="GET", headers=None, query_string=None, post_data=None, status=200, time_ms=100, response_text="{}"):
     """构造单条 HAR entry dict。"""
     request = {"url": url, "method": method, "headers": headers or []}
     if query_string is not None:
@@ -91,7 +93,7 @@ def _make_har_entry(url, method="GET", headers=None, query_string=None, post_dat
     return {
         "_resourceType": "xhr",
         "request": request,
-        "response": {"status": status, "content": {"text": "{}"}},
+        "response": {"status": status, "content": {"text": response_text}},
         "time": time_ms,
     }
 
@@ -105,6 +107,42 @@ def write_har(tmp_path):
         har_path.write_text(json.dumps(har_data, ensure_ascii=False), encoding="utf-8")
         return har_path
     return _write
+
+
+@pytest.fixture
+def pagination_config(monkeypatch):
+    """临时把 PAGINATION_PARAMS 设为 pageNum/pageSize（字典格式，monkeypatch 自动恢复）。"""
+    APIConfig.get_config("PAGINATION_PARAMS")  # 确保配置已加载
+    # 取局部引用并断言，避免 IDE 把 APIConfig._config 判为 None 类型
+    config = APIConfig._config
+    assert config is not None
+    monkeypatch.setitem(config, "PAGINATION_PARAMS", {"pageNum": 1, "pageSize": 10})
+
+
+# 手写 API 模块的 .py 内容仅作占位（parse_api_file 只读同名 .api.json 元数据），
+# 重复出现的模块体提取为常量，避免各测试中的冗余粘贴。
+_USER_LOGIN_PY = '''def user_login(data=data, token=token):
+    """
+    用户登录
+    /api/user/login
+    """
+    url = "/api/user/login"
+    headers = {}
+    return client.post(url=url, headers=headers, json=data)
+'''
+
+_FILE_UPLOAD_PY = '''files = {
+    "file": "(binary)",
+}
+
+def file_upload(files=files, headers=headers):
+    """
+    文件上传
+    /api/upload
+    """
+    url = "/api/upload"
+    return client.post(url=url, headers=headers, data=files)
+'''
 
 
 # ==================== 格式化参数测试 ====================
@@ -261,22 +299,19 @@ def test_normalize_params_without_constant_params():
 @allure.feature("测试用例生成器")
 @allure.story("从URL提取服务包名")
 @allure.title("测试从URL中提取服务包名")
-def test_extract_service_package_from_url():
+def test_extract_service_package_from_url(monkeypatch):
     APIConfig.get_config("SERVICE_MAPPING")
-    assert APIConfig._config is not None
-    original_service_mapping = APIConfig._config.get("SERVICE_MAPPING", {})
-    original_lower = dict(APIConfig._service_mapping_lower)
-    new_mapping = {"mobile": "mall_mobile_application", "user": "mall_center_user"}
-    APIConfig._config["SERVICE_MAPPING"] = new_mapping
-    APIConfig._service_mapping_lower = {k.lower(): v for k, v in new_mapping.items()}
+    config = APIConfig._config
+    assert config is not None
+    new_mapping = {"foo": "foo_service_package", "bar": "bar_service_package"}
+    monkeypatch.setitem(config, "SERVICE_MAPPING", new_mapping)
+    monkeypatch.setattr(
+        APIConfig, "_service_mapping_lower", {k.lower(): v for k, v in new_mapping.items()}
+    )
 
-    try:
-        assert APIConfig.determine_service_package("/mobile/trade/orderCommit") == "mall_mobile_application"
-        assert APIConfig.determine_service_package("/user/123/info") == "mall_center_user"
-        assert APIConfig.determine_service_package("") == "apis"
-    finally:
-        APIConfig._config["SERVICE_MAPPING"] = original_service_mapping
-        APIConfig._service_mapping_lower = original_lower
+    assert APIConfig.determine_service_package("/foo/api/list") == "foo_service_package"
+    assert APIConfig.determine_service_package("/bar/123/info") == "bar_service_package"
+    assert APIConfig.determine_service_package("") == "apis"
 
 
 # ==================== 提取参数备注测试 ====================
@@ -336,18 +371,7 @@ def test_match_api_files_for_har(tmp_path, write_har):
     api_dir.mkdir(parents=True)
 
     api_file = api_dir / "user_login.py"
-    api_file.write_text('''
-# coding:utf-8
-
-def user_login(data=data, token=token):
-    """
-    用户登录
-    /api/user/login
-    """
-    url = "/api/user/login"
-    headers = {}
-    return client.post(url=url, headers=headers, json=data)
-''', encoding="utf-8")
+    api_file.write_text(_USER_LOGIN_PY, encoding="utf-8")
 
     # URL 匹配依赖 .api.json 元数据（缺元数据的候选文件会被 find_matching_api_file 跳过）
     _write_api_sidecar(api_file, url="/api/user/login", description="用户登录")
@@ -393,18 +417,7 @@ def test_generate_scenario_test_content(tmp_path, write_har):
     api_dir.mkdir(parents=True)
 
     api_file = api_dir / "user_login.py"
-    api_file.write_text('''
-# coding:utf-8
-
-def user_login(data=data, token=token):
-    """
-    用户登录
-    /api/user/login
-    """
-    url = "/api/user/login"
-    headers = {}
-    return client.post(url=url, headers=headers, json=data)
-''', encoding="utf-8")
+    api_file.write_text(_USER_LOGIN_PY, encoding="utf-8")
 
     _write_api_sidecar(api_file, url="/api/user/login", description="用户登录")
 
@@ -420,6 +433,44 @@ def user_login(data=data, token=token):
     assert "test_user_login" in content
     assert "user_login" in content
     assert "allure" in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成测试用例内容")
+@allure.title("HAR 请求未匹配到 API 文件时告警并跳过步骤")
+def test_generate_scenario_warns_unmatched_request(tmp_path, write_har, caplog):
+    # 缺 API 文件（或缺同名 .api.json）的请求会被跳过，但必须留下 WARNING，避免静默丢步骤
+    har_file = write_har([
+        _make_har_entry(
+            "/api/user/login", "POST",
+            headers=[{"name": "Content-Type", "value": "application/json"}],
+            post_data={"mimeType": "application/json", "text": "{}"},
+        ),
+        _make_har_entry("/api/user/notExported", "GET"),
+    ])
+
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    api_file = api_dir / "user_login.py"
+    api_file.write_text(_USER_LOGIN_PY, encoding="utf-8")
+
+    _write_api_sidecar(api_file, url="/api/user/login", description="用户登录")
+
+    generator = TestCaseGenerator(api_dir=str(api_dir))
+    with caplog.at_level(logging.WARNING, logger="har2pytest"):
+        content = generator.generate_scenario_test_content(
+            har_file_path=str(har_file),
+            api_files=[str(api_file)],
+            task_id="test_task",
+            target_api_file=str(api_file),
+        )
+
+    assert content is not None
+    assert "step_user_login" in content
+    assert "step_user_notExported" not in content
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("/api/user/notExported" in msg for msg in warnings)
 
 
 @allure.feature("测试用例生成器")
@@ -486,6 +537,160 @@ def file_upload(files=files, headers=headers):
 
 
 @allure.feature("测试用例生成器")
+@allure.story("生成测试用例内容")
+@allure.title("测试文件上传渠道表单字段按取值来源渲染为 test_data 引用")
+def test_generate_scenario_upload_files_reference_test_data(tmp_path, write_har):
+    # HAR：multipart 上传请求，表单字段含 storageType/clientKey/actionUrl/file
+    har_file = write_har([_make_har_entry(
+        "/api/upload", "POST",
+        headers=[{"name": "Content-Type", "value": "multipart/form-data; boundary=----x"}],
+        post_data={
+            "mimeType": "multipart/form-data; boundary=----x",
+            "params": [
+                {"name": "storageType", "value": "PublicCloud"},
+                {"name": "clientKey", "value": "demo-client-key"},
+                {"name": "actionUrl", "value": "//uc-test.example.com/api/upload"},
+                {"name": "file", "value": "(binary)"},
+            ],
+        },
+    )])
+
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    api_file = api_dir / "file_upload.py"
+    api_file.write_text(_FILE_UPLOAD_PY, encoding="utf-8")
+
+    _write_api_sidecar(
+        api_file,
+        url="/api/upload",
+        description="文件上传",
+        files={"file": "(binary)"},
+    )
+
+    generator = TestCaseGenerator(api_dir=str(api_dir))
+    content = generator.generate_scenario_test_content(
+        har_file_path=str(har_file),
+        api_files=[str(api_file)],
+        task_id=None,
+        target_api_file=str(api_file),
+    )
+
+    assert content is not None
+    # files 字典内 test_data 来源字段渲染为引用表达式（与 data/params 渠道一致）
+    assert "\"storageType\": test_data['storageType']," in content
+    assert "\"clientKey\": test_data['clientKey']," in content
+    assert "\"actionUrl\": test_data['actionUrl']," in content
+    assert "\"file\": test_data['file']," in content
+    # test_data 初始化含对应字面量值
+    assert "'storageType': \"PublicCloud\"," in content
+    assert "'actionUrl': \"//uc-test.example.com/api/upload\"," in content
+    assert "'file': \"(binary)\"," in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成场景测试用例")
+@allure.title("测试响应收集接口聚合为循环步骤并支持列表推导引用")
+def test_generate_scenario_collect_upload_loop(tmp_path, write_har, monkeypatch):
+    # 配置 COLLECT_RESPONSE_APIS 后：多次上传合并为一个带 file 形参的步骤函数，
+    # 响应片段 append 进 test_data 收集列表，后续参数以列表推导引用
+    monkeypatch.setattr(
+        APIConfig, "COLLECT_RESPONSE_APIS",
+        classmethod(lambda cls: [{"url": "/api/upload", "collect_key": "storage_upload"}]),
+    )
+    upload_resp = json.dumps({
+        "success": True,
+        "datas": {"fileUrlKey": "https://test.example/center-order/1.jpg"},
+    }, ensure_ascii=False)
+    har_file = write_har([
+        _make_har_entry(
+            "/api/upload", "POST",
+            headers=[{"name": "Content-Type", "value": "multipart/form-data; boundary=----x"}],
+            post_data={
+                "mimeType": "multipart/form-data; boundary=----x",
+                "params": [
+                    {"name": "storageType", "value": "PublicCloud"},
+                    {"name": "clientKey", "value": "demo-client-key"},
+                    {"name": "file", "value": "(binary)"},
+                ],
+            },
+            response_text=upload_resp,
+        )
+        for _ in range(3)
+    ] + [
+        _make_har_entry(
+            "/api/check", "POST",
+            headers=[{"name": "Content-Type", "value": "application/json"}],
+            post_data={
+                "mimeType": "application/json",
+                "text": json.dumps({
+                    "attachmentUrlList": [
+                        "https://test.example/center-order/1.jpg",
+                    ] * 3,
+                }, ensure_ascii=False),
+            },
+            response_text=json.dumps({"code": 200, "data": {"success": True}}, ensure_ascii=False),
+        ),
+    ])
+
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    upload_api = api_dir / "file_upload.py"
+    upload_api.write_text(_FILE_UPLOAD_PY, encoding="utf-8")
+    _write_api_sidecar(
+        upload_api,
+        url="/api/upload",
+        description="文件上传",
+        files={"file": "(binary)"},
+    )
+
+    check_api = api_dir / "check.py"
+    check_api.write_text(
+        '''
+def check(data=data, headers=headers):
+    """
+    提交检查
+    /api/check
+    """
+    url = "/api/check"
+    return client.post(url=url, headers=headers, json=data)
+''',
+        encoding="utf-8",
+    )
+    _write_api_sidecar(
+        check_api,
+        url="/api/check",
+        description="提交检查",
+        data={"attachmentUrlList": []},
+    )
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), async_mode=True)
+    content = generator.generate_scenario_test_content(
+        har_file_path=str(har_file),
+        api_files=[str(upload_api), str(check_api)],
+        task_id=None,
+        target_api_file=str(check_api),
+    )
+
+    assert content is not None
+    # 多次上传合并为一个带循环形参的步骤函数
+    assert content.count("async def step_file_upload") == 1
+    assert "async def step_file_upload(file):" in content
+    assert "\"file\": file," in content
+    # 响应片段追加进收集列表（upload 响应无 code 字段，不生成 code 断言）
+    assert "test_data['storage_upload'].append(data['datas'])" in content
+    # 执行段以 for 循环逐文件调用
+    assert "for file in test_data['files']:" in content
+    assert "await step_file_upload(file)" in content
+    # test_data 初始化含收集列表与文件值列表（数量与调用次数一致）
+    assert "'storage_upload': []," in content
+    assert "'files': [\"(binary)\", \"(binary)\", \"(binary)\"]," in content
+    # 后续参数以列表推导引用收集列表
+    assert "\"attachmentUrlList\": [i['fileUrlKey'] for i in test_data['storage_upload']]," in content
+
+
+@allure.feature("测试用例生成器")
 @allure.story("生成场景测试用例")
 @allure.title("测试生成场景测试用例")
 def test_generate_scenario_testcase(tmp_path, write_har):
@@ -500,18 +705,7 @@ def test_generate_scenario_testcase(tmp_path, write_har):
     api_dir.mkdir(parents=True)
 
     api_file = api_dir / "user_login.py"
-    api_file.write_text('''
-# coding:utf-8
-
-def user_login(data=data, token=token):
-    """
-    用户登录
-    /api/user/login
-    """
-    url = "/api/user/login"
-    headers = {}
-    return client.post(url=url, headers=headers, json=data)
-''', encoding="utf-8")
+    api_file.write_text(_USER_LOGIN_PY, encoding="utf-8")
 
     _write_api_sidecar(api_file, url="/api/user/login", description="用户登录")
 
@@ -740,9 +934,9 @@ def test_get_all_api_files(tmp_path):
     (None, False),
 ])
 def test_generate_test_case_imports_single(task_id, has_marker):
-    generator = TestCaseGenerator(api_dir="apis")
+    render_ctx = build_render_ctx(False, "apis")
     result = gen_test_case_imports(
-        generator.render_ctx, service_package="test_service", function_name="test_api", task_id=task_id
+        render_ctx, service_package="test_service", function_name="test_api", task_id=task_id
     )
     content = "\n".join(result)
     assert "import pytest" in content
@@ -760,9 +954,9 @@ def test_generate_test_case_imports_single(task_id, has_marker):
     ("test_aftersales", ["@pytest.mark.test_aftersales", "@pytest.mark.test_list_query"]),
 ])
 def test_generate_test_case_imports_list_query_mark(task_id, expected_marks):
-    generator = TestCaseGenerator(api_dir="apis")
+    render_ctx = build_render_ctx(False, "apis")
     result = gen_test_case_imports(
-        generator.render_ctx, service_package="test_service", function_name="test_api",
+        render_ctx, service_package="test_service", function_name="test_api",
         task_id=task_id, is_list_query=True,
     )
     content = "\n".join(result)
@@ -774,9 +968,9 @@ def test_generate_test_case_imports_list_query_mark(task_id, expected_marks):
 @allure.story("生成测试用例导入")
 @allure.title("测试非 list_query 模式不包含 test_list_query 标记")
 def test_generate_test_case_imports_without_list_query():
-    generator = TestCaseGenerator(api_dir="apis")
+    render_ctx = build_render_ctx(False, "apis")
     result = gen_test_case_imports(
-        generator.render_ctx, service_package="test_service", function_name="test_api",
+        render_ctx, service_package="test_service", function_name="test_api",
         task_id="test_task", is_list_query=False,
     )
     content = "\n".join(result)
@@ -792,18 +986,7 @@ def test_generate_test_case_imports_multi(tmp_path):
     api_dir.mkdir(parents=True)
 
     api_file1 = api_dir / "user_login.py"
-    api_file1.write_text(
-        '''
-def user_login(data=data, token=token):
-    """
-    用户登录
-    /api/user/login
-    """
-    url = "/api/user/login"
-    return client.post(url=url, json=data)
-''',
-        encoding="utf-8",
-    )
+    api_file1.write_text(_USER_LOGIN_PY, encoding="utf-8")
     _write_api_sidecar(api_file1, url="/api/user/login", description="用户登录")
 
     api_file2 = api_dir / "user_info.py"
@@ -821,8 +1004,8 @@ def user_info(data=data, token=token):
     )
     _write_api_sidecar(api_file2, url="/api/user/info", description="用户信息")
 
-    generator = TestCaseGenerator(api_dir=str(api_dir))
-    result = gen_test_case_imports(generator.render_ctx, api_files=[str(api_file1), str(api_file2)])
+    render_ctx = build_render_ctx(False, str(api_dir))
+    result = gen_test_case_imports(render_ctx, api_files=[str(api_file1), str(api_file2)])
     content = "\n".join(result)
     assert "user_login" in content
     assert "user_info" in content
@@ -851,10 +1034,10 @@ def user_info(data=data, token=token):
       'has:"GW-Client": "test",']),
 ])
 def test_generate_test_case_description(story_name, feature_name, severity, kwargs, checks):
-    generator = TestCaseGenerator()
+    render_ctx = build_render_ctx(False, "apis")
     call_args = {"severity": severity} if severity else {}
     call_args.update(kwargs)
-    result = gen_test_case_description(generator.render_ctx, story_name, feature_name, **call_args)
+    result = gen_test_case_description(render_ctx, story_name, feature_name, **call_args)
     content = "\n".join(result)
     for check in checks:
         if check.startswith("has:"):
@@ -899,10 +1082,10 @@ def test_generate_allure_description(api_url, api_desc, param_remarks, expected_
     ("startDate,endDate", True, "开始日期-结束日期", "startDate, endDate", None),
 ])
 def test_generate_test_method_definition(param_name, is_combo, title_suffix, expected_in, expected_not_in):
-    generator = TestCaseGenerator()
+    render_ctx = build_render_ctx(False, "apis")
     remarks = {"keyword": "关键词", "startDate": "开始日期", "endDate": "结束日期"}
     result = gen_test_method_definition(
-        generator.render_ctx, "列表查询", param_name, remarks, "api_func", 0, is_combo
+        render_ctx, "列表查询", param_name, remarks, "api_func", 0, is_combo
     )
     content = "\n".join(result)
     assert expected_in in content
@@ -920,8 +1103,8 @@ def test_generate_test_method_definition(param_name, is_combo, title_suffix, exp
     ("order_list", "params", "startDate,endDate", False),
 ])
 def test_generate_test_method_assertions(func_name, param_var, param_name, should_have_search):
-    generator = TestCaseGenerator()
-    result = gen_test_method_assertions(generator.render_ctx, func_name, param_var, param_name)
+    render_ctx = build_render_ctx(False, "apis")
+    result = gen_test_method_assertions(render_ctx, func_name, param_var, param_name)
     content = "\n".join(result)
     assert f"{func_name}({param_var}={param_var}, headers=self.headers)" in content
     assert "assert r.status_code == 200" in content
@@ -1250,6 +1433,87 @@ def behavior_collect(data=data, headers=headers):
     assert "behavior_collect(data=data, headers=headers) as r:" in result
 
 
+@allure.feature("测试用例生成器")
+@allure.story("生成步骤函数体")
+@allure.title("测试场景模式载荷键以HAR为准且剔除Swagger独有键")
+def test_generate_step_function_body_scenario_har_keys_only(tmp_path):
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+    api_file = api_dir / "order_update.py"
+    api_file.write_text(
+        '''
+def order_update(data=data):
+    """
+    修改订单
+    /api/order/update
+    """
+    url = "/api/order/update"
+    return client.post(url=url, json=data)
+''',
+        encoding="utf-8",
+    )
+    # api.json 声明了 HAR 未传的 attachmentUrlList 默认值
+    _write_api_sidecar(
+        api_file,
+        url="/api/order/update",
+        description="修改订单",
+        data={"attachmentUrlList": [], "reason1": "", "returnNo": ""},
+    )
+
+    generator = TestCaseGenerator(api_dir=str(api_dir))
+    api_info = parse_api_file(str(api_file))
+    content = []
+    gen_step_function_body(
+        generator.render_ctx, content, "order_update", api_info,
+        ParsedRequestInfo(
+            method="POST",
+            query_params={},
+            post_data={"reason1": "30天无因退货", "returnNo": "TSG01"},
+        ),
+    )
+    result = "\n".join(content)
+    # HAR 实际传参的键保留
+    assert '"reason1"' in result
+    assert '"returnNo"' in result
+    # Swagger 声明但 HAR 未传的键不渲染
+    assert "attachmentUrlList" not in result
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成步骤函数体")
+@allure.title("测试场景模式API文件无参数声明时仍渲染HAR query参数")
+def test_generate_step_function_body_scenario_har_query_no_api_params(tmp_path):
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+    api_file = api_dir / "reason_list.py"
+    api_file.write_text(
+        '''
+def reason_list(params=params):
+    """
+    原因列表
+    /sys/api/reasonList
+    """
+    url = "/sys/api/reasonList"
+    return client.get(url=url, params=params)
+''',
+        encoding="utf-8",
+    )
+    # api.json 未声明 params/data（历史遗留元数据场景）
+    _write_api_sidecar(api_file, url="/sys/api/reasonList", description="原因列表")
+
+    generator = TestCaseGenerator(api_dir=str(api_dir))
+    api_info = parse_api_file(str(api_file))
+    content = []
+    gen_step_function_body(
+        generator.render_ctx, content, "reason_list", api_info,
+        ParsedRequestInfo(method="GET", query_params={"returnType": "1"}, post_data={}),
+    )
+    result = "\n".join(content)
+    assert "params =" in result
+    assert '"returnType"' in result
+    assert "reason_list(params=params, headers=self.headers)" in result
+
+
 # ==================== _generate_parametrize_values 测试 ====================
 
 
@@ -1294,8 +1558,8 @@ def test_generate_parametrize_decorator():
 @allure.story("生成测试方法体")
 @allure.title("测试生成测试方法体")
 def test_generate_test_method_body():
-    generator = TestCaseGenerator()
-    result = gen_test_method_body(generator.render_ctx, "params", "keyword", {"pageNum": 1}, False)
+    render_ctx = build_render_ctx(False, "apis")
+    result = gen_test_method_body(render_ctx, "params", "keyword", {"pageNum": 1}, False)
     content = "\n".join(result)
     assert "params = {" in content
     assert '"keyword": keyword' in content
@@ -1303,16 +1567,6 @@ def test_generate_test_method_body():
 
 
 # ==================== normalize_params_for_parametrization 边缘测试 ====================
-
-
-@pytest.fixture
-def pagination_config(monkeypatch):
-    """临时把 PAGINATION_PARAMS 设为 pageNum/pageSize（字典格式，monkeypatch 自动恢复）。"""
-    APIConfig.get_config("PAGINATION_PARAMS")  # 确保配置已加载
-    # 取局部引用并断言，避免 IDE 把 APIConfig._config 判为 None 类型
-    config = APIConfig._config
-    assert config is not None
-    monkeypatch.setitem(config, "PAGINATION_PARAMS", {"pageNum": 1, "pageSize": 10})
 
 
 @allure.feature("测试用例生成器")
@@ -1334,9 +1588,9 @@ def test_normalize_params_all_pagination(pagination_config):
 @allure.title("测试标准化参数化-全常量参数不再退化为参数化项")
 def test_normalize_params_all_constant_params_returns_empty():
     requests_params = [
-        {"memberId": "800064658", "productCodes": ["TS001"], "source": 1, "type": 1},
+        {"memberId": "123456789", "productCodes": ["TS001"], "source": 1, "type": 1},
     ]
-    constant_params = {"memberId": "800064658", "productCodes": ["TS001"], "source": 1, "type": 1}
+    constant_params = {"memberId": "123456789", "productCodes": ["TS001"], "source": 1, "type": 1}
     result = normalize_params_for_parametrization(requests_params, constant_params)
     # 全部参数均为常量：退化兜底不应把常量选为参数化变量，返回空列表
     assert result == []
@@ -1347,15 +1601,15 @@ def test_normalize_params_all_constant_params_returns_empty():
 @allure.title("测试标准化参数化-常量加全分页参数退化为分页变量")
 def test_normalize_params_constant_plus_pagination(pagination_config):
     requests_params = [
-        {"memberId": "800064658", "pageNum": 1, "pageSize": 20},
-        {"memberId": "800064658", "pageNum": 2, "pageSize": 20},
+        {"memberId": "123456789", "pageNum": 1, "pageSize": 20},
+        {"memberId": "123456789", "pageNum": 2, "pageSize": 20},
     ]
-    result = normalize_params_for_parametrization(requests_params, {"memberId": "800064658"})
+    result = normalize_params_for_parametrization(requests_params, {"memberId": "123456789"})
     # 常量排除后分页参数仍是首选变量，常量留在 other_params 作固定值
     assert len(result) == 1
     assert result[0]["param_name"] == "pageNum"
     assert result[0]["pageNum"] == [1, 2]
-    assert result[0]["other_params"] == {"memberId": "800064658", "pageSize": 20}
+    assert result[0]["other_params"] == {"memberId": "123456789", "pageSize": 20}
 
 
 @allure.feature("测试用例生成器")
@@ -1363,15 +1617,15 @@ def test_normalize_params_constant_plus_pagination(pagination_config):
 @allure.title("测试API文件不在api_dir下时报错提示而非生成非法import")
 def test_api_file_outside_api_dir_reports_error(tmp_path, caplog):
     api_dir = tmp_path / "apis"
-    other_dir = tmp_path / "store_apis" / "mall_store_application"
+    other_dir = tmp_path / "store_apis" / "demo_store_application"
     other_dir.mkdir(parents=True)
-    api_file = other_dir / "appStore_invest.py"
-    api_file.write_text("def appStore_invest(data=data, headers=headers):\n    pass\n", encoding="utf-8")
+    api_file = other_dir / "demo_store_invest.py"
+    api_file.write_text("def demo_store_invest(data=data, headers=headers):\n    pass\n", encoding="utf-8")
     _write_api_sidecar(
         api_file,
-        url="/appStore/invest",
+        url="/demo_store/invest",
         description="充值",
-        function_name="appStore_invest",
+        function_name="demo_store_invest",
         data={"amount": 0},
     )
 
@@ -1430,8 +1684,6 @@ def test_generate_parametrized_content_multiline_remark(tmp_path, monkeypatch):
 @allure.story("生成参数化测试内容")
 @allure.title("测试仅分页参数的列表接口生成单条参数化用例")
 def test_generate_parametrized_content_pagination_only(tmp_path, pagination_config):
-    """仅有 pageNum/pageSize 的列表接口应生成参数化用例，而不是告警后跳过。"""
-
     api_dir = tmp_path / "apis"
     api_dir.mkdir(parents=True)
     api_file = api_dir / "cms_activity_getActivityList.py"
@@ -1443,41 +1695,8 @@ def test_generate_parametrized_content_pagination_only(tmp_path, pagination_conf
         api_file,
         url="/cms/activity/getActivityList",
         description="活动列表",
-        function_name="cms_activity_getActivityList",
         params={"pageNum": 1, "pageSize": 20},
     )
-
-    test_har = {
-        "log": {
-            "entries": [
-                {
-                    "_resourceType": "xhr",
-                    "request": {
-                        "url": "/cms/activity/getActivityList?pageNum=1&pageSize=20",
-                        "method": "GET",
-                        "headers": [],
-                        "queryString": [{"name": "pageNum", "value": "1"}, {"name": "pageSize", "value": "20"}],
-                    },
-                    "response": {"status": 200, "content": {"text": "{}"}},
-                    "time": 50,
-                },
-                {
-                    "_resourceType": "xhr",
-                    "request": {
-                        "url": "/cms/activity/getActivityList?pageNum=3&pageSize=20",
-                        "method": "GET",
-                        "headers": [],
-                        "queryString": [{"name": "pageNum", "value": "3"}, {"name": "pageSize", "value": "20"}],
-                    },
-                    "response": {"status": 200, "content": {"text": "{}"}},
-                    "time": 50,
-                },
-            ]
-        }
-    }
-    har_file = tmp_path / "test.har"
-    with open(har_file, "w", encoding="utf-8") as f:
-        json.dump(test_har, f)
 
     generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(tmp_path / "output"))
     content = generator.generate_parametrized_test_content(str(api_file), "test_task")
@@ -1492,8 +1711,6 @@ def test_generate_parametrized_content_pagination_only(tmp_path, pagination_conf
 @allure.story("生成参数化测试内容")
 @allure.title("测试batch模式仅分页参数也生成参数化用例")
 def test_generate_parametrized_content_pagination_only_batch(tmp_path, pagination_config):
-    """无HAR的batch模式：API侧车仅有分页参数时也应生成默认查询用例（无参数化）。"""
-
     api_dir = tmp_path / "apis"
     api_dir.mkdir(parents=True)
     api_file = api_dir / "cms_advert_getAdvertList.py"
@@ -1505,7 +1722,6 @@ def test_generate_parametrized_content_pagination_only_batch(tmp_path, paginatio
         api_file,
         url="/cms/advert/getAdvertList",
         description="广告列表",
-        function_name="cms_advert_getAdvertList",
         params={"pageNum": 1, "pageSize": 10},
     )
 
@@ -1523,11 +1739,10 @@ def test_generate_parametrized_content_pagination_only_batch(tmp_path, paginatio
 @allure.story("生成参数化测试内容")
 @allure.title("测试活跃时间对且无constant_params时正常生成组合方法")
 def test_generate_parametrized_content_time_pair_without_constant_params(tmp_path):
-    """时间对 start 参数以 `{"param_name": start_name}` 追加到 param_items（无 other_params
-    键），constant_params 为空时旧逻辑不填充 other_params，导致
-    gen_batch_parametrized_test_methods 抛 KeyError。修复后应无条件填充并生成
-    start+end 组合测试方法。"""
-
+    # 时间对 start 参数以 {"param_name": start_name} 追加到 param_items（无 other_params
+    # 键），constant_params 为空时旧逻辑不填充 other_params，导致
+    # gen_batch_parametrized_test_methods 抛 KeyError。修复后应无条件填充并生成
+    # start+end 组合测试方法
     api_dir = tmp_path / "apis"
     api_dir.mkdir(parents=True)
     api_file = api_dir / "order_pageQuery.py"
@@ -1539,7 +1754,6 @@ def test_generate_parametrized_content_time_pair_without_constant_params(tmp_pat
         api_file,
         url="/order/pageQuery",
         description="订单分页查询",
-        function_name="order_pageQuery",
         params={"pageNum": 1, "pageSize": 10, "startTime": "", "endTime": "", "orderStatus": ""},
         param_remarks={
             "startTime": "开始时间 yyyy-MM-dd",
@@ -1570,10 +1784,9 @@ def test_generate_parametrized_content_time_pair_without_constant_params(tmp_pat
 @allure.story("生成参数化测试内容")
 @allure.title("测试HAR组合参数拆分为多参数参数化方法")
 def test_generate_parametrized_content_combo_params(tmp_path):
-    """组合参数键（如 header,orderTypes）此前生成引用 list_query_data 中不存在的
-    组合键的装饰器（pytest 收集期 KeyError）且参数未拆分。修复后应拆分为独立
-    参数、使用静态参数化值列表、other_params 排除子参数避免重复键覆盖。"""
-
+    # 组合参数键（如 header,orderTypes）此前生成引用 list_query_data 中不存在的
+    # 组合键的装饰器（pytest 收集期 KeyError）且参数未拆分。修复后应拆分为独立
+    # 参数、使用静态参数化值列表、other_params 排除子参数避免重复键覆盖
     api_dir = tmp_path / "apis"
     api_dir.mkdir(parents=True)
     api_file = api_dir / "order_list.py"
@@ -1585,7 +1798,6 @@ def test_generate_parametrized_content_combo_params(tmp_path):
         api_file,
         url="/order/list",
         description="订单列表",
-        function_name="order_list",
         params={"pageNum": 1, "pageSize": 10, "header": "", "orderTypes": ""},
         har_param_values={"header,orderTypes": [[1, "a"], [2, "b"]]},
     )
@@ -1610,9 +1822,8 @@ def test_generate_parametrized_content_combo_params(tmp_path):
 @allure.story("生成参数化测试内容")
 @allure.title("测试单值HAR组合参数仍走参数化而非运行时取值")
 def test_generate_parametrized_content_single_combo(tmp_path):
-    """单值组合参数（仅一组值）也保留参数化结构；否则会落入运行时取值路径
-    引用 list_query_data 中不存在的组合键。"""
-
+    # 单值组合参数（仅一组值）也保留参数化结构；否则会落入运行时取值路径
+    # 引用 list_query_data 中不存在的组合键
     api_dir = tmp_path / "apis"
     api_dir.mkdir(parents=True)
     api_file = api_dir / "order_list.py"
@@ -1624,7 +1835,6 @@ def test_generate_parametrized_content_single_combo(tmp_path):
         api_file,
         url="/order/list",
         description="订单列表",
-        function_name="order_list",
         params={"pageNum": 1, "pageSize": 10, "header": "", "orderTypes": ""},
         har_param_values={"header,orderTypes": [[1, "a"]]},
     )
@@ -1653,7 +1863,6 @@ def test_generate_parametrized_content_param_values_priority(tmp_path):
         api_file,
         url="/order/list",
         description="订单列表",
-        function_name="order_list",
         params={"pageNum": 1, "pageSize": 10, "header": "", "orderTypes": ""},
         param_values={"orderTypes": [1, 2, 3]},
         har_param_values={"header,orderTypes": [[1, "a"], [2, "b"]]},
@@ -1685,7 +1894,6 @@ def test_generate_parametrized_content_test0_constant_params(tmp_path):
         api_file,
         url="/order/list",
         description="订单列表",
-        function_name="order_list",
         params={"pageNum": 1, "pageSize": 10, "isDisSelfStoreOrder": None, "status": ""},
         param_values={"status": [0, 1]},
         constant_params={"pageNum": "1", "pageSize": "10", "isDisSelfStoreOrder": "0"},
@@ -1720,7 +1928,6 @@ def test_generate_parametrized_content_no_swagger_time_params_dynamic(tmp_path):
         api_file,
         url="/order/list",
         description="订单列表",
-        function_name="order_list",
         params={},
         har_params={
             "header": "1",
@@ -1756,9 +1963,8 @@ def test_generate_parametrized_content_no_swagger_time_params_dynamic(tmp_path):
 @allure.story("生成参数化测试内容")
 @allure.title("测试batch模式 api_params 为空时显式回退场景模式")
 def test_generate_parametrized_content_empty_api_params_batch(tmp_path):
-    """batch 模式下 api_info.params 与 api_info.data 均为空时，应显式短路回退场景模式，
-    而不是让下游方法对空 dict 做无意义遍历后才隐式回退。"""
-
+    # batch 模式下 api_info.params 与 api_info.data 均为空时，应显式短路回退场景
+    # 模式，而不是让下游方法对空 dict 做无意义遍历后才隐式回退
     api_dir = tmp_path / "apis"
     api_dir.mkdir(parents=True)
     api_file = api_dir / "health_check.py"
@@ -1771,7 +1977,6 @@ def test_generate_parametrized_content_empty_api_params_batch(tmp_path):
         api_file,
         url="/health",
         description="健康检查",
-        function_name="health_check",
     )
 
     generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(tmp_path / "output"))
@@ -1810,31 +2015,52 @@ def test_generate_parametrized_list_testcases_no_har():
 
 @allure.feature("测试用例生成器")
 @allure.story("生成参数化列表测试用例")
-@allure.title("测试目标URL无匹配")
+@allure.title("测试HAR未匹配到API文件时返回空列表")
 def test_generate_parametrized_list_testcases_no_match(tmp_path, write_har):
-
+    # 有 .py 文件但缺同名 .api.json 元数据 → match_api_files_for_har 匹配为空 → 早退 []
     har_file = write_har([_make_har_entry("/api/user/login", "POST")])
 
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
-    (api_dir / "user_login.py").write_text(
-        '''
-def user_login(data=data, token=token):
-    """
-    用户登录
-    /api/user/login
-    """
-    url = "/api/user/login"
-    return client.post(url=url, json=data)
-''',
-        encoding="utf-8",
-    )
+    (api_dir / "user_login.py").write_text(_USER_LOGIN_PY, encoding="utf-8")
 
     generator = TestCaseGenerator(api_dir=str(api_dir), base_urls=[])
-    result = asyncio.run(
-        generator.generate_parametrized_list_testcases(str(har_file), "test", target_url="/api/nonexistent")
-    )
+    result = asyncio.run(generator.generate_parametrized_list_testcases(str(har_file), "test"))
     assert result == []
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成参数化列表测试用例")
+@allure.title("测试 target_url 只生成匹配接口的用例")
+def test_generate_parametrized_list_testcases_target_url_filter(tmp_path, write_har):
+    # HAR 含两个接口的请求，target_url 只命中其一 → 只生成匹配接口的测试文件
+    har_file = write_har([
+        _make_har_entry("/api/user/login", "POST"),
+        _make_har_entry("/api/user/info", "GET"),
+    ])
+
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    login_file = api_dir / "user_login.py"
+    login_file.write_text(_USER_LOGIN_PY, encoding="utf-8")
+    _write_api_sidecar(login_file, url="/api/user/login", description="用户登录")
+
+    info_file = api_dir / "user_info.py"
+    info_file.write_text(_USER_LOGIN_PY, encoding="utf-8")
+    _write_api_sidecar(info_file, url="/api/user/info", description="用户信息")
+
+    output_dir = tmp_path / "output"
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir), base_urls=[])
+    result = asyncio.run(
+        generator.generate_parametrized_list_testcases(
+            str(har_file), "test", target_url="/api/user/login"
+        )
+    )
+
+    assert len(result) == 1
+    assert "test_user_login.py" in result[0]
+    assert os.path.exists(result[0])
 
 
 @allure.feature("测试用例生成器")
@@ -1895,6 +2121,18 @@ def user_list(data=data, token=token):
 
 @allure.feature("测试用例生成器")
 @allure.story("生成场景测试用例")
+@allure.title("测试HAR文件不存在返回None")
+def test_generate_scenario_testcase_no_har(tmp_path):
+    # 与 parametrized 入口的早退 [] 对应，scenario 入口早退返回 None
+    generator = TestCaseGenerator(api_dir=str(tmp_path / "apis"))
+    result = asyncio.run(
+        generator.generate_scenario_testcase("nonexistent.har", "/api/user/login", "test")
+    )
+    assert result is None
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成场景测试用例")
 @allure.title("测试目标URL无匹配")
 def test_generate_scenario_testcase_no_match(tmp_path, write_har):
 
@@ -1902,18 +2140,7 @@ def test_generate_scenario_testcase_no_match(tmp_path, write_har):
 
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
-    (api_dir / "user_login.py").write_text(
-        '''
-def user_login(data=data, token=token):
-    """
-    用户登录
-    /api/user/login
-    """
-    url = "/api/user/login"
-    return client.post(url=url, json=data)
-''',
-        encoding="utf-8",
-    )
+    (api_dir / "user_login.py").write_text(_USER_LOGIN_PY, encoding="utf-8")
 
     generator = TestCaseGenerator(api_dir=str(api_dir), base_urls=[])
     result = asyncio.run(generator.generate_scenario_testcase(str(har_file), "/api/nonexistent", "test"))
@@ -1933,18 +2160,7 @@ def test_generate_scenario_testcase_overwrite(tmp_path, write_har):
 
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
-    (api_dir / "user_login.py").write_text(
-        '''
-def user_login(data=data, token=token):
-    """
-    用户登录
-    /api/user/login
-    """
-    url = "/api/user/login"
-    return client.post(url=url, json=data)
-''',
-        encoding="utf-8",
-    )
+    (api_dir / "user_login.py").write_text(_USER_LOGIN_PY, encoding="utf-8")
     _write_api_sidecar(api_dir / "user_login.py", url="/api/user/login", description="用户登录")
 
     output_dir = tmp_path / "output"
@@ -2014,8 +2230,7 @@ def user_list(data=data, token=token):
     filepath = generated_files[0]
 
     # 验证生成内容包含参数化装饰器，且包含了3个不同的status值
-    with open(filepath, encoding="utf-8") as f:
-        content = f.read()
+    content = Path(filepath).read_text(encoding="utf-8")
 
     assert "pytest.mark.parametrize" in content
     assert "'status'" in content or '"status"' in content
@@ -2097,7 +2312,14 @@ def test_generate_batch_skipped_count(tmp_path):
     api_dir.mkdir()
     api_file = api_dir / "user_login.py"
     api_file.write_text(
-        'params = {"keyword": "test"}\n\ndef user_login(params=params):\n    """\n    用户登录\n    /user/login\n    """\n',
+        '''params = {"keyword": "test"}
+
+def user_login(params=params):
+    """
+    用户登录
+    /user/login
+    """
+''',
         encoding="utf-8",
     )
     _write_api_sidecar(
@@ -2118,6 +2340,22 @@ def test_generate_batch_skipped_count(tmp_path):
     assert result["skipped"] == 1
     assert result["generated"] == 0
     assert result["failed"] == 0
+
+
+@allure.feature("测试用例生成器")
+@allure.story("批量生成")
+@allure.title("测试 batch 传入不存在路径时忽略并返回空统计")
+def test_generate_batch_nonexistent_path(tmp_path, caplog):
+    # 路径既非目录也非文件 → 告警后 continue，不计入 total
+    caplog.set_level(logging.WARNING)
+    generator = TestCaseGenerator(api_dir=str(tmp_path / "apis"), output_dir=str(tmp_path / "output"))
+    result = asyncio.run(
+        generator.generate_batch_testcases([str(tmp_path / "missing.py")], har_file_path=None)
+    )
+    assert result["total"] == 0
+    assert result["generated"] == 0
+    assert result["failed"] == 0
+    assert any("路径不存在" in r.getMessage() for r in caplog.records)
 
 
 @allure.feature("测试用例生成器")
@@ -2169,8 +2407,7 @@ def common_ProductProvenance(headers=headers):
     assert os.path.exists(filepath)
 
     # 验证生成的是场景测试，不是参数化测试
-    with open(filepath, encoding="utf-8") as f:
-        content = f.read()
+    content = Path(filepath).read_text(encoding="utf-8")
 
     # 场景测试不含pytest.mark.parametrize，包含步骤函数
     assert "pytest.mark.parametrize" not in content
@@ -2181,26 +2418,13 @@ def common_ProductProvenance(headers=headers):
 @allure.feature("测试用例生成器")
 @allure.story("批量生成测试用例")
 @allure.title("测试描述含排除关键字时不使用参数化列表模式")
-def test_generate_batch_list_query_exclude_keywords(tmp_path, write_har):
+def test_generate_batch_list_query_exclude_keywords(tmp_path, write_har, monkeypatch):
     # HAR：/api/order/list 和 /api/order/detail 各两条不同参数的请求
-    def _entry(url, name, value):
-        return {
-            "_resourceType": "xhr",
-            "request": {
-                "url": url,
-                "method": "GET",
-                "headers": [],
-                "queryString": [{"name": name, "value": value}],
-            },
-            "response": {"status": 200, "content": {"text": "{}"}},
-            "time": 50,
-        }
-
     har_file = write_har([
-        _entry("https://example.com/api/order/list", "status", "1"),
-        _entry("https://example.com/api/order/list", "status", "2"),
-        _entry("https://example.com/api/order/detail", "id", "100"),
-        _entry("https://example.com/api/order/detail", "id", "200"),
+        _make_har_entry("https://example.com/api/order/list", query_string=[{"name": "status", "value": "1"}]),
+        _make_har_entry("https://example.com/api/order/list", query_string=[{"name": "status", "value": "2"}]),
+        _make_har_entry("https://example.com/api/order/detail", query_string=[{"name": "id", "value": "100"}]),
+        _make_har_entry("https://example.com/api/order/detail", query_string=[{"name": "id", "value": "200"}]),
     ])
 
     api_dir = tmp_path / "apis"
@@ -2251,37 +2475,32 @@ def order_detail(data=data):
 
     # 覆盖配置：列表关键字 + 排除关键字
     APIConfig.get_config("LIST_QUERY_KEYWORDS")
-    assert APIConfig._config is not None
-    orig_kw = APIConfig._config.get("LIST_QUERY_KEYWORDS")
-    orig_ex = APIConfig._config.get("LIST_QUERY_EXCLUDE_KEYWORDS")
-    APIConfig._config["LIST_QUERY_KEYWORDS"] = ["列表", "查询"]
-    APIConfig._config["LIST_QUERY_EXCLUDE_KEYWORDS"] = ["详情"]
-    try:
-        output_dir = tmp_path / "output"
-        generator = TestCaseGenerator(
-            api_dir=str(api_dir), output_dir=str(output_dir), base_urls=["https://example.com"]
-        )
-        result = asyncio.run(
-            generator.generate_batch_testcases(
-                [str(api_dir)], task_id="test_task", overwrite=True, har_file_path=str(har_file)
-            )
-        )
-        assert result["generated"] == 2
+    config = APIConfig._config
+    assert config is not None
+    monkeypatch.setitem(config, "LIST_QUERY_KEYWORDS", ["列表", "查询"])
+    monkeypatch.setitem(config, "LIST_QUERY_EXCLUDE_KEYWORDS", ["详情"])
 
-        contents = {}
-        for fp in result["generated_files"]:
-            with open(fp, encoding="utf-8") as f:
-                contents[os.path.basename(fp)] = f.read()
+    output_dir = tmp_path / "output"
+    generator = TestCaseGenerator(
+        api_dir=str(api_dir), output_dir=str(output_dir), base_urls=["https://example.com"]
+    )
+    result = asyncio.run(
+        generator.generate_batch_testcases(
+            [str(api_dir)], task_id="test_task", overwrite=True, har_file_path=str(har_file)
+        )
+    )
+    assert result["generated"] == 2
 
-        # 对照组：无排除关键字 → 参数化模式
-        assert "pytest.mark.parametrize" in contents["test_order_list.py"]
-        # 实验组：含“详情”排除关键字 → 场景模式（无参数化，含步骤函数）
-        detail_content = contents["test_order_detail.py"]
-        assert "pytest.mark.parametrize" not in detail_content
-        assert "step_" in detail_content
-    finally:
-        APIConfig._config["LIST_QUERY_KEYWORDS"] = orig_kw
-        APIConfig._config["LIST_QUERY_EXCLUDE_KEYWORDS"] = orig_ex
+    contents = {}
+    for fp in result["generated_files"]:
+        contents[os.path.basename(fp)] = Path(fp).read_text(encoding="utf-8")
+
+    # 对照组：无排除关键字 → 参数化模式
+    assert "pytest.mark.parametrize" in contents["test_order_list.py"]
+    # 实验组：含“详情”排除关键字 → 场景模式（无参数化，含步骤函数）
+    detail_content = contents["test_order_detail.py"]
+    assert "pytest.mark.parametrize" not in detail_content
+    assert "step_" in detail_content
 
 
 # ==================== 异步 / 同步模式测试 ====================
@@ -2298,14 +2517,22 @@ def test_scenario_test_method_definition_mode(async_mode, expected, tmp_path):
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
     (api_dir / "user_login.py").write_text(
-        "\ndef user_login(data=data):\n    \"\"\"\n    test\n    /api/login\n    \"\"\"\n    url = \"/api/login\"\n    return client.post(url=url, json=data)\n",
+        '''
+def user_login(data=data):
+    """
+    test
+    /api/login
+    """
+    url = "/api/login"
+    return client.post(url=url, json=data)
+''',
         encoding="utf-8",
     )
     _write_api_sidecar(api_dir / "user_login.py", url="/api/login", description="test")
 
-    generator = TestCaseGenerator(api_dir=str(api_dir), async_mode=async_mode)
+    render_ctx = build_render_ctx(async_mode, str(api_dir))
     result = gen_scenario_test_method_definition(
-        generator.render_ctx, str(api_dir / "user_login.py")
+        render_ctx, str(api_dir / "user_login.py")
     )
     content = "\n".join(result)
     assert expected in content
@@ -2321,10 +2548,12 @@ def test_scenario_test_method_definition_mode(async_mode, expected, tmp_path):
     (False, "with", "async with"),
 ])
 def test_step_function_body_mode(async_mode, expected_keyword, unexpected_keyword):
-    generator = TestCaseGenerator(api_dir="apis", async_mode=async_mode)
+    render_ctx = build_render_ctx(async_mode, "apis")
+    api_info = APIFileInfo()
+    api_info.data = {"name": ""}  # 声明 data 渠道，触发 data=data 渲染分支
     content = []
     gen_step_function_body(
-        generator.render_ctx, content, "user_login", APIFileInfo(data={"name": ""}),
+        render_ctx, content, "user_login", api_info,
         ParsedRequestInfo(query_params={}, post_data={"name": "test"})
     )
     result = "\n".join(content)
@@ -2341,9 +2570,9 @@ def test_step_function_body_mode(async_mode, expected_keyword, unexpected_keywor
     (False, None, "client.set_client"),
 ])
 def test_imports_mode(async_mode, should_contain, should_not_contain):
-    generator = TestCaseGenerator(api_dir="apis", async_mode=async_mode)
+    render_ctx = build_render_ctx(async_mode, "apis")
     result = gen_test_case_imports(
-        generator.render_ctx, service_package="test_service", function_name="test_api"
+        render_ctx, service_package="test_service", function_name="test_api"
     )
     content = "\n".join(result)
     if should_contain:

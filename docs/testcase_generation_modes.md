@@ -138,9 +138,9 @@ flowchart TD
 
 #### 数组类型参数（多选）
 
-api.json 中默认值为 list 的参数（如 `manualInterventionReasons: []`）是数组类型。
+api.json 中默认值为 list 的参数（如 `reviewReasons: []`）是数组类型。
 parametrize 把候选值打散为标量逐个传入，方法体渲染时包回单元素数组
-`"manualInterventionReasons": [manualInterventionReasons]`，保证请求体类型正确。
+`"reviewReasons": [reviewReasons]`，保证请求体类型正确。
 
 #### 搜索条件断言
 
@@ -150,11 +150,11 @@ parametrize 把候选值打散为标量逐个传入，方法体渲染时包回�
 for item in items:
     if isinstance(item, dict):
         for k, v in item.items():
-            if k.lower() == "manualinterventionreasons":
+            if k.lower() == "reviewreasons":
                 if v is None:
                     continue
-                assert v is None or str(v) == str(manualInterventionReasons), (
-                    f"字段 {k} 值 {v} 与搜索条件 manualInterventionReasons={manualInterventionReasons} 不一致"
+                assert v is None or str(v) == str(reviewReasons), (
+                    f"字段 {k} 值 {v} 与搜索条件 reviewReasons={reviewReasons} 不一致"
                 )
 ```
 
@@ -171,13 +171,13 @@ from har2pytest.client import async_client, client
 
 client.set_client(async_client)
 
-from apis.mall_mgmt_application import mgmt_order_exchange_getOrderExchangeList
+from apis.demo_mgmt_application import demo_order_getList
 
 
 @pytest.mark.test_list_query
 @allure.severity(Severity.NORMAL)
-@allure.feature("mall_mgmt_application")
-@allure.story("/mgmt/order/exchange/getOrderExchangeList")
+@allure.feature("demo_mgmt_application")
+@allure.story("/demo/order/getList")
 class TestClass:
     @property
     def headers(self):
@@ -187,39 +187,39 @@ class TestClass:
         }
 
     list_query_data = {
-        "applySource": [1, 2],
-        "exchangeStatus": [1, 2, 3, 4, 5, 6, 7, 98, 99],
-        "manualInterventionReasons": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "sourceType": [1, 2],
+        "orderStatus": [1, 2, 3, 4, 5, 6, 7, 98, 99],
+        "reviewReasons": [1, 2, 3, 4, 5, 6, 7, 8, 9],
         "pageNum": 1,
         "pageSize": 10,
         # ... 其余参数取默认值
     }
 
-    @allure.title("查询换货单列表: 获取响应数据")
-    async def test_0_mgmt_order_exchange_getOrderExchangeList(self):
+    @allure.title("查询订单列表: 获取响应数据")
+    async def test_0_demo_order_getList(self):
         params = {
-            "applySource": None,
-            "manualInterventionReasons": [],
+            "sourceType": None,
+            "reviewReasons": [],
             # ... 其余参数取默认值
         }
-        async with mgmt_order_exchange_getOrderExchangeList(params=params, headers=self.headers) as r:
+        async with demo_order_getList(params=params, headers=self.headers) as r:
             assert r.status == 200
             data = await r.json()
             assert data["code"] == 200
 
-    @pytest.mark.parametrize("manualInterventionReasons", list_query_data["manualInterventionReasons"])
-    @allure.title("查询换货单列表: 人工介入原因（多选）1-AI审核不通过 查询")
-    async def test_7_mgmt_order_exchange_getOrderExchangeList(self, manualInterventionReasons):
+    @pytest.mark.parametrize("reviewReasons", list_query_data["reviewReasons"])
+    @allure.title("查询订单列表: 审核原因（多选）1-审核不通过 查询")
+    async def test_7_demo_order_getList(self, reviewReasons):
 
         params = {
-            "manualInterventionReasons": [manualInterventionReasons],
-            "applySource": None,
+            "reviewReasons": [reviewReasons],
+            "sourceType": None,
             "pageNum": 1,
             "pageSize": 10,
             # ... 其余参数取默认值
         }
 
-        async with mgmt_order_exchange_getOrderExchangeList(params=params, headers=self.headers) as r:
+        async with demo_order_getList(params=params, headers=self.headers) as r:
             assert r.status == 200
             data = await r.json()
             assert data["code"] == 200
@@ -227,7 +227,7 @@ class TestClass:
 ```
 
 > 同步模式差异：不导入 async_client、不调用 `client.set_client`，方法为普通 `def`，
-> 调用形式为 `with mgmt_xxx(...) as r:`，状态断言为 `r.status_code`，默认输出目录为 `testcases/sync/`。
+> 调用形式为 `with demo_xxx(...) as r:`，状态断言为 `r.status_code`，默认输出目录为 `testcases/sync/`。
 
 ---
 
@@ -237,7 +237,9 @@ class TestClass:
 
 为多步骤业务流程生成场景化链路测试用例。每个步骤对应一个 `@allure.step` 嵌套函数，
 测试数据通过用例级 `test_data` 字典在步骤间传递：前序步骤响应整存，后续步骤参数
-按取值来源动态引用。
+按取值来源动态引用。上传类接口（`COLLECT_RESPONSE_APIS` 配置命中）的多次调用
+合并为一个带循环形参的步骤函数，响应片段追加进 `test_data` 收集列表，后续步骤
+的列表参数以列表推导引用（见 Step 3/Step 4）。
 
 ### 调用链
 
@@ -290,15 +292,22 @@ flowchart TD
 输入: content, requests, api_files, class_headers
  └─ 第一遍：匹配 API 文件并分配步骤名/步骤键
       ├─ URLMatcher.find_matching_api_file() 匹配每个请求
-      ├─ 从 API 文件 URL 模板提取路径参数（/orderInfo/{orderNo} → orderNo）
+      ├─ 从 API 文件 URL 模板提取路径参数（/order/detail/{orderNo} → orderNo）
       ├─ gen_step_function_name()：同名 API 第二次起加计数前缀 step_1_xxx
-      └─ make_step_key()：API 函数名按下划线取末两段作 test_data 键，冲突时向前扩展
+      ├─ make_step_key()：API 函数名按下划线取末两段作 test_data 键，冲突时向前扩展
+      └─ find_collect_config()：响应收集接口（COLLECT_RESPONSE_APIS 子串匹配）的
+         多次调用合并为同一步骤名，执行条目只保留一条（循环体逐文件执行）
  └─ build_scenario_value_plan() 分析取值计划（见 Step 4）
  └─ 开启 TRACK_PARAM_SOURCES 时，在第一个步骤前插入 test_data 初始化字典
  └─ 第二遍：逐步骤生成
       ├─ s_step_heading.j2：@allure.step("描述") + def step_xxx()
+      │    （响应收集接口额外带文件形参 def step_xxx(file)，重复调用只渲染一次）
       ├─ gen_step_function_body()：files/data/params/无参数 四类调用
+      │    （渠道由 API 文件声明决定；载荷键以 HAR 实际请求参数为准，
+      │     HAR 未传的 Swagger 声明键不渲染，API 文件无声明时按 HAR 结构推断渠道；
+      │     响应收集接口的文件字段改渲染为形参引用，其余表单字段照常引用）
       ├─ 断言 + 被后续步骤引用的响应整存 test_data[步骤键] = data["data"]
+      │    （响应收集接口无 code 断言，改追加 test_data[collect_key].append(data[路径])）
       └─ 未被引用的响应不存储，避免无用数据常驻
 ```
 
@@ -309,13 +318,22 @@ flowchart TD
 
 | 来源 | 触发条件 | 生成的代码形态 |
 |------|---------|--------------|
-| **step_response** | 前序步骤压平叶子中存在「字段名（不分大小写）与值均相同」的叶子 | `test_data['步骤键']['路径']` 引用表达式 |
+| **step_response** | 前序步骤压平叶子中存在「字段名（不分大小写）与值均相同」的叶子；字段名未命中时按值兜底——数值型 ≥5 字符、非数值（中文/字母）≥2 字符且在前序响应中单步骤唯一出现 | `test_data['步骤键']['路径']` 引用表达式 |
 | **container_projection** | 容器参数（dict/list）与响应某子结构部分一致 | 逐字段生成引用表达式，不一致字段同名同值时提升为用例级 test_data，否则保留 HAR 录制值 |
-| **test_data** | 未在前序响应中找到同名同值叶子的参数（含首步路径参数） | 生成 `test_data['参数名']` 引用，值集中在测试方法顶部的 test_data 初始化字典，便于用户修改 |
+| **collect_projection** | 纯叶子列表参数元素与前序响应收集接口（COLLECT_RESPONSE_APIS）的收集片段按同一字段对齐（元素数一致且值一致） | `[i['字段名'] for i in test_data['collect_key']]` 列表推导表达式 |
+| **json_projection** | 参数值为 JSON 对象字符串（非空叶子 ≥2）且全部非空叶子在前序同一步骤键的响应压平索引中同值命中（完备子集，null/空串键保持字面量），候选步骤键唯一 | `json.dumps({...})` 把响应字段重组回字符串（产物头部自动补 `import json`），保持接口 string 声明 |
+| **test_data** | 未在前序响应中找到同名同值叶子的参数（含首步路径参数）；同值在前序响应中多处出现无法确定语义来源时也归此类，并在行尾生成注释提示候选路径（供手工改引用） | 生成 `test_data['参数名']` 引用，值集中在测试方法顶部的 test_data 初始化字典，便于用户修改 |
 | **literal** | 空值或被忽略的参数 | 保持字面量原样输出 |
 
 响应存储规则：每个步骤响应 `data` 一律整存（`test_data[步骤键] = data["data"]`），
 不做任何裁剪；引用时携带完整路径（如 `test_data['product_search']['list'][0]['serialNo']`）。
+
+响应收集接口（`COLLECT_RESPONSE_APIS` 配置，详见 [configuration.md](configuration.md)）是例外：
+
+- 不整存响应、不建叶子/容器索引，普通取值引用无法命中（避免悬空引用）；
+- 文件字段（默认 `file`）不进 test_data，改收进 `files` 列表（数量与调用次数一致）；
+- 测试方法顶部注入 `test_data[collect_key] = []` 与文件值列表；
+- 仅 `collect_projection` 可引用收集片段（append_path 从响应 JSON 取的片段）。
 
 #### headers 差异对比
 
@@ -333,15 +351,15 @@ import os
 import allure
 from allure_commons.types import Severity
 
-from apis.mall_mgmt_application import (
-    mgmt_order_cancelOrder,
-    mgmt_order_orderInfo_orderNo,
+from apis.demo_mgmt_application import (
+    demo_order_cancel,
+    demo_order_info,
 )
 
 
 @allure.severity(Severity.CRITICAL)
-@allure.feature("mall_mgmt_application")
-@allure.story("/mgmt/order/cancelOrder")
+@allure.feature("demo_mgmt_application")
+@allure.story("/demo/order/cancel")
 class TestClass:
     @property
     def headers(self):
@@ -351,43 +369,43 @@ class TestClass:
         }
 
     @allure.title("取消订单")
-    def test_mgmt_order_cancelOrder(self):
+    def test_demo_order_cancel(self):
 
         # 初始化测试数据字典，用于在步骤间传递数据
         test_data: dict = {
-            "orderNo": "SG014000261020000192",
+            "orderNo": "SO000000000000000001",
         }
 
         @allure.step("取消订单")
-        def step_mgmt_order_cancelOrder():
+        def step_demo_order_cancel():
 
             data = {
                 "orderNo": test_data["orderNo"],
                 "remarks": "111",
             }
 
-            with mgmt_order_cancelOrder(data=data, headers=self.headers) as r:
+            with demo_order_cancel(data=data, headers=self.headers) as r:
                 assert r.status_code == 200
                 data = r.json()
                 assert data["code"] == 200
-                test_data["order_cancelOrder"] = data["data"]
+                test_data["order_cancel"] = data["data"]
 
         @allure.step("订单信息")
-        def step_mgmt_order_orderInfo_orderNo():
+        def step_demo_order_info():
 
             params = {
-                "orderNo": test_data["order_cancelOrder"]["orderNo"],
+                "orderNo": test_data["order_cancel"]["orderNo"],
             }
 
-            with mgmt_order_orderInfo_orderNo(params=params, headers=self.headers) as r:
+            with demo_order_info(params=params, headers=self.headers) as r:
                 assert r.status_code == 200
                 data = r.json()
                 assert data["code"] == 200
-                test_data["orderInfo_orderNo"] = data["data"]
+                test_data["order_info"] = data["data"]
 
         # 执行所有测试步骤
-        step_mgmt_order_cancelOrder()
-        step_mgmt_order_orderInfo_orderNo()
+        step_demo_order_cancel()
+        step_demo_order_info()
 ```
 
 ---
@@ -516,7 +534,7 @@ batch 模式单独运行时没有单份 HAR 作为整个批量任务的输入；
 | `TimePairContext.build()` | `time_pair.py` | 时间对查找表与角色映射 | parametrized |
 | `get_requests_from_source()` | `scenario_codegen.py` | HAR/API 文件二选一获取请求序列 | scenario |
 | `gen_scenario_step_functions()` | `scenario_codegen.py` | 场景步骤函数生成（两遍处理） | scenario |
-| `build_scenario_value_plan()` | `step_values.py` | 分析步骤取值计划（step_response/container_projection/test_data/literal） | scenario |
+| `build_scenario_value_plan()` | `step_values.py` | 分析步骤取值计划（step_response/container_projection/collect_projection/json_projection/test_data/literal） | scenario |
 | `write_test_file()` | `utils.py` | 写盘（含输出目录创建） | 所有模式 |
 | `format_directory()` | `utils.py` | 目录级 ruff 格式化 | 所有模式 |
 | `validate_python()` | `codegen.py` | 写盘前 ast.parse 语法校验 | 所有模式 |

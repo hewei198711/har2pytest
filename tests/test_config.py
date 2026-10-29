@@ -53,8 +53,8 @@ def tmp_config(tmp_path):
 @allure.story("默认配置")
 @allure.title("测试默认配置")
 def test_default_config(test_config):
-    assert APIConfig.BASE_URLS() == ["https://taobao.com/api"]
-    assert APIConfig.KILL_URLS() == ["aliyuncs.com"]
+    assert APIConfig.BASE_URLS() == ["https://example.com/api"]
+    assert APIConfig.KILL_URLS() == ["blocked-cdn.example.com"]
     assert APIConfig.DEFAULT_API_DIR() == "apis"
     assert APIConfig.INVALID_PARAMS() == {"partnerKey", "sign", "timestamp", "nonce", "rnd"}
     assert APIConfig.HEADERS_TO_INCLUDE() == {
@@ -81,7 +81,7 @@ def test_default_config(test_config):
     assert APIConfig.is_time_param("keyword") is False
     # PATH_URLS
     assert len(APIConfig.PATH_URLS()) == 5
-    assert "/mobile/dashbord/{usrId}" in APIConfig.PATH_URLS()
+    assert "/mobile/demo/{usrId}" in APIConfig.PATH_URLS()
     # 列表查询排除关键字（测试配置未设置，回退默认空列表）
     assert APIConfig.LIST_QUERY_EXCLUDE_KEYWORDS() == []
     # 单接口测试模式配置（测试配置未设置，回退默认空列表）
@@ -209,11 +209,11 @@ def test_default_list_query_and_state_patterns(tmp_config):
 @allure.title("测试根据URL判断服务包")
 def test_determine_service_package(test_config):
     # 匹配 SERVICE_MAPPING 中的 mobile → mobile_application
-    assert APIConfig.determine_service_package("/mobile/trade/orderCommit") == "mobile_application"
+    assert APIConfig.determine_service_package("/mobile/demo/list") == "mobile_application"
     # 匹配 SERVICE_MAPPING 中的 member → order_application
-    assert APIConfig.determine_service_package("/member/order/detail") == "order_application"
+    assert APIConfig.determine_service_package("/member/demo/detail") == "order_application"
     # 大小写不敏感匹配
-    assert APIConfig.determine_service_package("/Mobile/Dashboard") == "mobile_application"
+    assert APIConfig.determine_service_package("/Mobile/Demo") == "mobile_application"
     # 未匹配时回退到 DEFAULT_API_DIR
     assert APIConfig.determine_service_package("/unknown/path") == "apis"
     # 空字符串和 None 回退到 DEFAULT_API_DIR
@@ -228,7 +228,7 @@ def test_determine_service_package_first_call_cold_start(test_config, monkeypatc
     # 模拟冷启动：配置缓存与预计算映射均未初始化
     APIConfig._config = None
     monkeypatch.setattr(APIConfig, "_service_mapping_lower", {})
-    assert APIConfig.determine_service_package("/mobile/trade/orderCommit") == "mobile_application"
+    assert APIConfig.determine_service_package("/mobile/demo/list") == "mobile_application"
 
 
 # ==================== 配置异常分支测试 ====================
@@ -286,7 +286,7 @@ def test_get_config_auto_loads(test_config):
     APIConfig._config = None
     # get_config 应自动触发 _load_config
     result = APIConfig.get_config("BASE_URLS")
-    assert result == ["https://taobao.com/api"]
+    assert result == ["https://example.com/api"]
     # _config 应已被填充
     assert APIConfig._config is not None
 

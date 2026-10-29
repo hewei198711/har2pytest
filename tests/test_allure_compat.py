@@ -8,7 +8,6 @@ import allure
 
 from har2pytest import allure_compat
 
-
 # ==================== 安装与探测测试 ====================
 
 

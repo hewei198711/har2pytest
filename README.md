@@ -86,7 +86,7 @@ har2pytest testcase api_request.har \
 # 批量生成（指定 API 文件目录，无 HAR 文件）
 har2pytest testcase \
   --pattern batch \
-  --api-files apis/mall_store_application \
+  --api-files apis/demo_store_application \
   --output testcases/sync \
   --api-dir apis \
   --overwrite
@@ -101,7 +101,7 @@ har2pytest testcase \
 # 批量生成（多个 API 文件目录，用逗号分隔）
 har2pytest testcase \
   --pattern batch \
-  --api-files apis/mall_store_application,apis/mall_center_member \
+  --api-files apis/demo_store_application,apis/demo_center_member \
   --output testcases/sync \
   --overwrite
 

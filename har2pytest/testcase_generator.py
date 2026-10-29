@@ -663,8 +663,14 @@ class TestCaseGenerator:
         if step_functions:
             content.append("        # 执行所有测试步骤")
             call_prefix = "await " if self.async_mode else ""
-            for step_func in step_functions:
-                content.append(f"        {call_prefix}{step_func}()")
+            for call in step_functions:
+                if call.get("collect") is not None:
+                    # 响应收集接口：按 test_data 文件列表逐文件执行（响应追加进收集列表）
+                    files_key = call["collect"].get("files_key") or "files"
+                    content.append(f"        for file in test_data[{files_key!r}]:")
+                    content.append(f"            {call_prefix}{call['name']}(file)")
+                else:
+                    content.append(f"        {call_prefix}{call['name']}()")
             content.append("")
 
         rendered = "\n".join(content)

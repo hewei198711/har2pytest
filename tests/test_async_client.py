@@ -7,8 +7,6 @@ import allure
 import pytest
 
 from har2pytest.client import AsyncClient, AsyncResponseContext, async_client
-from har2pytest.logger import logger
-
 
 # ==================== Fixtures ====================
 

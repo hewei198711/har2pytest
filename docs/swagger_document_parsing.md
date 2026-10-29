@@ -42,19 +42,19 @@ flowchart TD
 #### 策略 1：通过 `swagger-resources` 发现（推荐）
 
 ```
-请求: GET https://taobao.com/sw/order-application/v2/api-docs/swagger-resources
+请求: GET https://example.com/sw/demo-application/v2/api-docs/swagger-resources
 
 响应:
 [
     {
-        "name": "order-application",
-        "location": "/sw/order-application/v2/api-docs",
-        "url": "/sw/order-application/v2/api-docs"
+        "name": "demo-application",
+        "location": "/sw/demo-application/v2/api-docs",
+        "url": "/sw/demo-application/v2/api-docs"
     }
 ]
 
 → 提取 location/url 字段
-→ 请求完整文档: GET https://taobao.com/sw/order-application/v2/api-docs
+→ 请求完整文档: GET https://example.com/sw/demo-application/v2/api-docs
 → 返回 Swagger JSON 数据
 ```
 
@@ -77,7 +77,7 @@ doc_paths = [
 ```python
 # 缓存 key: service_base_url
 self.swagger_cache = {
-    "https://taobao.com/sw/order-application/v2/api-docs": { ... },
+    "https://example.com/sw/demo-application/v2/api-docs": { ... },
 }
 ```
 
@@ -343,7 +343,7 @@ param_descriptions = {
 
 ```bash
 # 从 Swagger 文档生成所有 API 文件
-har2pytest swagger https://taobao.com/sw/order-application/v2/api-docs
+har2pytest swagger https://example.com/sw/demo-application/v2/api-docs
 
 # 指定输出目录
 har2pytest swagger https://... --output apis
