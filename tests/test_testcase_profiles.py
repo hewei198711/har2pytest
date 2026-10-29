@@ -147,14 +147,15 @@ def test_profile_auto_with_exclude(tmp_path):
 
 @allure.feature("测试模式配置化")
 @allure.story("关键字回落")
-@allure.title("测试描述不含列表关键字但有参数时回落参数化模式")
-def test_no_keyword_match_with_params_falls_back_to_parametrized(tmp_path):
+@allure.title("测试描述不含列表关键字时即使带参数也回落场景模式")
+def test_no_keyword_match_with_params_falls_back_to_scenario(tmp_path):
     gen = TestCaseGenerator(api_dir=str(tmp_path / "apis"))
     api_file = _write_api(tmp_path, "order_detail.py", "订单详情", "/mgmt/order/detail")
-    # 全局关键字为 ["列表"]，描述 "订单详情" 不含 "列表"，但 API 携带参数，应回落为 parametrized
+    # 全局关键字为 ["列表"]，描述 "订单详情" 不含 "列表"；即使 API 携带参数也应回落 scenario，
+    # 避免非列表接口（如“获取协议”）被渲染成 list_query 形态（test_0 收集语义不符）
     restore = _set_profiles([], keywords=["列表"])
     try:
-        assert gen._resolve_testcase_mode(api_file) == "parametrized"
+        assert gen._resolve_testcase_mode(api_file) == "scenario"
     finally:
         restore()
 

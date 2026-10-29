@@ -93,8 +93,13 @@ def gen_test_case_imports(
     """
     content = [
         "import os",
-        "",
     ]
+    if is_list_query:
+        # list_query_data 类属性注解 dict[str, Any] 依赖：test_0 收集逻辑会把响应中
+        # str/int/float 类型的字段值写入 list_query_data，与初始 str/list 值类型混合，
+        # 值类型须为 Any 才能通过类型检查（insert_datetime_import 按 import os 定位插入）
+        content.append("from typing import Any")
+    content.append("")
 
     api_dir = render_ctx["api_dir"]
     async_mode = render_ctx["async_mode"]
@@ -185,7 +190,7 @@ def gen_allure_description(
 
 def gen_test_case_description(
     render_ctx: dict[str, Any],
-    api_url: str,
+    api_urls: list[str],
     service_package: str,
     severity: str = "NORMAL",
     api_description: str = "",
@@ -196,7 +201,8 @@ def gen_test_case_description(
 
     Args:
         render_ctx: 模板渲染上下文
-        api_url: API URL
+        api_urls: 接口 URL 列表，每个接口渲染为一个 story（单接口场景传单元素列表）；
+            列表首个元素同时用作 @allure.description 中的主接口地址
         service_package: 服务包名称
         severity: 测试用例严重级别
         api_description: 接口名称/描述
@@ -208,7 +214,7 @@ def gen_test_case_description(
     """
     description = ""
     if api_description:
-        description = gen_allure_description(api_url, api_description, param_remarks)
+        description = gen_allure_description(api_urls[0], api_description, param_remarks)
     header_items = []
     if api_headers:
         header_items = [(key, header_value_formatter(value)) for key, value in api_headers.items()]
@@ -217,7 +223,7 @@ def gen_test_case_description(
         "tc_description.j2",
         severity=severity,
         service_package=service_package,
-        api_url=api_url,
+        api_urls=api_urls,
         api_description=description,
         header_items=header_items,
     )

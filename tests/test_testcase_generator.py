@@ -407,11 +407,14 @@ def test_match_api_files_for_har_no_match(tmp_path, write_har):
 @allure.title("测试生成场景测试用例内容")
 def test_generate_scenario_test_content(tmp_path, write_har):
 
-    har_file = write_har([_make_har_entry(
-        "/api/user/login", "POST",
-        headers=[{"name": "Content-Type", "value": "application/json"}],
-        post_data={"mimeType": "application/json", "text": "{}"},
-    )])
+    har_file = write_har([
+        _make_har_entry(
+            "/api/user/login", "POST",
+            headers=[{"name": "Content-Type", "value": "application/json"}],
+            post_data={"mimeType": "application/json", "text": "{}"},
+        ),
+        _make_har_entry("/api/user/info", "GET"),
+    ])
 
     api_dir = tmp_path / "apis" / "test_service"
     api_dir.mkdir(parents=True)
@@ -421,10 +424,25 @@ def test_generate_scenario_test_content(tmp_path, write_har):
 
     _write_api_sidecar(api_file, url="/api/user/login", description="用户登录")
 
+    info_file = api_dir / "user_info.py"
+    info_file.write_text(
+        '''
+def user_info(data=data, token=token):
+    """
+    用户信息
+    /api/user/info
+    """
+    url = "/api/user/info"
+    return client.get(url=url, params=data)
+''',
+        encoding="utf-8",
+    )
+    _write_api_sidecar(info_file, url="/api/user/info", description="用户信息")
+
     generator = TestCaseGenerator(api_dir=str(api_dir))
     content = generator.generate_scenario_test_content(
         har_file_path=str(har_file),
-        api_files=[str(api_file)],
+        api_files=[str(api_file), str(info_file)],
         task_id="test_task",
         target_api_file=str(api_file),
     )
@@ -433,6 +451,8 @@ def test_generate_scenario_test_content(tmp_path, write_har):
     assert "test_user_login" in content
     assert "user_login" in content
     assert "allure" in content
+    # 多接口场景：每个步骤接口都渲染为一个 story，主接口置首
+    assert "@allure.story('/api/user/login', '/api/user/info')" in content
 
 
 @allure.feature("测试用例生成器")
@@ -1017,27 +1037,31 @@ def user_info(data=data, token=token):
 @allure.feature("测试用例生成器")
 @allure.story("生成测试用例描述")
 @allure.title("测试测试用例描述与 headers 属性生成")
-@pytest.mark.parametrize("story_name,feature_name,severity,kwargs,checks", [
-    ("/api/user/login", "test_service", None, {},
+@pytest.mark.parametrize("story_urls,feature_name,severity,kwargs,checks", [
+    (["/api/user/login"], "test_service", None, {},
      ["has:Severity.NORMAL", "has:test_service", "has:/api/user/login", "has:class TestClass:",
       "nothas:@allure.description", "nothas:@property", "nothas:def headers(self):"]),
-    ("/api/order/create", "order_service", "CRITICAL", {},
+    (["/api/order/create"], "order_service", "CRITICAL", {},
      ["has:Severity.CRITICAL"]),
-    ("/api/user/login", "user_service", "NORMAL",
+    (["/api/user/login"], "user_service", "NORMAL",
      {"api_description": "用户登录", "param_remarks": {"username": "会员账号", "password": "登录密码"}},
      ["has:@allure.description", "has:用户登录", "has:- 接口地址：/api/user/login",
       "has:- username：会员账号", "has:- password：登录密码", "has:class TestClass:"]),
-    ("/api/order/list", "order_service", None,
+    (["/api/order/list"], "order_service", None,
      {"api_headers": {"authorization": "bearer-token-value", "GW-Client": "test"}},
      ["has:@property", "has:def headers(self):",
       'has:"authorization": "bearer-token-value",',
       'has:"GW-Client": "test",']),
+    (["/api/user/login", "/api/user/info", "/api/order/list"], "user_service", "NORMAL",
+     {"api_description": "用户登录"},
+     ["has:@allure.story('/api/user/login', '/api/user/info', '/api/order/list')",
+      "has:- 接口地址：/api/user/login"]),
 ])
-def test_generate_test_case_description(story_name, feature_name, severity, kwargs, checks):
+def test_generate_test_case_description(story_urls, feature_name, severity, kwargs, checks):
     render_ctx = build_render_ctx(False, "apis")
     call_args = {"severity": severity} if severity else {}
     call_args.update(kwargs)
-    result = gen_test_case_description(render_ctx, story_name, feature_name, **call_args)
+    result = gen_test_case_description(render_ctx, story_urls, feature_name, **call_args)
     content = "\n".join(result)
     for check in checks:
         if check.startswith("has:"):
@@ -1705,6 +1729,39 @@ def test_generate_parametrized_content_pagination_only(tmp_path, pagination_conf
     # 分页参数从 api_params 取默认值，不再从 HAR 提取多值参数化
     assert '"pageNum"' in content
     assert '"pageSize":' in content
+    # list_query_data 类属性带 dict[str, Any] 注解，test_0 收集可写入 str/int/float 响应值
+    assert "list_query_data: dict[str, Any] = {" in content
+    assert "from typing import Any" in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成参数化测试内容")
+@allure.title("测试test_0响应收集采用响应值优先覆盖逻辑")
+def test_generate_parametrized_content_test0_response_priority(tmp_path, pagination_config):
+    # 收集逻辑：响应值优先，首条记录的匹配值覆盖 list_query_data 已有值（含录制值）；
+    # 同一参数只收集一次（collected 集合保证取首条记录而非末条）
+    api_dir = tmp_path / "apis"
+    api_dir.mkdir(parents=True)
+    api_file = api_dir / "mgmt_page_query.py"
+    api_file.write_text(
+        "def mgmt_page_query(params=params, headers=headers):\n    pass\n",
+        encoding="utf-8",
+    )
+    _write_api_sidecar(
+        api_file,
+        url="/mgmt/page/query",
+        description="分页查询",
+        params={"activityNo": "", "pageNum": 1, "pageSize": 10},
+    )
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(tmp_path / "output"))
+    content = generator.generate_parametrized_test_content(str(api_file), "test_task")
+    assert content is not None
+    assert "collected = set()" in content
+    assert "if param_name and param_name not in collected:" in content
+    assert "collected.add(param_name)" in content
+    # 旧“仅填空值”条件已移除
+    assert "not self.list_query_data[param_name]" not in content
 
 
 @allure.feature("测试用例生成器")

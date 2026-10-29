@@ -40,6 +40,7 @@ from .scenario_codegen import (
     gen_scenario_step_functions,
     gen_scenario_test_method_definition,
     get_requests_from_source,
+    match_scenario_steps,
 )
 from .swagger_handler import SwaggerHandler
 from .time_pair import TimePairContext
@@ -178,13 +179,9 @@ class TestCaseGenerator:
         is_list_query = keywords_matched
         if is_list_query and exclude and any(kw in description for kw in exclude):
             is_list_query = False
-        # 关键字未匹配时，检查 API 是否携带参数（Swagger 或 HAR 捕获），
-        # 有参数的接口默认走参数化路径，避免生成无参数的空壳场景用例。
-        # 注意：仅在关键字完全未匹配时回退，不覆盖 exclude_keywords 的排除决定
-        if not is_list_query and not keywords_matched:
-            has_params = bool(api_info.params or api_info.data or api_info.har_params)
-            if has_params:
-                is_list_query = True
+        # 仅描述命中列表关键字（或 TESTCASE_PROFILES 显式指定）才走参数化；
+        # 其余接口（含带参数的非列表接口）一律回落 scenario 单请求用例，
+        # 避免把"获取协议"等非列表接口渲染成 list_query 形态（test_0 收集语义不符）
         return "parametrized" if is_list_query else "scenario"
 
     # ==================== Swagger/URL 匹配 ====================
@@ -558,7 +555,7 @@ class TestCaseGenerator:
         )
         content.extend(
             gen_test_case_description(
-                ctx, story_name, feature_name or "TODO", severity="NORMAL",
+                ctx, [story_name], feature_name or "TODO", severity="NORMAL",
                 api_description=api_info.description, param_remarks=api_info.param_remarks,
                 api_headers=api_info.headers,
             )
@@ -634,6 +631,15 @@ class TestCaseGenerator:
 
         feature_name, story_name = extract_api_info_for_scenario(target_api_file, self.api_dir)
 
+        # 类头渲染前先完成步骤匹配：多 story 装饰器需要全部步骤接口 URL，
+        # 步骤函数生成也复用同一份匹配结果，避免重复执行 URLMatcher 匹配
+        matched, step_calls, step_keys = match_scenario_steps(requests, api_files)
+
+        # 类头多 story：主接口置首，其余按 HAR 执行顺序去重（同接口多次调用只保留一个）
+        story_urls = list(dict.fromkeys(
+            [story_name] + [api_info.url for _, api_info, _ in matched if api_info.url]
+        ))
+
         api_description = ""
         param_remarks = None
         api_headers = None
@@ -647,7 +653,7 @@ class TestCaseGenerator:
             class_headers = {}
         content.extend(
             gen_test_case_description(
-                ctx, story_name, feature_name or "TODO", severity="CRITICAL",
+                ctx, story_urls, feature_name or "TODO", severity="CRITICAL",
                 api_description=api_description, param_remarks=param_remarks,
                 api_headers=api_headers,
             )
@@ -657,7 +663,7 @@ class TestCaseGenerator:
             content.extend(gen_scenario_test_method_definition(ctx, target_api_file))
 
         step_functions = gen_scenario_step_functions(
-            ctx, content, requests, api_files, class_headers,
+            ctx, content, matched, step_calls, step_keys, class_headers,
         )
 
         if step_functions:

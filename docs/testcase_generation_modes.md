@@ -133,8 +133,9 @@ flowchart TD
 
 #### `test_0` 收集方法
 
-`test_0_{function_name}` 发送一次默认查询，遍历响应把字段值收集进 `list_query_data`，
-供后续运行时取值方法使用。
+`test_0_{function_name}` 发送一次默认查询，遍历响应记录按字段名（不区分大小写）匹配参数，
+把首条记录的匹配值收集进 `list_query_data` 供后续运行时取值方法使用；
+响应值优先：收集到的值覆盖类属性已有值（含 HAR 录制值），同一参数只取首条记录的值。
 
 #### 数组类型参数（多选）
 
@@ -278,25 +279,31 @@ flowchart TD
  └─ requests 未显式传入时由 get_requests_from_source() 获取
  │    （HAR 文件优先；无 HAR 时从目标 API 文件构建单条模拟请求）
  ├─ gen_test_case_imports(api_files)：多函数模式，按服务包分组导入
- ├─ extract_api_info_for_scenario() → (feature_name=服务包名, story_name=API URL)
- ├─ gen_test_case_description(severity="CRITICAL")
+ ├─ extract_api_info_for_scenario() → (feature_name=服务包名, story_name=主接口 API URL)
+ ├─ match_scenario_steps()：匹配步骤 API 文件并分配步骤名/步骤键
+ ├─ gen_test_case_description(全部步骤接口 URL 列表, severity="CRITICAL")
+ │    └─ 多 story 装饰器：主接口置首，其余按 HAR 执行顺序去重，每个接口一个 story
  ├─ gen_scenario_test_method_definition(target_api_file)
- ├─ gen_scenario_step_functions() → 步骤函数名列表
+ ├─ gen_scenario_step_functions(matched, step_calls, step_keys) → 步骤函数名列表
  ├─ 生成步骤调用（async 模式加 await 前缀）
  └─ validate_python() 语法校验
 ```
 
-#### Step 3: `gen_scenario_step_functions()` 两遍处理（[scenario_codegen.py](../har2pytest/scenario_codegen.py)）
+#### Step 3: `match_scenario_steps()` 匹配 + `gen_scenario_step_functions()` 渲染（[scenario_codegen.py](../har2pytest/scenario_codegen.py)）
 
 ```
-输入: content, requests, api_files, class_headers
- └─ 第一遍：匹配 API 文件并分配步骤名/步骤键
-      ├─ URLMatcher.find_matching_api_file() 匹配每个请求
-      ├─ 从 API 文件 URL 模板提取路径参数（/order/detail/{orderNo} → orderNo）
-      ├─ gen_step_function_name()：同名 API 第二次起加计数前缀 step_1_xxx
-      ├─ make_step_key()：API 函数名按下划线取末两段作 test_data 键，冲突时向前扩展
-      └─ find_collect_config()：响应收集接口（COLLECT_RESPONSE_APIS 子串匹配）的
-         多次调用合并为同一步骤名，执行条目只保留一条（循环体逐文件执行）
+match_scenario_steps() 第一遍匹配（类头渲染前执行，结果复用给类头多 story 与步骤函数生成）：
+输入: requests, api_files
+ └─ URLMatcher.find_matching_api_file() 匹配每个请求
+ ├─ 从 API 文件 URL 模板提取路径参数（/order/detail/{orderNo} → orderNo）
+ ├─ gen_step_function_name()：同名 API 第二次起加计数前缀 step_1_xxx
+ ├─ make_step_key()：API 函数名按下划线取末两段作 test_data 键，冲突时向前扩展
+ └─ find_collect_config()：响应收集接口（COLLECT_RESPONSE_APIS 子串匹配）的
+    多次调用合并为同一步骤名，执行条目只保留一条（循环体逐文件执行）
+ └─ 返回 (matched, step_calls, step_keys)
+
+gen_scenario_step_functions() 基于匹配结果继续：
+输入: content, matched, step_calls, step_keys, class_headers
  └─ build_scenario_value_plan() 分析取值计划（见 Step 4）
  └─ 开启 TRACK_PARAM_SOURCES 时，在第一个步骤前插入 test_data 初始化字典
  └─ 第二遍：逐步骤生成
@@ -359,7 +366,7 @@ from apis.demo_mgmt_application import (
 
 @allure.severity(Severity.CRITICAL)
 @allure.feature("demo_mgmt_application")
-@allure.story("/demo/order/cancel")
+@allure.story("/demo/order/cancel", "/demo/order/info")
 class TestClass:
     @property
     def headers(self):
@@ -420,8 +427,8 @@ class TestClass:
 1. **`TESTCASE_PROFILES` 配置命中且显式指定 `mode`**（推荐，见"模式配置化"）；
 2. `mode=auto`/未配置 → 描述关键字启发式（命中 `LIST_QUERY_KEYWORDS` 且未被
    `LIST_QUERY_EXCLUDE_KEYWORDS` 排除 → parametrized）；
-3. 关键字未命中时，接口携带参数（Swagger 或 HAR 捕获）默认走 parametrized，
-   避免生成无参数的空壳场景用例；无参数接口 → scenario。
+3. 关键字未命中时一律回落 scenario 单请求用例（含带参数的非列表接口，如"获取协议"），
+   避免把非列表接口渲染成 list_query 形态（test_0 收集语义不符）。
 
 ### 模式配置化（TESTCASE_PROFILES）
 
@@ -529,11 +536,12 @@ batch 模式单独运行时没有单份 HAR 作为整个批量任务的输入；
 | `parse_api_file()` | `utils.py` | API 文件解析（带缓存，.py → 同名 .api.json） | 所有模式 |
 | `extract_service_package()` | `utils.py` | 从路径提取服务包名 | 所有模式 |
 | `gen_test_case_imports()` | `parametrized_codegen.py` | 生成导入语句（单函数/多函数分组） | 所有模式 |
-| `gen_test_case_description()` | `parametrized_codegen.py` | 生成 allure 描述（severity/备注/headers） | 所有模式 |
+| `gen_test_case_description()` | `parametrized_codegen.py` | 生成 allure 描述（severity/备注/headers/多 story） | 所有模式 |
 | `build_param_items_from_api()` | `param_builder.py` | 构建参数化条目 | parametrized |
 | `TimePairContext.build()` | `time_pair.py` | 时间对查找表与角色映射 | parametrized |
 | `get_requests_from_source()` | `scenario_codegen.py` | HAR/API 文件二选一获取请求序列 | scenario |
-| `gen_scenario_step_functions()` | `scenario_codegen.py` | 场景步骤函数生成（两遍处理） | scenario |
+| `match_scenario_steps()` | `scenario_codegen.py` | 匹配步骤 API 文件并分配步骤名/步骤键（类头多 story 与步骤函数生成共用） | scenario |
+| `gen_scenario_step_functions()` | `scenario_codegen.py` | 基于匹配结果生成步骤函数（heading + 函数体 + 断言与存储） | scenario |
 | `build_scenario_value_plan()` | `step_values.py` | 分析步骤取值计划（step_response/container_projection/collect_projection/json_projection/test_data/literal） | scenario |
 | `write_test_file()` | `utils.py` | 写盘（含输出目录创建） | 所有模式 |
 | `format_directory()` | `utils.py` | 目录级 ruff 格式化 | 所有模式 |

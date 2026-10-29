@@ -1,3 +1,3 @@
-    list_query_data = {
+    list_query_data: dict[str, Any] = {
 {% for key, value in data_items %}        "{{ key }}": {{ value }},
 {% endfor %}    }

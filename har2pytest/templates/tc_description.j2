@@ -1,6 +1,6 @@
 @allure.severity(Severity.{{ severity }})
 @allure.feature('{{ service_package }}')
-@allure.story('{{ api_url }}')
+@allure.story({% for story in api_urls %}'{{ story }}'{% if not loop.last %}, {% endif %}{% endfor %})
 {% if api_description %}{{ api_description }}
 {% endif %}class TestClass:
 

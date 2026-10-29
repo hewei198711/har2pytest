@@ -149,39 +149,30 @@ def gen_scenario_test_method_definition(
 # ==================== 步骤函数生成 ====================
 
 
-def gen_scenario_step_functions(
-    render_ctx: dict[str, Any],
-    content: list[str],
+def match_scenario_steps(
     requests: list[ParsedRequestInfo],
     api_files: list[str],
-    class_headers: dict[str, Any] | None = None,
-) -> list[dict]:
-    """生成场景测试步骤函数。
+) -> tuple[list[tuple[str, APIFileInfo, ParsedRequestInfo]], list[dict], list[str]]:
+    """第一遍匹配：为每个请求匹配 API 文件并分配步骤名。
 
-    先匹配 API 文件并分配步骤名，再分析步骤取值计划（哪些参数取前序
-    步骤响应、哪些提升为用例级 test_data），最后生成各步骤函数。
-
-    响应收集接口（COLLECT_RESPONSE_APIS 配置命中）的多次调用合并为一个
-    带循环形参的步骤函数：每次调用响应片段追加进 test_data 收集列表，
-    执行段以 for 循环逐文件调用。
+    步骤名确定后才能构建取值计划，且类头的多 story 装饰器也需要全部
+    步骤接口 URL，因此把匹配逻辑独立出来供类头渲染与步骤函数生成复用。
 
     Args:
-        render_ctx: 模板渲染上下文
-        content: 内容列表（会被修改）
-        requests: 请求信息列表
+        requests: HAR 请求信息列表
         api_files: API 文件路径列表
-        class_headers: 类级别 headers
 
     Returns:
-        执行条目列表（每项 {"name": 步骤函数名, "collect": 收集配置或 None}）
+        (matched, step_calls, step_keys) 三元组：
+        - matched: 每项 (步骤名, API 信息, 请求信息)
+        - step_calls: 执行条目列表（每项 {"name": 步骤函数名, "collect": 收集配置或 None}）
+        - step_keys: 与 matched 对齐的 test_data 步骤键列表
     """
-    step_calls: list[dict] = []
-    name_counters: dict[str, int] = {}
     track_enabled = APIConfig.TRACK_PARAM_SOURCES()
-
-    # 第一遍：匹配 API 文件并分配步骤名（步骤名确定后才能构建取值计划）
     matched: list[tuple[str, APIFileInfo, ParsedRequestInfo]] = []
+    step_calls: list[dict] = []
     step_keys: list[str] = []
+    name_counters: dict[str, int] = {}
     used_keys: set[str] = set()
     function_step_keys: dict[str, str] = {}  # API 函数名 → 步骤键（同一 API 多次调用复用同一键）
     collect_step_names: dict[str, str] = {}  # collect_key → 步骤名（同接口多次调用合并）
@@ -220,6 +211,38 @@ def gen_scenario_step_functions(
             function_step_keys[func_name] = key
             step_keys.append(key)
         matched.append((step_name, api_info, request_info))
+    return matched, step_calls, step_keys
+
+
+def gen_scenario_step_functions(
+    render_ctx: dict[str, Any],
+    content: list[str],
+    matched: list[tuple[str, APIFileInfo, ParsedRequestInfo]],
+    step_calls: list[dict],
+    step_keys: list[str],
+    class_headers: dict[str, Any] | None = None,
+) -> list[dict]:
+    """生成场景测试步骤函数。
+
+    基于 match_scenario_steps 的匹配结果分析步骤取值计划（哪些参数取前序
+    步骤响应、哪些提升为用例级 test_data），再生成各步骤函数。
+
+    响应收集接口（COLLECT_RESPONSE_APIS 配置命中）的多次调用合并为一个
+    带循环形参的步骤函数：每次调用响应片段追加进 test_data 收集列表，
+    执行段以 for 循环逐文件调用。
+
+    Args:
+        render_ctx: 模板渲染上下文
+        content: 内容列表（会被修改）
+        matched: match_scenario_steps 返回的匹配结果
+        step_calls: match_scenario_steps 返回的执行条目列表
+        step_keys: 与 matched 对齐的 test_data 步骤键列表
+        class_headers: 类级别 headers
+
+    Returns:
+        执行条目列表（每项 {"name": 步骤函数名, "collect": 收集配置或 None}）
+    """
+    track_enabled = APIConfig.TRACK_PARAM_SOURCES()
 
     # 分析步骤取值计划，并在第一个步骤函数前插入 test_data 初始化
     value_plan = build_scenario_value_plan(
