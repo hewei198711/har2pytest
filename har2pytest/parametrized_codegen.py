@@ -123,6 +123,15 @@ def gen_test_case_imports(
             ]
         )
 
+    if is_list_query:
+        # test_0 收集逻辑收口到 pytest_utils.collect_list_query_data，产物只调用
+        content.extend(
+            [
+                "from har2pytest.pytest_utils import collect_list_query_data",
+                "",
+            ]
+        )
+
     if api_files:
         service_imports: dict[str | None, list[str]] = {}
         for api_file in api_files:

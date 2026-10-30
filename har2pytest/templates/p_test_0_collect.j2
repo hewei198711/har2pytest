@@ -7,16 +7,6 @@
 {{ body_indent }}    assert r.{{ status_attr }} == 200
 {{ body_indent }}    data = {{ json_call }}
 {{ body_indent }}    assert data["code"] == 200
-{{ body_indent }}    # 收集响应字段值到 list_query_data（不区分大小写匹配参数名）；响应值优先：首条记录的匹配值覆盖已有值（含录制值）
-{{ body_indent }}    collected = set()
-{{ body_indent }}    resp_data = data.get("data", {})
-{{ body_indent }}    items = resp_data.get("lists", resp_data.get("list", [])) if isinstance(resp_data, dict) else []
-{{ body_indent }}    for item in items:
-{{ body_indent }}        if isinstance(item, dict):
-{{ body_indent }}            for k, v in item.items():
-{{ body_indent }}                if isinstance(v, (str, int, float)) and v not in ("", None):
-{{ body_indent }}                    param_name = next((p for p in self.list_query_data if p.lower() == k.lower()), None)
-{{ body_indent }}                    if param_name and param_name not in collected:
-{{ body_indent }}                        collected.add(param_name)
-{{ body_indent }}                        self.__class__.list_query_data[param_name] = v
+{{ body_indent }}    # 收集响应字段值到 list_query_data（精确匹配优先、无则前缀模糊匹配；响应值优先覆盖），逻辑见 pytest_utils.collect_list_query_data
+{{ body_indent }}    collect_list_query_data(data, self.__class__.list_query_data)
 

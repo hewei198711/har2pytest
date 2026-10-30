@@ -1757,10 +1757,10 @@ def test_generate_parametrized_content_test0_response_priority(tmp_path, paginat
     generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(tmp_path / "output"))
     content = generator.generate_parametrized_test_content(str(api_file), "test_task")
     assert content is not None
-    assert "collected = set()" in content
-    assert "if param_name and param_name not in collected:" in content
-    assert "collected.add(param_name)" in content
-    # 旧“仅填空值”条件已移除
+    # 收集逻辑收口到 pytest_utils.collect_list_query_data，产物只调用 + 导入
+    assert "collect_list_query_data(data, self.__class__.list_query_data)" in content
+    assert "from har2pytest.pytest_utils import collect_list_query_data" in content
+    # 旧“仅填空值”条件已移除（收集逻辑不再内联在产物中）
     assert "not self.list_query_data[param_name]" not in content
 
 

@@ -1,11 +1,11 @@
-"""测试 har2pytest.pytest_utils 模块中 retry_step 重试装饰器的同步/异步重试、异常类型过滤与日志输出的功能与边界。"""
+"""测试 har2pytest.pytest_utils 模块中 retry_step 重试装饰器的同步/异步重试、异常类型过滤与日志输出，以及 collect_list_query_data 响应收集函数的功能与边界。"""
 
 import logging
 
 import allure
 import pytest
 
-from har2pytest.pytest_utils import retry_step
+from har2pytest.pytest_utils import collect_list_query_data, retry_step
 
 # ==================== retry_step 重试装饰器测试 ====================
 
@@ -118,3 +118,70 @@ async def test_retry_step_default_counts():
 
     assert await flaky() == "ok"
     assert len(attempts) == 2
+
+
+# ==================== collect_list_query_data 响应收集函数测试 ====================
+
+
+@allure.feature("pytest工具函数")
+@allure.story("响应收集函数")
+@allure.title("测试精确匹配优先于前缀模糊匹配")
+def test_collect_list_query_data_exact_match_priority():
+    list_query_data = {"operator": "", "ruleName": ""}
+    collect_list_query_data(
+        {"data": {"list": [{"operator": "OP-100", "operatorNo": "NO-1", "ruleName": "R1"}]}},
+        list_query_data,
+    )
+    # 响应同时存在同名与同前缀字段时，精确匹配值获胜
+    assert list_query_data["operator"] == "OP-100"
+    assert list_query_data["ruleName"] == "R1"
+
+
+@allure.feature("pytest工具函数")
+@allure.story("响应收集函数")
+@allure.title("测试无精确匹配时降级前缀模糊匹配且取第一个")
+def test_collect_list_query_data_fuzzy_fallback_first_match():
+    list_query_data = {"operator": "", "ruleName": ""}
+    collect_list_query_data(
+        {"data": {"list": [{"operatorNo": "NO-2", "operatorName": "张三", "ruleName": "R2"}]}},
+        list_query_data,
+    )
+    # 参数 operator 无同名字段，降级前缀匹配 operatorNo/operatorName，取遍历第一个
+    assert list_query_data["operator"] == "NO-2"
+    assert list_query_data["ruleName"] == "R2"
+
+
+@allure.feature("pytest工具函数")
+@allure.story("响应收集函数")
+@allure.title("测试已收集参数不再被后续记录覆盖且响应值覆盖录制值")
+def test_collect_list_query_data_first_record_wins():
+    # 初始录制值非空，验证响应值优先覆盖；后续记录的同名/同前缀字段不再覆盖首条记录值
+    list_query_data = {"operator": "RECORDED", "ruleName": "RECORDED-RULE"}
+    collect_list_query_data(
+        {
+            "data": {
+                "list": [
+                    {"operator": "OP-3", "ruleName": "R3"},
+                    {"operatorNo": "NO-3", "ruleName": "R3-2"},
+                ]
+            }
+        },
+        list_query_data,
+    )
+    assert list_query_data["operator"] == "OP-3"
+    assert list_query_data["ruleName"] == "R3"
+
+
+@allure.feature("pytest工具函数")
+@allure.story("响应收集函数")
+@allure.title("测试响应无数据时保持原值且非参数键不收集")
+def test_collect_list_query_data_empty_response_keeps_original():
+    list_query_data = {"operator": "OP-0", "ruleName": "R0"}
+    # 响应 data 缺失/列表为空/字段值空均不更新
+    collect_list_query_data({"code": 200}, list_query_data)
+    collect_list_query_data({"data": {"list": []}}, list_query_data)
+    collect_list_query_data(
+        {"data": {"list": [{"operator": "", "otherField": "X"}]}},
+        list_query_data,
+    )
+    assert list_query_data == {"operator": "OP-0", "ruleName": "R0"}

@@ -133,9 +133,11 @@ flowchart TD
 
 #### `test_0` 收集方法
 
-`test_0_{function_name}` 发送一次默认查询，遍历响应记录按字段名（不区分大小写）匹配参数，
-把首条记录的匹配值收集进 `list_query_data` 供后续运行时取值方法使用；
-响应值优先：收集到的值覆盖类属性已有值（含 HAR 录制值），同一参数只取首条记录的值。
+`test_0_{function_name}` 发送一次默认查询，调用 `har2pytest.pytest_utils.collect_list_query_data`
+把响应字段值收集进 `list_query_data`（原地更新类属性）：优先精确匹配参数名（不区分大小写），
+响应字段无同名参数时降级前缀模糊匹配（如参数 `operator` 可匹配响应字段
+`operatorName`/`operatorNo`，命中多个时取第一个），同一参数只取首条记录的值；
+响应值优先：收集到的值覆盖类属性已有值（含 HAR 录制值）。
 
 #### 数组类型参数（多选）
 
