@@ -296,16 +296,26 @@ def _extract_date_format_from_remark(remark: str) -> str:
         remark: 参数备注文本（如 "领取时间开始时间(yyyy-MM-dd)"）
 
     Returns:
-        strftime 格式字符串（如 "%Y-%m-%d"）；未找到时默认 "%Y-%m-%d"
+        strftime 格式字符串（如 "%Y-%m-%d"）；未识别到日期格式时默认
+        "%Y-%m-%d %H:%M:%S"（年月日时分秒）
     """
     match = re.search(r"[\(\uff08]([^\)\uff09]+)[\)\uff09]", remark)
     if not match:
-        return "%Y-%m-%d"
+        return "%Y-%m-%d %H:%M:%S"
     fmt = match.group(1)
     # Java 风格日期格式 → Python strftime
-    fmt = fmt.replace("yyyy", "%Y").replace("yy", "%y")
-    fmt = fmt.replace("MM", "%m").replace("dd", "%d")
-    fmt = fmt.replace("HH", "%H").replace("mm", "%M").replace("ss", "%S")
+    fmt = (
+        fmt.replace("yyyy", "%Y")
+        .replace("yy", "%y")
+        .replace("MM", "%m")
+        .replace("dd", "%d")
+        .replace("HH", "%H")
+        .replace("mm", "%M")
+        .replace("ss", "%S")
+    )
+    # 括号内容不含任何日期 token（如 "含"）时视为未识别，回落默认完整日期时间格式
+    if "%" not in fmt:
+        return "%Y-%m-%d %H:%M:%S"
     return fmt
 
 

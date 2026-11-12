@@ -318,8 +318,15 @@ class TestCaseGenerator:
         task_id: str | None = None,
         overwrite: bool = False,
         har_file_path: str | None = None,
+        only_mode: str | None = None,
     ) -> dict[str, Any]:
-        """批量生成测试用例（异步 + 并行处理）。"""
+        """批量生成测试用例（异步 + 并行处理）。
+
+        Args:
+            only_mode: 仅生成指定模式的用例（list_query/complex_scenario），None 表示不过滤。
+                按 _resolve_testcase_mode 识别结果过滤：list_query=参数化产物，
+                complex_scenario=场景产物（含描述无列表关键字回落 scenario 的接口）。
+        """
         expanded_api_files: list[str] = []
         for api_path in api_files_list:
             if os.path.isdir(api_path):
@@ -341,6 +348,7 @@ class TestCaseGenerator:
         generated_count = 0
         skipped_count = 0
         failed_count = 0
+        filtered_count = 0
         generated_files_list: list[str] = []
 
         invalid_files = [f for f in expanded_api_files if not self._is_within_api_dir(f)]
@@ -353,7 +361,7 @@ class TestCaseGenerator:
             )
             return {
                 "total": len(expanded_api_files), "skipped": 0, "generated": 0,
-                "failed": len(invalid_files), "generated_files": [],
+                "failed": len(invalid_files), "filtered": 0, "generated_files": [],
             }
 
         os.makedirs(self.output_dir, exist_ok=True)
@@ -376,6 +384,19 @@ class TestCaseGenerator:
                     logger.warning(f"  [任务跳过] {api_basename} 无法提取 API 信息")
                     return "failed", None
 
+                # 模式过滤（--only-mode）：先于存在性检查判定识别模式，
+                # 不匹配的接口不计入 skipped（避免与"已存在"语义混淆），单独计入 filtered
+                mode = self._resolve_testcase_mode(api_file)
+                if only_mode is not None:
+                    expected_mode = "parametrized" if only_mode == "list_query" else "scenario"
+                    if mode != expected_mode:
+                        elapsed = time.time() - task_start
+                        logger.info(
+                            f"  [任务跳过] {api_basename} 识别模式 {mode} 不在筛选范围"
+                            f"（--only-mode {only_mode}） (耗时 {elapsed:.2f}s)"
+                        )
+                        return "filtered", None
+
                 test_filename = f"test_{api_info.function_name}.py"
                 test_filepath = os.path.join(self.output_dir, test_filename)
 
@@ -385,7 +406,6 @@ class TestCaseGenerator:
                         logger.debug(f"  [任务跳过] {api_basename} 测试文件已存在 (耗时 {elapsed:.2f}s)")
                         return "skipped", None
 
-                mode = self._resolve_testcase_mode(api_file)
                 test_content = None
                 if mode == "parametrized":
                     test_content = self.generate_parametrized_test_content(api_file, task_id)
@@ -424,10 +444,12 @@ class TestCaseGenerator:
                 skipped_count += 1
             elif status == "failed":
                 failed_count += 1
+            elif status == "filtered":
+                filtered_count += 1
 
         logger.info(
             f"[并行处理] 完成! 成功: {generated_count}, 跳过: {skipped_count}, "
-            f"失败: {failed_count}, 总耗时: {parallel_elapsed:.2f}s"
+            f"失败: {failed_count}, 模式过滤: {filtered_count}, 总耗时: {parallel_elapsed:.2f}s"
         )
 
         if generated_count > 0:
@@ -436,7 +458,7 @@ class TestCaseGenerator:
         return {
             "total": len(expanded_api_files), "skipped": skipped_count,
             "generated": generated_count, "failed": failed_count,
-            "generated_files": generated_files_list,
+            "filtered": filtered_count, "generated_files": generated_files_list,
         }
 
     # ==================== 测试用例内容生成 ====================

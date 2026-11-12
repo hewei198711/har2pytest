@@ -1136,7 +1136,7 @@ def test_generate_test_method_assertions(func_name, param_var, param_name, shoul
     assert "assert data['code'] == 200" in content
     if should_have_search:
         assert "验证返回数据符合搜索条件" in content
-        assert "items = resp_data.get('list', [])" in content
+        assert "items = extract_list_items(resp_data)" in content
     else:
         assert "验证返回数据符合搜索条件" not in content
 
@@ -1757,11 +1757,46 @@ def test_generate_parametrized_content_test0_response_priority(tmp_path, paginat
     generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(tmp_path / "output"))
     content = generator.generate_parametrized_test_content(str(api_file), "test_task")
     assert content is not None
-    # 收集逻辑收口到 pytest_utils.collect_list_query_data，产物只调用 + 导入
+    # 收集逻辑收口到 pytest_utils.collect_list_query_data，产物只调用 + 导入；
+    # 断言侧明细提取统一调用 extract_list_items（兼容 lists/list/records 等键名）
     assert "collect_list_query_data(data, self.__class__.list_query_data)" in content
-    assert "from har2pytest.pytest_utils import collect_list_query_data" in content
+    assert "from har2pytest.pytest_utils import collect_list_query_data, extract_list_items" in content
+    assert "items = extract_list_items(resp_data)" in content
     # 旧“仅填空值”条件已移除（收集逻辑不再内联在产物中）
     assert "not self.list_query_data[param_name]" not in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成参数化测试内容")
+@allure.title("测试List后缀参数断言用列表期望值与removesuffix字段匹配")
+def test_generate_parametrized_content_list_suffix_assert(tmp_path, pagination_config):
+    api_dir = tmp_path / "apis"
+    api_dir.mkdir(parents=True)
+    api_file = api_dir / "demo_conversations.py"
+    api_file.write_text(
+        "def demo_conversations(params=params, headers=headers):\n    pass\n",
+        encoding="utf-8",
+    )
+    _write_api_sidecar(
+        api_file,
+        url="/mgmt/demo-message/conversations",
+        description="查询门店会话列表",
+        params={"demoCodeList": [], "demoShop": "", "pageNum": 1, "pageSize": 10},
+    )
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(tmp_path / "output"))
+    content = generator.generate_parametrized_test_content(str(api_file), "test_task")
+    assert content is not None
+    # List 后缀参数：期望值是列表（收集时包装），断言逐元素比较
+    assert 'any(str(v) == str(x) for x in self.list_query_data["demoCodeList"])' in content
+    # 字段匹配兼容去掉 list 后缀的响应字段名（demoCode ↔ demoCodeList）
+    assert (
+        'k.lower() == "democodelist" or k.lower() == "democodelist".removesuffix("list")'
+        in content
+    )
+    # 非 List 参数保持等值比较形态，不带 removesuffix 条件
+    assert 'str(v) == str(self.list_query_data["demoShop"])' in content
+    assert '"demoshop".removesuffix("list")' not in content
 
 
 @allure.feature("测试用例生成器")
@@ -2305,7 +2340,7 @@ def test_generate_batch_no_param_list_keyword_fallback(tmp_path, caplog):
     api_dir.mkdir(parents=True)
 
     # API描述含'列表'关键词，但是接口无参数（只有headers）
-    (api_dir / "common_ProductProvenance.py").write_text(
+    (api_dir / "common_DemoProduct.py").write_text(
         '''
 import os
 
@@ -2316,21 +2351,21 @@ headers = {
 }
 
 
-def common_Provenance(headers=headers):
+def common_DemoProduct(headers=headers):
     """
     获取商品发货信息列表
-    /common/ProductProvenance
+    /common/DemoProduct
     """
 
-    url = "/common/ProductProvenance"
+    url = "/common/DemoProduct"
     return client.get(url=url, headers=headers)
 ''',
         encoding="utf-8",
     )
     # 模块级 headers 现取自 .api.json 元数据；描述含“列表”用于模式决策
     _write_api_sidecar(
-        api_dir / "common_ProductProvenance.py",
-        url="/common/ProductProvenance",
+        api_dir / "common_DemoProduct.py",
+        url="/common/DemoProduct",
         description="获取商品发货信息列表",
         headers={"authorization": 'f"bearer {os.environ[\'token\']}"'},
     )
@@ -2401,6 +2436,96 @@ def user_login(params=params):
 
 @allure.feature("测试用例生成器")
 @allure.story("批量生成")
+@allure.title("测试 batch --only-mode 按识别模式过滤")
+@pytest.mark.parametrize(
+    "only_mode,expected_gen",
+    [
+        ("list_query", "test_common_DemoProduct.py"),
+        ("complex_scenario", "test_user_login.py"),
+    ],
+)
+def test_generate_batch_only_mode_filter(tmp_path, only_mode, expected_gen):
+    # 两个 API：描述含"列表"→parametrized；"用户登录"无列表关键字→scenario
+    api_dir = tmp_path / "apis"
+    api_dir.mkdir()
+    (api_dir / "common_DemoProduct.py").write_text(
+        '''
+import os
+
+from har2pytest.client import client
+
+headers = {
+    "authorization": f"test {os.environ['token']}",
+}
+
+params = {"keyword": "A"}
+
+
+def common_DemoProduct(params=params, headers=headers):
+    """
+    获取商品发货信息列表
+    /common/DemoProduct
+    """
+
+    url = "/common/DemoProduct"
+    return client.get(url=url, headers=headers)
+''',
+        encoding="utf-8",
+    )
+    _write_api_sidecar(
+        api_dir / "common_DemoProduct.py",
+        url="/common/DemoProduct",
+        description="获取商品发货信息列表",
+        headers={"authorization": 'f"test {os.environ[\'token\']}"'},
+        params={"keyword": "A"},
+    )
+    (api_dir / "user_login.py").write_text(
+        '''
+import os
+
+from har2pytest.client import client
+
+headers = {
+    "authorization": f"test {os.environ['token']}",
+}
+
+
+def user_login(headers=headers):
+    """
+    用户登录
+    /user/login
+    """
+
+    url = "/user/login"
+    return client.get(url=url, headers=headers)
+''',
+        encoding="utf-8",
+    )
+    _write_api_sidecar(
+        api_dir / "user_login.py",
+        url="/user/login",
+        description="用户登录",
+        headers={"authorization": 'f"test {os.environ[\'token\']}"'},
+        params={},
+    )
+
+    output_dir = tmp_path / "output"
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir))
+    result = asyncio.run(
+        generator.generate_batch_testcases(
+            [str(api_dir)], task_id="test_task", overwrite=True, har_file_path=None, only_mode=only_mode
+        )
+    )
+
+    assert result["total"] == 2
+    assert result["generated"] == 1
+    assert result["filtered"] == 1
+    assert result["failed"] == 0
+    assert [os.path.basename(f) for f in result["generated_files"]] == [expected_gen]
+
+
+@allure.feature("测试用例生成器")
+@allure.story("批量生成")
 @allure.title("测试 batch 传入不存在路径时忽略并返回空统计")
 def test_generate_batch_nonexistent_path(tmp_path, caplog):
     # 路径既非目录也非文件 → 告警后 continue，不计入 total
@@ -2419,12 +2544,12 @@ def test_generate_batch_nonexistent_path(tmp_path, caplog):
 @allure.story("生成参数化列表测试用例")
 @allure.title("测试参数化模式下无参数时fallback到场景测试")
 def test_generate_parametrized_list_no_param_fallback(tmp_path, write_har):
-    har_file = write_har([_make_har_entry("/common/ProductProvenance", time_ms=50)])
+    har_file = write_har([_make_har_entry("/common/DemoProduct", time_ms=50)])
 
     api_dir = tmp_path / "apis"
     api_dir.mkdir(parents=True)
 
-    (api_dir / "common_ProductProvenance.py").write_text(
+    (api_dir / "common_DemoProduct.py").write_text(
         '''
 import os
 
@@ -2435,20 +2560,20 @@ headers = {
 }
 
 
-def common_ProductProvenance(headers=headers):
+def common_DemoProduct(headers=headers):
     """
     获取商品发货信息列表
-    /common/ProductProvenance
+    /common/DemoProduct
     """
 
-    url = "/common/ProductProvenance"
+    url = "/common/DemoProduct"
     return client.get(url=url, headers=headers)
 ''',
         encoding="utf-8",
     )
     _write_api_sidecar(
-        api_dir / "common_ProductProvenance.py",
-        url="/common/ProductProvenance",
+        api_dir / "common_DemoProduct.py",
+        url="/common/DemoProduct",
         description="获取商品发货信息列表",
         headers={"authorization": 'f"test {os.environ[\'token\']}"'},
     )
@@ -2469,7 +2594,7 @@ def common_ProductProvenance(headers=headers):
     # 场景测试不含pytest.mark.parametrize，包含步骤函数
     assert "pytest.mark.parametrize" not in content
     assert "step_" in content
-    assert "common_ProductProvenance" in content
+    assert "common_DemoProduct" in content
 
 
 @allure.feature("测试用例生成器")

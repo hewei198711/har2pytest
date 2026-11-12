@@ -134,10 +134,14 @@ flowchart TD
 #### `test_0` 收集方法
 
 `test_0_{function_name}` 发送一次默认查询，调用 `har2pytest.pytest_utils.collect_list_query_data`
-把响应字段值收集进 `list_query_data`（原地更新类属性）：优先精确匹配参数名（不区分大小写），
-响应字段无同名参数时降级前缀模糊匹配（如参数 `operator` 可匹配响应字段
-`operatorName`/`operatorNo`，命中多个时取第一个），同一参数只取首条记录的值；
-响应值优先：收集到的值覆盖类属性已有值（含 HAR 录制值）。
+把响应字段值收集进 `list_query_data`（原地更新类属性）：
+
+1. 精确匹配参数名（不区分大小写）；
+2. 响应字段无同名参数时降级前缀模糊匹配——参数被响应字段名包含（如参数 `operator`
+   可匹配响应字段 `operatorName`/`operatorNo`，命中多个时取第一个），或参数名包含
+   响应字段名（如参数 `demoCodeList` 包含响应字段 `demoCode`，值包装为单元素列表）。
+
+同一参数只取首条记录的值；响应值优先：收集到的值覆盖类属性已有值（含 HAR 录制值）。
 
 #### 数组类型参数（多选）
 
@@ -432,6 +436,21 @@ class TestClass:
 3. 关键字未命中时一律回落 scenario 单请求用例（含带参数的非列表接口，如"获取协议"），
    避免把非列表接口渲染成 list_query 形态（test_0 收集语义不符）。
 
+#### CLI 命令与 --only-mode 过滤
+
+    # 批量生成全部接口（逐接口自动决策模式）
+    har2pytest testcase --pattern batch --api-files apis/mobile_application
+
+    # 仅生成识别为 list_query（参数化列表查询）的接口
+    har2pytest testcase --pattern batch --only-mode list_query --api-files apis/mobile_application
+
+    # 仅生成识别为 complex_scenario（场景）的接口
+    har2pytest testcase --pattern batch --only-mode complex_scenario --api-files apis/mobile_application
+
+`--only-mode` 仅 batch 模式生效：按 `_resolve_testcase_mode()` 识别结果过滤，
+`list_query`=参数化产物、`complex_scenario`=场景产物（含描述未命中列表关键字回落 scenario 的接口）；
+被过滤的接口不计入 `skipped`，单独计入 `filtered`。
+
 ### 模式配置化（TESTCASE_PROFILES）
 
 在 `har2pytest_config.json` 中按 URL 显式指定模式，消除"靠中文描述关键字判定"的脆弱点。
@@ -455,18 +474,21 @@ batch 模式支持两类输入（CLI 层解析，逗号分隔混合输入）：
 
 ```mermaid
 flowchart TD
-    A["generate_batch_testcases<br/>api_files_list, task_id?, overwrite?, har_file_path?"] --> B["展开文件列表<br/>目录递归扫描 / 校验 api-dir 归属"]
+    A["generate_batch_testcases<br/>api_files_list, task_id?, overwrite?, har_file_path?, only_mode?"] --> B["展开文件列表<br/>目录递归扫描 / 校验 api-dir 归属"]
     B --> C["asyncio.gather 并行处理 process_single"]
-    C --> D{文件存在且未 overwrite?}
-    D -->|是| E["跳过 skipped++"]
-    D -->|否| F["_resolve_testcase_mode<br/>TESTCASE_PROFILES / 关键字启发式"]
-    F -->|parametrized| G["generate_parametrized_test_content<br/>api_file, task_id"]
-    F -->|scenario| H["generate_scenario_test_content<br/>har_file_path, [api_file], task_id, api_file, cached_requests"]
-    G --> I{内容为空?}
-    I -->|是| H
-    I -->|否| J["write_test_file 写入"]
-    H --> J
-    J --> K["汇总结果 + format_directory"]
+    C --> D["_resolve_testcase_mode<br/>TESTCASE_PROFILES / 关键字启发式"]
+    D --> E{指定 --only-mode<br/>且识别模式不匹配?}
+    E -->|是| F["跳过 filtered++"]
+    E -->|否| G{文件存在且未 overwrite?}
+    G -->|是| H["跳过 skipped++"]
+    G -->|否| I{识别模式}
+    I -->|parametrized| J["generate_parametrized_test_content<br/>api_file, task_id"]
+    I -->|scenario| K["generate_scenario_test_content<br/>har_file_path, [api_file], task_id, api_file, cached_requests"]
+    J --> L{内容为空?}
+    L -->|是| K
+    L -->|否| M["write_test_file 写入"]
+    K --> M
+    M --> N["汇总结果 + format_directory"]
 ```
 
 ### 详细步骤
@@ -474,20 +496,22 @@ flowchart TD
 #### Step 1: `generate_batch_testcases()`（异步 + 并行）
 
 ```
-输入: api_files_list, task_id?, overwrite=False, har_file_path?
+输入: api_files_list, task_id?, overwrite=False, har_file_path?, only_mode?
  └─ 展开路径: 目录 → 递归收集 .py 文件；普通文件 → 直接追加
  └─ 校验所有文件位于 api_dir 内（否则整批失败并提示 --api-dir）
  └─ 传入 HAR 文件时预先解析请求列表（供场景模式复用）
  └─ asyncio.gather 并行处理，每个 api_file 独立 process_single():
       ├─ 文件不存在 → "skipped"
       ├─ 无 function_name → "failed"
+      ├─ _resolve_testcase_mode(api_file) 决策模式（parametrized / scenario）
+      ├─ 指定 only_mode 时按识别结果过滤：list_query=parametrized、
+      │    complex_scenario=scenario（含关键字未命中的回落接口），不匹配 → "filtered"
       ├─ 测试文件已存在且未 overwrite → "skipped"
-      ├─ _resolve_testcase_mode(api_file) 决策模式
-      │    ├─ parametrized → generate_parametrized_test_content()
+      ├─ parametrized → generate_parametrized_test_content()
       │    └─ scenario → generate_scenario_test_content()
       ├─ parametrized 内容为空 → 回退场景模式
       └─ write_test_file() 同步写入 → "generated"
- └─ 汇总 {total, skipped, generated, failed, generated_files}
+ └─ 汇总 {total, skipped, generated, failed, filtered, generated_files}
  └─ 有产出时 format_directory() 批量 ruff 格式化
 ```
 

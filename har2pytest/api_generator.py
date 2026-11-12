@@ -279,7 +279,7 @@ class APIGenerator:
                     if "," not in pn and pn not in har_params:
                         har_params[pn] = ""
             # HAR 场景从参数基线自行配对时间对（无 Swagger 备注可提取格式，
-            # 默认 %Y-%m-%d），写入 har_time_pairs 供测试生成动态计算时间参数
+            # 默认 %Y-%m-%d %H:%M:%S），写入 har_time_pairs 供测试生成动态计算时间参数
             har_time_pairs = build_time_pairs({name: "" for name in har_params}) or None
         # 以 param_remarks 为基准（保证所有 Swagger 定义的参数都在），
         # 用类型感知默认值覆盖（缺失的参数字符串兜底）

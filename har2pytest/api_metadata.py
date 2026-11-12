@@ -35,7 +35,7 @@ HAR_PARAM_VALUES_FIELD = "har_param_values"
 # HAR 分析得出的参数基线值（常量参数 + 首条请求的所有参数值）
 HAR_PARAMS_FIELD = "har_params"
 
-# HAR 分析得出的时间参数对（从 HAR 参数基线自行配对，无 Swagger 备注时格式默认 %Y-%m-%d）
+# HAR 分析得出的时间参数对（从 HAR 参数基线自行配对，无 Swagger 备注时格式默认 %Y-%m-%d %H:%M:%S）
 HAR_TIME_PAIRS_FIELD = "har_time_pairs"
 
 

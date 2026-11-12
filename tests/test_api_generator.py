@@ -1233,9 +1233,9 @@ def test_generate_api_file_har_time_pairs(tmp_path):
     assert filepath is not None
     with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
         meta = json.load(f)
-    # 无 Swagger 备注可提取格式，默认 %Y-%m-%d；按基础名 commit 配对 start/end
+    # 无 Swagger 备注可提取格式，默认 %Y-%m-%d %H:%M:%S；按基础名 commit 配对 start/end
     assert meta["har_time_pairs"] == {
-        "commit": {"start": "commitStartTime", "end": "commitEndTime", "format": "%Y-%m-%d"},
+        "commit": {"start": "commitStartTime", "end": "commitEndTime", "format": "%Y-%m-%d %H:%M:%S"},
     }
 
 

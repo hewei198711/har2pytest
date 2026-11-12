@@ -9,10 +9,10 @@
 {% endif %}{% if search_enabled %}
             # 验证返回数据符合搜索条件
             resp_data = data.get('data')
-            items = resp_data.get('list', []) if isinstance(resp_data, dict) else []
+            items = extract_list_items(resp_data)
             for item in items:
                 if isinstance(item, dict):
                     for k, v in item.items():
-                        if k.lower() == '{{ search_param }}':
+                        if k.lower() == '{{ search_param }}'{% if list_suffix %} or k.lower() == '{{ search_param }}'.removesuffix('list'){% endif %}:
                             {{ verify_assert }}
 {% endif %}

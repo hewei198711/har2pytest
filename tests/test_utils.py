@@ -718,8 +718,9 @@ def test_extract_service_package():
 @pytest.mark.parametrize("remark,expected", [
     ("领取时间开始时间(yyyy-MM-dd)", "%Y-%m-%d"),
     ("创建时间（yyyy-MM-dd HH:mm:ss）", "%Y-%m-%d %H:%M:%S"),
-    ("无格式备注", "%Y-%m-%d"),  # 默认格式
+    ("无格式备注", "%Y-%m-%d %H:%M:%S"),  # 未识别到格式 → 默认完整日期时间
     ("时间(yyyy/MM/dd)", "%Y/%m/%d"),
+    ("开始时间(含)", "%Y-%m-%d %H:%M:%S"),  # 括号内容无日期 token → 默认完整日期时间
 ])
 def test_extract_date_format_from_remark(remark, expected):
     assert _extract_date_format_from_remark(remark) == expected

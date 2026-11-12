@@ -33,6 +33,7 @@ def _tc_args(**overrides):
         api_files="api_request.har",
         overwrite=False,
         async_mode=False,
+        only_mode=None,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -311,10 +312,53 @@ async def test_handle_testcase_batch_success(monkeypatch, caplog):
     await main_module.handle_testcase(args)
 
     generator_instance.generate_batch_testcases.assert_awaited_once_with(
-        ["api1.py", "api2.py"], "test_4295", overwrite=False, har_file_path=None
+        ["api1.py", "api2.py"], "test_4295", overwrite=False, har_file_path=None, only_mode=None
     )
     assert "总API文件数: 2" in caplog.text
     assert "成功生成: 2" in caplog.text
+
+
+@allure.feature("CLI入口")
+@allure.story("testcase命令处理")
+@allure.title("测试batch模式仅生成指定模式（--only-mode）")
+async def test_handle_testcase_batch_only_mode(monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="har2pytest")
+    generator_instance = MagicMock()
+    generator_instance.swagger_handler.close = AsyncMock()
+    generator_instance.generate_batch_testcases = AsyncMock(
+        return_value={
+            "total": 3, "skipped": 0, "generated": 1, "failed": 0, "filtered": 2,
+            "generated_files": ["a.py"],
+        }
+    )
+    monkeypatch.setattr(main_module, "TestCaseGenerator", MagicMock(return_value=generator_instance))
+
+    args = _tc_args(pattern="batch", api_files="api1.py", only_mode="list_query")
+    await main_module.handle_testcase(args)
+
+    generator_instance.generate_batch_testcases.assert_awaited_once_with(
+        ["api1.py"], None, overwrite=False, har_file_path=None, only_mode="list_query"
+    )
+    assert "模式过滤跳过（非 list_query）: 2" in caplog.text
+
+
+@allure.feature("CLI入口")
+@allure.story("testcase命令处理")
+@allure.title("测试非batch模式传--only-mode时警告忽略")
+async def test_handle_testcase_only_mode_ignored_non_batch(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING, logger="har2pytest")
+    generator_instance = MagicMock()
+    generator_instance.swagger_handler.close = AsyncMock()
+    generator_instance.generate_scenario_testcase = AsyncMock(return_value=None)
+    monkeypatch.setattr(main_module, "TestCaseGenerator", MagicMock(return_value=generator_instance))
+
+    args = _tc_args(pattern="complex_scenario", url="/api/login", only_mode="list_query")
+    await main_module.handle_testcase(args)
+
+    assert any("--only-mode 仅在 batch 模式下生效" in r.getMessage() for r in caplog.records)
+    generator_instance.generate_scenario_testcase.assert_awaited_once_with(
+        "api_request.har", "/api/login", None, overwrite=False
+    )
 
 
 # ==================== handle_* 命令处理函数测试 ====================

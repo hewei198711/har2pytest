@@ -101,6 +101,12 @@ def main():
 
         # 生成复杂场景测试用例（传mark）
         har2pytest testcase api_request.har --pattern complex_scenario --url /api/user/login --mark test_4295
+
+        # 批量生成（仅生成识别为 list_query 模式的接口）
+        har2pytest testcase --pattern batch --only-mode list_query --api-files apis/mobile_application
+
+        # 批量生成（仅生成识别为 complex_scenario 模式的接口）
+        har2pytest testcase --pattern batch --only-mode complex_scenario --api-files apis/mobile_application
         """,
     )
     tc_parser.add_argument("har_file", nargs="?", default="api_request.har", help="HAR文件路径（默认 api_request.har）")
@@ -116,6 +122,15 @@ def main():
     tc_parser.add_argument("--api-dir", default=None, help="API文件目录（默认取配置 DEFAULT_API_DIR）")
     tc_parser.add_argument(
         "--api-files", default="api_request.har", help="指定API文件或HAR文件（batch模式使用，多个文件用逗号分隔）"
+    )
+    tc_parser.add_argument(
+        "--only-mode",
+        choices=["list_query", "complex_scenario"],
+        default=None,
+        help=(
+            "仅生成指定模式的测试用例（batch模式使用）：list_query=仅参数化列表查询接口，"
+            "complex_scenario=仅场景接口（按模式识别结果过滤）"
+        ),
     )
     _add_overwrite_arg(tc_parser, "强制覆盖已存在的测试用例文件")
     tc_parser.add_argument(
@@ -237,6 +252,11 @@ async def handle_testcase(args):
     output_dir = args.output
     api_dir = args.api_dir or APIConfig.DEFAULT_API_DIR()
     overwrite = args.overwrite
+    only_mode = args.only_mode
+
+    # --only-mode 仅 batch 模式生效；其他模式单接口生成无需过滤
+    if only_mode and pattern != "batch":
+        logger.warning(f"--only-mode 仅在 batch 模式下生效，当前模式 {pattern} 将忽略该参数")
 
     # --mark 同时用作 @pytest.mark.<task_id> 与输出子目录名：
     # 非标识符（如 "2025-01-01"、纯数字）会让每个接口都生成失败，直接拒绝
@@ -346,11 +366,13 @@ async def handle_testcase(args):
         logger.info("-" * 50)
 
         result = await generator.generate_batch_testcases(
-            api_files_list, task_id, overwrite=overwrite, har_file_path=har_file_for_batch
+            api_files_list, task_id, overwrite=overwrite, har_file_path=har_file_for_batch, only_mode=only_mode
         )
 
         logger.info("-" * 50)
         logger.info(f"总API文件数: {result['total']}")
+        if only_mode:
+            logger.info(f"模式过滤跳过（非 {only_mode}）: {result['filtered']}")
         logger.info(f"跳过（已存在）: {result['skipped']}")
         logger.info(f"成功生成: {result['generated']}")
         logger.info(f"失败: {result['failed']}")

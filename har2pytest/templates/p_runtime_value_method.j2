@@ -10,10 +10,10 @@
 {% if search_enabled %}{{ body_indent }}    # 验证返回数据符合搜索条件（降级：若 test_0 未收集到值则跳过验证）
 {{ body_indent }}    if self.list_query_data["{{ param_name }}"]:
 {{ body_indent }}        resp_data = data.get("data")
-{{ body_indent }}        items = resp_data.get("list", []) if isinstance(resp_data, dict) else []
+{{ body_indent }}        items = extract_list_items(resp_data)
 {{ body_indent }}        for item in items:
 {{ body_indent }}            if isinstance(item, dict):
 {{ body_indent }}                for k, v in item.items():
-{{ body_indent }}                    if k.lower() == "{{ param_name_lower }}":
+{{ body_indent }}                    if k.lower() == "{{ param_name_lower }}"{% if list_suffix %} or k.lower() == "{{ param_name_lower }}".removesuffix("list"){% endif %}:
 {{ body_indent }}                        {{ verify_assert }}
 {% endif %}

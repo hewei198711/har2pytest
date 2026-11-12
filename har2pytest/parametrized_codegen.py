@@ -124,10 +124,11 @@ def gen_test_case_imports(
         )
 
     if is_list_query:
-        # test_0 收集逻辑收口到 pytest_utils.collect_list_query_data，产物只调用
+        # test_0 收集逻辑收口到 pytest_utils.collect_list_query_data，产物只调用；
+        # 断言侧明细提取统一用 extract_list_items（兼容 lists/list/records 等键名）
         content.extend(
             [
-                "from har2pytest.pytest_utils import collect_list_query_data",
+                "from har2pytest.pytest_utils import collect_list_query_data, extract_list_items",
                 "",
             ]
         )
@@ -481,12 +482,20 @@ def gen_batch_parametrized_test_methods(
                 title_param = title_param.split(" ")[0]
 
             search_enabled = "," not in param_name
+            is_list_param = param_name.lower().endswith("list")
             verify_assert = ""
             if search_enabled:
-                verify_assert = (
-                    f'assert v is None or str(v) == str(self.list_query_data["{param_name}"]), '
-                    f"f'字段 {{k}} 值 {{v}} 与搜索条件 {param_name}={{self.list_query_data[\"{param_name}\"]}} 不一致'"
-                )
+                if is_list_param:
+                    # List 集合参数期望值是列表（收集时包装），断言逐元素比较
+                    verify_assert = (
+                        f'assert v is None or any(str(v) == str(x) for x in self.list_query_data["{param_name}"]), '
+                        f"f'字段 {{k}} 值 {{v}} 与搜索条件 {param_name}={{self.list_query_data[\"{param_name}\"]}} 不一致'"
+                    )
+                else:
+                    verify_assert = (
+                        f'assert v is None or str(v) == str(self.list_query_data["{param_name}"]), '
+                        f"f'字段 {{k}} 值 {{v}} 与搜索条件 {param_name}={{self.list_query_data[\"{param_name}\"]}} 不一致'"
+                    )
 
             content.extend(
                 render_lines(
@@ -506,6 +515,7 @@ def gen_batch_parametrized_test_methods(
                     param_name_lower=param_name.lower(),
                     verify_assert=verify_assert,
                     with_keyword=render_ctx["with_keyword"],
+                    list_suffix=is_list_param,
                 )
             )
 
@@ -646,6 +656,7 @@ def gen_test_method_assertions(
         search_enabled=search_enabled,
         search_param=param_name.lower() if search_enabled else "",
         verify_assert=verify_assert,
+        list_suffix=search_enabled and param_name.lower().endswith("list"),
     )
     content.append("")
     return content
