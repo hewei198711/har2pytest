@@ -1,4 +1,6 @@
-{% if method == "GET" %}{% if has_params %}    return client.get(url=url, params=params, headers=headers)
+{% if method == "GET" %}{% if has_data %}{% if is_json_content %}    return client.get(url=url, json=data, headers=headers)
+{% else %}    return client.get(url=url, data=data, headers=headers)
+{% endif %}{% elif has_params %}    return client.get(url=url, params=params, headers=headers)
 {% else %}    return client.get(url=url, headers=headers)
 {% endif %}{% elif method == "POST" %}{% if has_data %}{% if is_urlencode %}    data = urlencode(data) # application/x-www-form-urlencoded传参需要特殊处理
 

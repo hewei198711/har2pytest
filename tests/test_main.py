@@ -147,52 +147,22 @@ def test_main_unknown_command(monkeypatch, tmp_path):
         main_module.main()
 
 
+@pytest.mark.parametrize("overrides,expected_msg", [
+    pytest.param({"pattern": "list_query", "url": None}, "必须指定 --url 参数", id="list_query模式缺少url参数"),
+    pytest.param({"pattern": "complex_scenario", "url": None}, "必须指定 --url 参数", id="complex_scenario模式缺少url参数"),
+    pytest.param({"pattern": "batch", "api_files": ""}, "必须指定 --api-files 参数", id="batch模式缺少api_files参数"),
+    pytest.param({"pattern": "list_query", "har_file": "", "url": "/api/test"}, "必须指定 HAR 文件", id="list_query模式har_file为空"),
+])
 @allure.feature("CLI入口")
 @allure.story("testcase参数校验")
-@allure.title("测试list_query模式缺少url参数时拒绝执行")
-async def test_handle_testcase_list_query_missing_url(caplog):
+@allure.title("测试testcase必填参数缺失时拒绝执行")
+async def test_handle_testcase_missing_required_args(caplog, overrides, expected_msg):
     caplog.set_level(logging.ERROR, logger="har2pytest")
 
-    result = await main_module.handle_testcase(_tc_args(pattern="list_query", url=None))
+    result = await main_module.handle_testcase(_tc_args(**overrides))
 
     assert result is None
-    assert "必须指定 --url 参数" in caplog.text
-
-
-@allure.feature("CLI入口")
-@allure.story("testcase参数校验")
-@allure.title("测试complex_scenario模式缺少url参数时拒绝执行")
-async def test_handle_testcase_complex_missing_url(caplog):
-    caplog.set_level(logging.ERROR, logger="har2pytest")
-
-    result = await main_module.handle_testcase(_tc_args(pattern="complex_scenario", url=None))
-
-    assert result is None
-    assert "必须指定 --url 参数" in caplog.text
-
-
-@allure.feature("CLI入口")
-@allure.story("testcase参数校验")
-@allure.title("测试batch模式缺少api-files参数时拒绝执行")
-async def test_handle_testcase_batch_missing_api_files(caplog):
-    caplog.set_level(logging.ERROR, logger="har2pytest")
-
-    result = await main_module.handle_testcase(_tc_args(pattern="batch", api_files=""))
-
-    assert result is None
-    assert "必须指定 --api-files 参数" in caplog.text
-
-
-@allure.feature("CLI入口")
-@allure.story("testcase参数校验")
-@allure.title("测试list_query模式har_file为空时拒绝执行")
-async def test_handle_testcase_list_query_empty_har(caplog):
-    caplog.set_level(logging.ERROR, logger="har2pytest")
-
-    result = await main_module.handle_testcase(_tc_args(pattern="list_query", har_file="", url="/api/test"))
-
-    assert result is None
-    assert "必须指定 HAR 文件" in caplog.text
+    assert expected_msg in caplog.text
 
 
 @allure.feature("CLI入口")

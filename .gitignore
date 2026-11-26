@@ -38,3 +38,4 @@ data/*
 har_main.py
 *.har
 run_list_query.py
+run_complex_test.py

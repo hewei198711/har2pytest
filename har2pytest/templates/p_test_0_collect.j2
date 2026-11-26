@@ -7,6 +7,11 @@
 {{ body_indent }}    assert r.{{ status_attr }} == 200
 {{ body_indent }}    data = {{ json_call }}
 {{ body_indent }}    assert data["code"] == 200
-{{ body_indent }}    # 收集响应字段值到 list_query_data（精确匹配优先、无则前缀模糊匹配；响应值优先覆盖），逻辑见 pytest_utils.collect_list_query_data
-{{ body_indent }}    collect_list_query_data(data, self.__class__.list_query_data)
+{{ body_indent }}    # 响应列表为空或收集后参数仍为空时，后续查询用例参数值收集不到、搜索条件保持空值
+{{ body_indent }}    # （等于没传参）、一致性断言被跳过而空转，直接失败暴露问题；恒空参数说明无意义，手工删除该参数即可
+{{ body_indent }}    assert extract_list_items(data.get("data")), "接口响应列表为空，test_0 无法收集参数值，后续查询用例将无效执行"
+{{ body_indent }}    # 收集响应字段值到 list_query_data，逻辑见 pytest_utils.collect_list_query_data
+{{ body_indent }}    collect_list_query_data(data, self.__class__.list_query_data{% if extra_time_params_repr %}, {{ extra_time_params_repr }}{% endif %}{% if value_pairs_repr %}, value_pairs={{ value_pairs_repr }}{% endif %}{% if field_map_repr %}, field_map={{ field_map_repr }}{% endif %})
+{{ body_indent }}    empty_keys = [k for k, v in self.__class__.list_query_data.items() if v in ("", None)]
+{{ body_indent }}    assert not empty_keys, f"以下参数未收集到值，后续查询用例将无效执行: {empty_keys}"
 

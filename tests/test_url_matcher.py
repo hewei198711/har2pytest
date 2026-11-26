@@ -3,6 +3,7 @@
 import json
 
 import allure
+import pytest
 
 from har2pytest.config import APIConfig
 from har2pytest.url_matcher import URLMatcher
@@ -48,87 +49,32 @@ def _write_api_file(tmp_path, url, filename="user_info.py"):
 class TestMatchUrlPattern:
     @allure.feature("URL匹配器")
     @allure.story("URL模式匹配")
-    @allure.title("测试无路径参数的完全匹配")
-    def test_exact_match_without_params(self):
-        matched, params = URLMatcher.match_url_pattern("/api/user/info", "/api/user/info")
-        assert matched is True
-        assert params == {}
-
-    @allure.feature("URL匹配器")
-    @allure.story("URL模式匹配")
-    @allure.title("测试带路径参数的匹配")
-    def test_match_with_path_param(self):
-        matched, params = URLMatcher.match_url_pattern("/api/user/123/info", "/api/user/{userId}/info")
-        assert matched is True
-        assert params == {"userId": "123"}
-
-    @allure.feature("URL匹配器")
-    @allure.story("URL模式匹配")
-    @allure.title("测试多个路径参数的匹配")
-    def test_match_with_multiple_path_params(self):
-        matched, params = URLMatcher.match_url_pattern("/api/user/123/order/456", "/api/user/{userId}/order/{orderId}")
-        assert matched is True
-        assert params == {"userId": "123", "orderId": "456"}
-
-    @allure.feature("URL匹配器")
-    @allure.story("URL模式匹配")
-    @allure.title("测试URL长度不同时不匹配")
-    def test_length_mismatch(self):
-        matched, params = URLMatcher.match_url_pattern("/api/user/info", "/api/user")
-        assert matched is False
-        assert params == {}
-
-        matched, params = URLMatcher.match_url_pattern("/api/user", "/api/user/info")
-        assert matched is False
-        assert params == {}
-
-    @allure.feature("URL匹配器")
-    @allure.story("URL模式匹配")
-    @allure.title("测试非参数部分不匹配")
-    def test_non_param_part_mismatch(self):
-        matched, params = URLMatcher.match_url_pattern("/api/user/123/info", "/api/order/{userId}/info")
-        assert matched is False
-        assert params == {}
-
-        matched, params = URLMatcher.match_url_pattern("/api/user/123/info", "/api/user/{userId}/detail")
-        assert matched is False
-        assert params == {}
-
-    @allure.feature("URL匹配器")
-    @allure.story("URL模式匹配")
-    @allure.title("测试空URL")
-    def test_empty_url(self):
-        matched, params = URLMatcher.match_url_pattern("", "")
-        assert matched is True
-        assert params == {}
-
-        matched, params = URLMatcher.match_url_pattern("/", "/")
-        assert matched is True
-        assert params == {}
-
-        matched, params = URLMatcher.match_url_pattern("", "/api/user")
-        assert matched is False
-        assert params == {}
-
-    @allure.feature("URL匹配器")
-    @allure.story("URL模式匹配")
-    @allure.title("测试数字类型的路径参数值")
-    def test_numeric_param_value(self):
-        matched, params = URLMatcher.match_url_pattern("/api/order/12345/detail", "/api/order/{orderId}/detail")
-        assert matched is True
-        assert params == {"orderId": "12345"}
-
-        matched, params = URLMatcher.match_url_pattern("/api/product/abc123", "/api/product/{productId}")
-        assert matched is True
-        assert params == {"productId": "abc123"}
-
-    @allure.feature("URL匹配器")
-    @allure.story("URL模式匹配")
-    @allure.title("测试完整URL与模式的匹配")
-    def test_full_url_vs_pattern(self):
-        matched, params = URLMatcher.match_url_pattern("https://example.com/api/user/123", "/api/user/{userId}")
-        assert matched is False
-        assert params == {}
+    @allure.title("测试 URL 模式匹配各形态")
+    @pytest.mark.parametrize(
+        "url,pattern,expected",
+        [
+            pytest.param("/api/user/info", "/api/user/info", (True, {}), id="无路径参数完全匹配"),
+            pytest.param("/api/user/123/info", "/api/user/{userId}/info", (True, {"userId": "123"}), id="单路径参数"),
+            pytest.param(
+                "/api/user/123/order/456",
+                "/api/user/{userId}/order/{orderId}",
+                (True, {"userId": "123", "orderId": "456"}),
+                id="多路径参数",
+            ),
+            pytest.param("/api/user/info", "/api/user", (False, {}), id="URL更长不匹配"),
+            pytest.param("/api/user", "/api/user/info", (False, {}), id="URL更短不匹配"),
+            pytest.param("/api/user/123/info", "/api/order/{userId}/info", (False, {}), id="非参数前缀段不匹配"),
+            pytest.param("/api/user/123/info", "/api/user/{userId}/detail", (False, {}), id="非参数后缀段不匹配"),
+            pytest.param("", "", (True, {}), id="双空URL匹配"),
+            pytest.param("/", "/", (True, {}), id="根路径匹配"),
+            pytest.param("", "/api/user", (False, {}), id="空URL不匹配非空模式"),
+            pytest.param("/api/order/12345/detail", "/api/order/{orderId}/detail", (True, {"orderId": "12345"}), id="纯数字参数值"),
+            pytest.param("/api/product/abc123", "/api/product/{productId}", (True, {"productId": "abc123"}), id="字母数字混合参数值"),
+            pytest.param("https://example.com/api/user/123", "/api/user/{userId}", (False, {}), id="完整URL不匹配path模式"),
+        ],
+    )
+    def test_match_url_pattern_forms(self, url, pattern, expected):
+        assert URLMatcher.match_url_pattern(url, pattern) == expected
 
 
 # ==================== 查找匹配API文件测试 ====================
@@ -137,39 +83,33 @@ class TestMatchUrlPattern:
 class TestFindMatchingApiFile:
     @allure.feature("URL匹配器")
     @allure.story("查找匹配API文件")
-    @allure.title("测试直接相等匹配")
-    def test_exact_match(self, tmp_path):
-        api_file = _write_api_file(tmp_path, "/api/user/info")
-        result = URLMatcher.find_matching_api_file("/api/user/info", [str(api_file)])
-        assert result == str(api_file)
-
-    @allure.feature("URL匹配器")
-    @allure.story("查找匹配API文件")
-    @allure.title("测试路径参数模式匹配")
-    def test_path_param_pattern_match(self, tmp_path):
-        api_file = _write_api_file(tmp_path, "/api/user/{userId}/info")
-        result = URLMatcher.find_matching_api_file("/api/user/123/info", [str(api_file)])
-        assert result == str(api_file)
-
-    @allure.feature("URL匹配器")
-    @allure.story("查找匹配API文件")
-    @allure.title("测试转换后URL匹配")
-    def test_transformed_url_match(self, tmp_path):
-        api_file = _write_api_file(tmp_path, "/api/user/{userId}/info")
-
-        request_url_map = {"/api/user/123/info": "/api/user/{userId}/info"}
-
-        result = URLMatcher.find_matching_api_file("/api/user/123/info", [str(api_file)], request_url_map)
-        assert result == str(api_file)
-
-    @allure.feature("URL匹配器")
-    @allure.story("查找匹配API文件")
-    @allure.title("测试无匹配文件")
-    def test_no_matching_file(self, tmp_path):
-        api_file = _write_api_file(tmp_path, "/api/user/info")
-
-        result = URLMatcher.find_matching_api_file("/api/order/list", [str(api_file)])
-        assert result is None
+    @allure.title("测试单 API 文件查找匹配各形态")
+    @pytest.mark.parametrize(
+        "file_url,request_url,url_map,expected_name",
+        [
+            pytest.param("/api/user/info", "/api/user/info", None, "user_info.py", id="直接相等"),
+            pytest.param("/api/user/{userId}/info", "/api/user/123/info", None, "user_info.py", id="路径参数模式"),
+            pytest.param(
+                "/api/user/{userId}/info",
+                "/api/user/123/info",
+                {"/api/user/123/info": "/api/user/{userId}/info"},
+                "user_info.py",
+                id="request_url_map转换后匹配",
+            ),
+            pytest.param("/api/user/info", "/api/order/list", None, None, id="无匹配"),
+            # 请求 URL 带 scheme://host 前缀：应经 normalize_url 归一化（去除前缀）后命中 API 文件
+            pytest.param("/api/user/info", "https://example.com/api/user/info", None, "user_info.py", id="完整URL前缀归一化"),
+            # 带查询参数、无前导斜杠的请求 URL 应标准化（去 query、补斜杠）后命中 API 文件
+            pytest.param("/api/user/info", "api/user/info?page=1&size=10", None, "user_info.py", id="查询参数与前导斜杠标准化"),
+            # 请求 URL 为模板形式，API 文件 URL 为具体值：反向 match_url_pattern(file_url, request_url) 命中
+            pytest.param("/api/user/123/info", "/api/user/{userId}/info", None, "user_123_info.py", id="反向模式匹配"),
+        ],
+    )
+    def test_find_single_file_forms(self, tmp_path, file_url, request_url, url_map, expected_name):
+        filename = expected_name or "user_info.py"
+        api_file = _write_api_file(tmp_path, file_url, filename=filename)
+        result = URLMatcher.find_matching_api_file(request_url, [str(api_file)], url_map)
+        assert result == (str(api_file) if expected_name else None)
 
     @allure.feature("URL匹配器")
     @allure.story("查找匹配API文件")
@@ -180,16 +120,6 @@ class TestFindMatchingApiFile:
 
         result = URLMatcher.find_matching_api_file("/api/user/info", [str(api_file1), str(api_file2)])
         assert result == str(api_file1)
-
-    @allure.feature("URL匹配器")
-    @allure.story("查找匹配API文件")
-    @allure.title("测试完整URL前缀归一化匹配")
-    def test_full_url_with_base_url_stripped(self, tmp_path):
-        # 请求 URL 带 scheme://host 前缀：应经 normalize_url 归一化（去除前缀）后命中 API 文件
-        api_file = _write_api_file(tmp_path, "/api/user/info")
-
-        result = URLMatcher.find_matching_api_file("https://example.com/api/user/info", [str(api_file)])
-        assert result == str(api_file)
 
     @allure.feature("URL匹配器")
     @allure.story("查找匹配API文件")
@@ -205,51 +135,28 @@ class TestFindMatchingApiFile:
 class TestNormalizeUrl:
     @allure.feature("URL匹配器")
     @allure.story("URL规范化")
-    @allure.title("测试移除查询参数")
-    def test_remove_query_params(self):
-        result = URLMatcher.normalize_url("/api/user/list?page=1&size=10")
-        assert result == "/api/user/list"
-
-    @allure.feature("URL匹配器")
-    @allure.story("URL规范化")
-    @allure.title("测试添加开头的斜杠")
-    def test_add_leading_slash(self):
-        result = URLMatcher.normalize_url("api/user/list")
-        assert result == "/api/user/list"
-
-    @allure.feature("URL匹配器")
-    @allure.story("URL规范化")
-    @allure.title("测试移除基础URL前缀")
-    def test_remove_base_url(self):
-        result = URLMatcher.normalize_url("https://example.com/api/user/list", base_urls=["https://example.com"])
-        assert result == "/api/user/list"
-
-    @allure.feature("URL匹配器")
-    @allure.story("URL规范化")
-    @allure.title("测试多个基础URL前缀")
-    def test_multiple_base_urls(self):
-        base_urls = ["https://dev.example.com", "https://example.com"]
-        result = URLMatcher.normalize_url("https://example.com/api/user", base_urls=base_urls)
-        assert result == "/api/user"
-
-    @allure.feature("URL匹配器")
-    @allure.story("URL规范化")
-    @allure.title("测试无基础URL")
-    def test_no_base_url(self):
-        result = URLMatcher.normalize_url("/api/user/list")
-        assert result == "/api/user/list"
-
-    @allure.feature("URL匹配器")
-    @allure.story("URL规范化")
-    @allure.title("测试绝对URL无匹配base_url时仅保留path部分")
-    def test_absolute_url_no_base_match(self):
-        # 绝对 URL 未匹配任何 base_url，应只保留 path 部分
-        result = URLMatcher.normalize_url("https://other.com/api/user/list")
-        assert result == "/api/user/list"
-
-        # 绝对 URL 仅 host 无 path，应回落到 "/"
-        result2 = URLMatcher.normalize_url("https://other.com")
-        assert result2 == "/"
+    @allure.title("测试 URL 规范化各形态")
+    @pytest.mark.parametrize(
+        "url,base_urls,expected",
+        [
+            pytest.param("/api/user/list?page=1&size=10", None, "/api/user/list", id="移除查询参数"),
+            pytest.param("api/user/list", None, "/api/user/list", id="补开头斜杠"),
+            pytest.param("https://example.com/api/user/list", ["https://example.com"], "/api/user/list", id="移除基础URL前缀"),
+            pytest.param(
+                "https://example.com/api/user",
+                ["https://dev.example.com", "https://example.com"],
+                "/api/user",
+                id="多个基础URL前缀",
+            ),
+            pytest.param("/api/user/list", None, "/api/user/list", id="无基础URL原样保留"),
+            # 绝对 URL 未匹配任何 base_url，应只保留 path 部分
+            pytest.param("https://other.com/api/user/list", None, "/api/user/list", id="绝对URL无匹配base仅留path"),
+            # 绝对 URL 仅 host 无 path，应回落到 "/"
+            pytest.param("https://other.com", None, "/", id="仅host无path回落根路径"),
+        ],
+    )
+    def test_normalize_url_forms(self, url, base_urls, expected):
+        assert URLMatcher.normalize_url(url, base_urls=base_urls) == expected
 
 
 # ==================== generate_function_name 测试 ====================
@@ -258,31 +165,18 @@ class TestNormalizeUrl:
 class TestGenerateFunctionName:
     @allure.feature("URL匹配器")
     @allure.story("生成函数名")
-    @allure.title("测试从普通URL生成函数名")
-    def test_normal_url(self):
-        result = URLMatcher.generate_function_name("/api/user/login")
-        assert result == "api_user_login"
-
-    @allure.feature("URL匹配器")
-    @allure.story("生成函数名")
-    @allure.title("测试从带路径参数的URL生成函数名")
-    def test_url_with_path_params(self):
-        result = URLMatcher.generate_function_name("/api/user/{userId}/info")
-        assert result == "api_user_userId_info"
-
-    @allure.feature("URL匹配器")
-    @allure.story("生成函数名")
-    @allure.title("测试None输入")
-    def test_none_url(self):
-        result = URLMatcher.generate_function_name(None)
-        assert result == "unknown"
-
-    @allure.feature("URL匹配器")
-    @allure.story("生成函数名")
-    @allure.title("测试空URL")
-    def test_empty_url(self):
-        result = URLMatcher.generate_function_name("")
-        assert result == ""
+    @allure.title("测试从 URL 生成函数名各形态")
+    @pytest.mark.parametrize(
+        "url,expected",
+        [
+            pytest.param("/api/user/login", "api_user_login", id="普通URL"),
+            pytest.param("/api/user/{userId}/info", "api_user_userId_info", id="带路径参数"),
+            pytest.param(None, "unknown", id="None输入"),
+            pytest.param("", "", id="空URL"),
+        ],
+    )
+    def test_generate_function_name_forms(self, url, expected):
+        assert URLMatcher.generate_function_name(url) == expected
 
 
 # ==================== extract_url_template 测试 ====================
@@ -291,29 +185,22 @@ class TestGenerateFunctionName:
 class TestExtractUrlTemplate:
     @allure.feature("URL匹配器")
     @allure.story("提取URL模板")
-    @allure.title("测试匹配URL模板")
-    def test_match_template(self):
-        patterns = ["/api/user/{userId}/info", "/api/order/{orderId}/detail"]
-        template, params = URLMatcher.extract_url_template("/api/user/123/info", patterns)
-        assert template == "/api/user/{userId}/info"
-        assert params == {"userId": "123"}
-
-    @allure.feature("URL匹配器")
-    @allure.story("提取URL模板")
-    @allure.title("测试无匹配模板")
-    def test_no_match(self):
-        patterns = ["/api/user/{userId}/info"]
-        template, params = URLMatcher.extract_url_template("/api/order/list", patterns)
-        assert template is None
-        assert params == {}
-
-    @allure.feature("URL匹配器")
-    @allure.story("提取URL模板")
-    @allure.title("测试空模板列表")
-    def test_empty_patterns(self):
-        template, params = URLMatcher.extract_url_template("/api/user/123/info", [])
-        assert template is None
-        assert params == {}
+    @allure.title("测试提取 URL 模板各形态")
+    @pytest.mark.parametrize(
+        "url,patterns,expected",
+        [
+            pytest.param(
+                "/api/user/123/info",
+                ["/api/user/{userId}/info", "/api/order/{orderId}/detail"],
+                ("/api/user/{userId}/info", {"userId": "123"}),
+                id="命中模板",
+            ),
+            pytest.param("/api/order/list", ["/api/user/{userId}/info"], (None, {}), id="无匹配模板"),
+            pytest.param("/api/user/123/info", [], (None, {}), id="空模板列表"),
+        ],
+    )
+    def test_extract_url_template_forms(self, url, patterns, expected):
+        assert URLMatcher.extract_url_template(url, patterns) == expected
 
 
 # ==================== get_url_info 测试 ====================
@@ -376,31 +263,18 @@ class TestGetUrlInfo:
 class TestRemoveBasePath:
     @allure.feature("URL匹配器")
     @allure.story("移除基础路径")
-    @allure.title("测试移除基础路径")
-    def test_remove_base_path(self):
-        result = URLMatcher.remove_base_path("/swagger/api/user/login", "/swagger")
-        assert result == "/api/user/login"
-
-    @allure.feature("URL匹配器")
-    @allure.story("移除基础路径")
-    @allure.title("测试空基础路径")
-    def test_empty_base_path(self):
-        result = URLMatcher.remove_base_path("/api/user/login", "")
-        assert result == "/api/user/login"
-
-    @allure.feature("URL匹配器")
-    @allure.story("移除基础路径")
-    @allure.title("测试根路径基础路径")
-    def test_root_base_path(self):
-        result = URLMatcher.remove_base_path("/api/user/login", "/")
-        assert result == "/api/user/login"
-
-    @allure.feature("URL匹配器")
-    @allure.story("移除基础路径")
-    @allure.title("测试不匹配的基础路径")
-    def test_non_matching_base_path(self):
-        result = URLMatcher.remove_base_path("/api/user/login", "/v2")
-        assert result == "/api/user/login"
+    @allure.title("测试移除基础路径各形态")
+    @pytest.mark.parametrize(
+        "url,base_path,expected",
+        [
+            pytest.param("/swagger/api/user/login", "/swagger", "/api/user/login", id="移除基础路径"),
+            pytest.param("/api/user/login", "", "/api/user/login", id="空基础路径"),
+            pytest.param("/api/user/login", "/", "/api/user/login", id="根路径基础路径"),
+            pytest.param("/api/user/login", "/v2", "/api/user/login", id="不匹配的基础路径"),
+        ],
+    )
+    def test_remove_base_path_forms(self, url, base_path, expected):
+        assert URLMatcher.remove_base_path(url, base_path) == expected
 
 
 # ==================== _extract_path_parts 测试 ====================
@@ -409,17 +283,21 @@ class TestRemoveBasePath:
 class TestExtractPathParts:
     @allure.feature("URL匹配器")
     @allure.story("提取路径部分")
-    @allure.title("测试提取路径部分（含参数）")
-    def test_extract_with_params(self):
-        result = URLMatcher._extract_path_parts("/api/user/123/info", "/api/user/{userId}/info")
-        assert result == ["api", "user", "userId", "info"]
-
-    @allure.feature("URL匹配器")
-    @allure.story("提取路径部分")
-    @allure.title("测试提取路径部分（无参数）")
-    def test_extract_without_params(self):
-        result = URLMatcher._extract_path_parts("/api/user/login", "/api/user/login")
-        assert result == ["api", "user", "login"]
+    @allure.title("测试提取路径部分各形态")
+    @pytest.mark.parametrize(
+        "url,pattern,expected",
+        [
+            pytest.param(
+                "/api/user/123/info",
+                "/api/user/{userId}/info",
+                ["api", "user", "userId", "info"],
+                id="含参数",
+            ),
+            pytest.param("/api/user/login", "/api/user/login", ["api", "user", "login"], id="无参数"),
+        ],
+    )
+    def test_extract_path_parts_forms(self, url, pattern, expected):
+        assert URLMatcher._extract_path_parts(url, pattern) == expected
 
 
 # ==================== match_with_swagger 测试 ====================
@@ -428,50 +306,40 @@ class TestExtractPathParts:
 class TestMatchWithSwagger:
     @allure.feature("URL匹配器")
     @allure.story("Swagger匹配")
-    @allure.title("测试无Swagger数据")
-    def test_no_swagger_data(self):
-        matcher = URLMatcher()
-        result = matcher.match_with_swagger("/api/user/123")
-        assert result == (None, {}, [])
-
-    @allure.feature("URL匹配器")
-    @allure.story("Swagger匹配")
-    @allure.title("测试Swagger数据无paths字段")
-    def test_swagger_no_paths(self):
-        matcher = URLMatcher({"info": {"title": "Test"}})
-        result = matcher.match_with_swagger("/api/user/123")
-        assert result == (None, {}, [])
-
-    @allure.feature("URL匹配器")
-    @allure.story("Swagger匹配")
-    @allure.title("测试Swagger路径匹配")
-    def test_swagger_path_match(self):
-        swagger_data = {
-            "basePath": "/api",
-            "paths": {
-                "/user/{userId}/info": {"get": {}},
-                "/order/list": {"get": {}},
-            },
-        }
+    @allure.title("测试 Swagger 匹配各形态")
+    @pytest.mark.parametrize(
+        "swagger_data,url,expected",
+        [
+            pytest.param(None, "/api/user/123", (None, {}, []), id="无Swagger数据"),
+            pytest.param({"info": {"title": "Test"}}, "/api/user/123", (None, {}, []), id="无paths字段"),
+            pytest.param(
+                {
+                    "basePath": "/api",
+                    "paths": {
+                        "/user/{userId}/info": {"get": {}},
+                        "/order/list": {"get": {}},
+                    },
+                },
+                "/api/user/123/info",
+                ("/api/user/{userId}/info", {"userId": "123"}, ["user", "userId", "info"]),
+                id="路径命中模板",
+            ),
+            pytest.param(
+                {
+                    "basePath": "/api",
+                    "paths": {
+                        "/user/{userId}/info": {"get": {}},
+                    },
+                },
+                "/api/order/list",
+                (None, {}, []),
+                id="不匹配",
+            ),
+        ],
+    )
+    def test_match_with_swagger_forms(self, swagger_data, url, expected):
         matcher = URLMatcher(swagger_data)
-        full_path, params, parts = matcher.match_with_swagger("/api/user/123/info")
-        assert full_path == "/api/user/{userId}/info"
-        assert params == {"userId": "123"}
-        assert parts == ["user", "userId", "info"]
-
-    @allure.feature("URL匹配器")
-    @allure.story("Swagger匹配")
-    @allure.title("测试Swagger不匹配")
-    def test_swagger_no_match(self):
-        swagger_data = {
-            "basePath": "/api",
-            "paths": {
-                "/user/{userId}/info": {"get": {}},
-            },
-        }
-        matcher = URLMatcher(swagger_data)
-        result = matcher.match_with_swagger("/api/order/list")
-        assert result == (None, {}, [])
+        assert matcher.match_with_swagger(url) == expected
 
     @allure.feature("URL匹配器")
     @allure.story("Swagger匹配")

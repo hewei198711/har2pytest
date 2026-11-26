@@ -272,14 +272,17 @@ class SwaggerHandler:
             api_info.param_defaults.update(path_params)
             if isinstance(post_data, dict):
                 api_info.param_defaults.update(post_data)
+            elif isinstance(post_data, list) and post_data and isinstance(post_data[0], dict):
+                # 顶层数组 body：元素字段即定义侧字段，取首元素合并类型感知默认值
+                api_info.param_defaults.update(post_data[0])
             for param in parameters:
                 param_name = param.get("name", "")
                 # 描述统一压成单行：多行 description 会破坏生成的注释/docstring/allure 标题
                 param_desc = sanitize_remark(param.get("description", ""))
                 param_in = param.get("in", "")
 
-                if param_in in ("query", "path"):
-                    # query/path 参数：直接添加描述
+                if param_in in ("query", "path", "formData"):
+                    # query/path/formData 参数为平铺 type 声明，直接添加描述
                     if param_name and param_desc:
                         api_info.parameters[param_name] = param_desc
                 elif "schema" in param:
@@ -287,8 +290,16 @@ class SwaggerHandler:
                     # body 参数：统一使用递归提取嵌套描述（支持 $ref 和 properties）
                     self._extract_nested_descriptions(schema, swagger_data, api_info.parameters)
                     # 裸类型 body（无 $ref/properties，如 {"type": "string"}）：
-                    # 递归提取覆盖不到，直接用参数名+描述兜底
-                    if param_name and param_desc and not ("$ref" in schema or "properties" in schema):
+                    # 递归提取覆盖不到，直接用参数名+描述兜底；
+                    # 带模型的数组已由顶层数组分支展开元素描述，不走兜底（避免参数名噪声备注）
+                    items = schema.get("items") or {}
+                    is_model_array = schema.get("type") == "array" and ("$ref" in items or "properties" in items)
+                    if (
+                        param_name
+                        and param_desc
+                        and not ("$ref" in schema or "properties" in schema)
+                        and not is_model_array
+                    ):
                         api_info.parameters[param_name] = param_desc
 
         return api_info
@@ -297,7 +308,8 @@ class SwaggerHandler:
         """
         从Swagger文档提取参数
 
-        处理查询参数、请求体参数和路径参数，提取默认值和参数描述信息
+        处理查询参数、请求体参数、表单参数（Swagger 2.0 的 ``in: formData``，
+        文件上传参数属于此类）和路径参数，提取默认值和参数描述信息
 
         Args:
             parameters: Swagger文档中的参数列表
@@ -342,6 +354,19 @@ class SwaggerHandler:
                     post_data[param_name] = self._get_default_value(schema.get("type", "string"), param_name)
                     if param_desc:
                         param_descriptions[param_name] = param_desc
+            elif param_in == "formData" and param_name:
+                # Swagger 2.0 表单参数（文件上传就声明在这里）归入请求体；
+                # file 类型填 “(binary)” 占位，与 HAR 路径 _find_file_upload_key
+                # 的约定一致，下游据此触发文件上传生成；
+                # post_data 可能已被 body 分支换成数组请求体，故需 isinstance 判定
+                has_body_param = True
+                if isinstance(post_data, dict):
+                    if param_type == "file":
+                        post_data[param_name] = "(binary)"
+                    else:
+                        post_data[param_name] = self._get_default_value(param_type, param_name)
+                if param_desc:
+                    param_descriptions[param_name] = param_desc
             elif param_in == "path":
                 # 处理路径参数
                 path_params[param_name] = self._get_default_value(param_type, param_name)
@@ -536,6 +561,14 @@ class SwaggerHandler:
         """
         if _active_refs is None:
             _active_refs = set()
+
+        # 顶层数组 body（type=array，items 指向模型）：与 _extract_body_params 对称，
+        # 递归 items 展开元素字段描述；无此分支时顶层数组接口的元素备注会全部丢失
+        if isinstance(schema, dict) and schema.get("type") == "array":
+            items = schema.get("items")
+            if isinstance(items, dict):
+                self._extract_nested_descriptions(items, swagger_data, descriptions, parent_key, _active_refs)
+            return
 
         properties: dict[str, Any] | None = None
         ref: str | None = None

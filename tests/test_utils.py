@@ -10,6 +10,7 @@ import pytest
 from har2pytest import utils as utils_module
 from har2pytest.models import ParsedRequestInfo
 from har2pytest.utils import (
+    MANUAL_KEEP_MARKER,
     _extract_date_format_from_remark,
     build_time_pairs,
     clear_api_file_cache,
@@ -20,6 +21,7 @@ from har2pytest.utils import (
     format_parameter_value,
     format_params_for_python,
     header_value_formatter,
+    is_manually_kept,
     merge_request_params,
     parse_api_file,
     sanitize_param_name,
@@ -110,18 +112,24 @@ def test_parse_api_file_headers(tmp_path):
 
 @allure.feature("工具函数")
 @allure.story("参数名清理")
-@allure.title("测试清理参数名避免 Python 关键字冲突")
-def test_sanitize_param_name():
-    assert sanitize_param_name("from") == "from_"
-    assert sanitize_param_name("class") == "class_"
-    assert sanitize_param_name("def") == "def_"
-    assert sanitize_param_name("return") == "return_"
-    assert sanitize_param_name("user_id") == "user_id"
-    assert sanitize_param_name("from_user") == "from_user"
-    # 空字符串返回默认前缀
-    assert sanitize_param_name("") == "param_"
-    # 数字开头时加 param_ 前缀
-    assert sanitize_param_name("123abc") == "param_123abc"
+@allure.title("测试清理参数名各形态")
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        pytest.param("from", "from_", id="关键字from"),
+        pytest.param("class", "class_", id="关键字class"),
+        pytest.param("def", "def_", id="关键字def"),
+        pytest.param("return", "return_", id="关键字return"),
+        pytest.param("user_id", "user_id", id="普通名不变"),
+        pytest.param("from_user", "from_user", id="关键字前缀不冲突"),
+        # 空字符串返回默认前缀
+        pytest.param("", "param_", id="空串默认前缀"),
+        # 数字开头时加 param_ 前缀
+        pytest.param("123abc", "param_123abc", id="数字开头加前缀"),
+    ],
+)
+def test_sanitize_param_name(name, expected):
+    assert sanitize_param_name(name) == expected
 
 
 # ==================== 值去重测试 ====================
@@ -129,51 +137,28 @@ def test_sanitize_param_name():
 
 @allure.feature("工具函数")
 @allure.story("值去重")
-@allure.title("测试基本类型去重")
-def test_deduplicate_values_primitives():
-    assert deduplicate_values([1, 2, 2, 3]) == [1, 2, 3]
-    assert deduplicate_values(["a", "b", "a"]) == ["a", "b"]
-    assert deduplicate_values([True, False, True]) == [True, False]
-    assert deduplicate_values([None, None, 1]) == [None, 1]
-
-
-@allure.feature("工具函数")
-@allure.story("值去重")
-@allure.title("测试 dict 去重（含键顺序不同）")
-def test_deduplicate_values_dicts():
-    result = deduplicate_values([{"b": 2, "a": 1}, {"a": 1, "b": 2}])
-    assert result == [{"b": 2, "a": 1}]
-
-
-@allure.feature("工具函数")
-@allure.story("值去重")
-@allure.title("测试 list 去重")
-def test_deduplicate_values_lists():
-    result = deduplicate_values([[1, 2], [1, 2], [3, 4]])
-    assert result == [[1, 2], [3, 4]]
-
-
-@allure.feature("工具函数")
-@allure.story("值去重")
-@allure.title("测试 raw string 与 JSON 序列化结果不碰撞")
-def test_deduplicate_values_no_cross_type_collision():
-    result = deduplicate_values(['{"a": 1}', {"a": 1}])
-    assert len(result) == 2
-    assert '{"a": 1}' in result
-    assert {"a": 1} in result
-
-
-@allure.feature("工具函数")
-@allure.story("值去重")
-@allure.title("测试嵌套结构去重")
-def test_deduplicate_values_nested():
-    result = deduplicate_values(
-        [
-            {"items": [{"b": 2, "a": 1}]},
-            {"items": [{"a": 1, "b": 2}]},
-        ]
-    )
-    assert len(result) == 1
+@allure.title("测试值去重各形态")
+@pytest.mark.parametrize(
+    "values,expected",
+    [
+        pytest.param([1, 2, 2, 3], [1, 2, 3], id="整数"),
+        pytest.param(["a", "b", "a"], ["a", "b"], id="字符串"),
+        pytest.param([True, False, True], [True, False], id="布尔"),
+        pytest.param([None, None, 1], [None, 1], id="None"),
+        # dict 键顺序不同仍视为同值
+        pytest.param([{"b": 2, "a": 1}, {"a": 1, "b": 2}], [{"b": 2, "a": 1}], id="dict键序无关"),
+        pytest.param([[1, 2], [1, 2], [3, 4]], [[1, 2], [3, 4]], id="list"),
+        # raw string 与 JSON 序列化结果不碰撞
+        pytest.param(['{"a": 1}', {"a": 1}], ['{"a": 1}', {"a": 1}], id="字符串与dict不跨类型碰撞"),
+        pytest.param(
+            [{"items": [{"b": 2, "a": 1}]}, {"items": [{"a": 1, "b": 2}]}],
+            [{"items": [{"b": 2, "a": 1}]}],
+            id="嵌套结构",
+        ),
+    ],
+)
+def test_deduplicate_values_forms(values, expected):
+    assert deduplicate_values(values) == expected
 
 
 @allure.feature("工具函数")
@@ -261,17 +246,23 @@ def test_parse_api_file_remarks_newline_flattened(tmp_path, monkeypatch):
 
 @allure.feature("工具函数")
 @allure.story("参数备注清洗")
-@allure.title("测试备注文本规范化为单行")
-def test_sanitize_remark():
-    # 换行、制表符、续行缩进统一折叠为单个空格
-    assert sanitize_remark("第一行\n    第二行\t第三行") == "第一行 第二行 第三行"
-    assert sanitize_remark("  两侧空白  ") == "两侧空白"
-    assert sanitize_remark("状态：\r\n1:待支付") == "状态： 1:待支付"
-    # 中文全角空格保留原样
-    assert sanitize_remark("待支付\u3000已取消") == "待支付\u3000已取消"
-    # 非字符串返回空串
-    assert sanitize_remark(None) == ""
-    assert sanitize_remark(123) == ""
+@allure.title("测试备注文本规范化各形态")
+@pytest.mark.parametrize(
+    "remark,expected",
+    [
+        # 换行、制表符、续行缩进统一折叠为单个空格
+        pytest.param("第一行\n    第二行\t第三行", "第一行 第二行 第三行", id="换行制表符折叠"),
+        pytest.param("  两侧空白  ", "两侧空白", id="两侧空白去除"),
+        pytest.param("状态：\r\n1:待支付", "状态： 1:待支付", id="CRLF折叠"),
+        # 中文全角空格保留原样
+        pytest.param("待支付\u3000已取消", "待支付\u3000已取消", id="全角空格保留"),
+        # 非字符串返回空串
+        pytest.param(None, "", id="None返回空串"),
+        pytest.param(123, "", id="非字符串返回空串"),
+    ],
+)
+def test_sanitize_remark(remark, expected):
+    assert sanitize_remark(remark) == expected
 
 
 @allure.feature("工具函数")
@@ -382,6 +373,31 @@ def test_write_test_file(tmp_path):
     assert target.read_text(encoding="utf-8") == "content = 1\n"
 
 
+@allure.feature("工具函数")
+@allure.story("人工保护标记")
+@allure.title("测试 keep 标记识别各形态")
+@pytest.mark.parametrize(
+    "content,expected",
+    [
+        pytest.param(f"{MANUAL_KEEP_MARKER} 人工校验通过\nimport os\n", True, id="首行标记"),
+        pytest.param(f"import os\n\n    {MANUAL_KEEP_MARKER}\n", True, id="中部缩进行标记"),
+        pytest.param("import os\n", False, id="无标记"),
+    ],
+)
+def test_is_manually_kept_forms(tmp_path, content, expected):
+    target = tmp_path / "test_kept.py"
+    target.write_text(content, encoding="utf-8")
+    assert is_manually_kept(str(target)) is expected
+
+
+@allure.feature("工具函数")
+@allure.story("人工保护标记")
+@allure.title("测试文件不存在时返回False")
+def test_is_manually_kept_missing_file(tmp_path):
+    # 读取失败按未保护处理，不阻塞正常生成
+    assert is_manually_kept(str(tmp_path / "nonexistent.py")) is False
+
+
 # ==================== 目录格式化测试 ====================
 
 
@@ -424,6 +440,34 @@ async def test_format_directory_success(monkeypatch, tmp_path):
     assert second_args[3] == "format"
     assert second_args[4] == "--no-respect-gitignore"
     assert second_args[5] == str(tmp_path)
+
+
+@allure.feature("工具函数")
+@allure.story("目录格式化")
+@allure.title("测试带keep标记的文件被排除在ruff之外")
+async def test_format_directory_excludes_kept_files(monkeypatch, tmp_path):
+    sub_dir = tmp_path / "sub"
+    sub_dir.mkdir()
+    (sub_dir / "test_kept.py").write_text(f"{MANUAL_KEEP_MARKER}\nimport os\n", encoding="utf-8")
+    (sub_dir / "test_plain.py").write_text("import os\n", encoding="utf-8")
+
+    proc = MagicMock()
+    proc.returncode = 0
+    proc.wait = AsyncMock()
+    create_subprocess = AsyncMock(return_value=proc)
+    monkeypatch.setattr(utils_module.asyncio, "create_subprocess_exec", create_subprocess)
+
+    await format_directory(str(tmp_path))
+
+    assert create_subprocess.await_count == 2
+    expected_exclude = (sub_dir / "test_kept.py").resolve().as_posix()
+    for call in create_subprocess.await_args_list:
+        args = call.args
+        assert "--exclude" in args
+        exclude_value = args[args.index("--exclude") + 1]
+        # 绝对路径统一正斜杠，只排除带标记的文件
+        assert exclude_value == expected_exclude
+        assert args[-1] == str(tmp_path)
 
 
 @allure.feature("工具函数")
@@ -505,16 +549,26 @@ def test_merge_request_params_empty():
 
 @allure.feature("工具函数")
 @allure.story("Headers格式化")
-@allure.title("测试header值格式化")
-def test_header_value_formatter():
-    # 普通字符串包装引号
-    assert header_value_formatter("pc") == '"pc"'
-    # 已带引号的字符串原样返回
-    assert header_value_formatter('"pc"') == '"pc"'
-    # f-string 中的 os.environ 下标访问转为安全访问
-    assert header_value_formatter("f\"bearer {os.environ['token']}\"") == "f\"bearer {os.environ.get('token', '')}\""
-    # 非字符串类型使用 repr 兆底
-    assert header_value_formatter(123) == "123"
+@allure.title("测试 header 值格式化各形态")
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        # 普通字符串包装引号
+        pytest.param("pc", '"pc"', id="普通字符串包引号"),
+        # 已带引号的字符串原样返回
+        pytest.param('"pc"', '"pc"', id="已带引号原样"),
+        # f-string 中的 os.environ 下标访问转为安全访问
+        pytest.param(
+            "f\"bearer {os.environ['token']}\"",
+            "f\"bearer {os.environ.get('token', '')}\"",
+            id="environ下标转安全访问",
+        ),
+        # 非字符串类型使用 repr 兜底
+        pytest.param(123, "123", id="非字符串repr兜底"),
+    ],
+)
+def test_header_value_formatter(value, expected):
+    assert header_value_formatter(value) == expected
 
 
 @allure.feature("工具函数")
@@ -649,49 +703,177 @@ def test_parse_api_file_metadata_missing_url(tmp_path, monkeypatch):
 
 @allure.feature("工具函数")
 @allure.story("时间参数对解析")
-@allure.title("测试 build_time_pairs 识别时间对并提取格式")
-def test_build_time_pairs_basic(monkeypatch):
+@allure.title("测试 build_time_pairs 各命名形态配对与格式提取")
+@pytest.mark.parametrize(
+    "keywords,remarks,expected",
+    [
+        pytest.param(
+            ["starttime", "endtime"],
+            {
+                "getTimeStartTime": "领取时间开始时间(yyyy-MM-dd)",
+                "getTimeEndTime": "领取时间结束时间(yyyy-MM-dd)",
+                "cardNo": "会员卡号",
+            },
+            {"getTime": {"start": "getTimeStartTime", "end": "getTimeEndTime", "format": "%Y-%m-%d"}},
+            id="StartTime_EndTime后缀",
+        ),
+        pytest.param(
+            ["starttime", "endtime"],
+            {"getTimeStartTime": "开始时间(yyyy-MM-dd)"},
+            {},
+            id="只有start无end不配对",
+        ),
+        pytest.param(["starttime", "endtime"], {}, {}, id="空备注"),
+        # begin 与 start 同为开始语义；begintime 长后缀须先于 begin 剥离，与 endtime 后缀同基础名配对
+        pytest.param(
+            ["datebegin", "dateend", "starttime", "endtime"],
+            {
+                "commitDateBegin": "提交开始日期 yyyy-MM-dd",
+                "commitDateEnd": "提交结束日期 yyyy-MM-dd",
+                "purchaseDateBeginTime": "采购开始日期(yyyy-MM-dd)",
+                "purchaseDateEndTime": "采购结束日期(yyyy-MM-dd)",
+                "cardNo": "会员卡号",
+            },
+            {
+                "commitDate": {"start": "commitDateBegin", "end": "commitDateEnd", "format": "%Y-%m-%d"},
+                "purchaseDate": {"start": "purchaseDateBeginTime", "end": "purchaseDateEndTime", "format": "%Y-%m-%d"},
+            },
+            id="Begin_End后缀",
+        ),
+        pytest.param(
+            ["datebegin", "dateend", "starttime", "endtime"],
+            {"commitDateBegin": "提交开始日期"},
+            {},
+            id="只有begin无end不配对",
+        ),
+        # timebegin/timeend 关键字须成对覆盖，否则 Begin 被闸门挡掉致不对称不配对
+        pytest.param(
+            ["timebegin", "timeend"],
+            {
+                "applyTimeBegin": "申请开始时间 #格式yyyy-MM-dd",
+                "applyTimeEnd": "申请结束时间 #格式yyyy-MM-dd",
+                "cardNo": "会员卡号",
+            },
+            {"applyTime": {"start": "applyTimeBegin", "end": "applyTimeEnd", "format": "%Y-%m-%d"}},
+            id="TimeBegin_TimeEnd后缀",
+        ),
+        # 备注无日期 token 时用默认纯日期格式
+        pytest.param(
+            ["starttime", "endtime", "demotime"],
+            {
+                "startDemoTime": "演示时间-开始时间",
+                "endDemoTime": "演示时间-结束时间",
+                "demoCard": "演示卡号",
+            },
+            {"DemoTime": {"start": "startDemoTime", "end": "endDemoTime", "format": "%Y-%m-%d"}},
+            id="start_end前缀",
+        ),
+        pytest.param(
+            ["starttime", "endtime", "demotime"],
+            {"startDemoTime": "开始时间"},
+            {},
+            id="前缀形态只有start无end不配对",
+        ),
+        # 裸 yyyyMM token 提取为年月格式（而非默认完整日期时间）
+        pytest.param(
+            ["starttime", "endtime", "ordermonth"],
+            {
+                "startOrderMonth": "演示开始业绩月份yyyyMM 202104",
+                "endOrderMonth": "演示结束业绩月份yyyyMM 202104",
+                "keyword": "演示关键字",
+            },
+            {"OrderMonth": {"start": "startOrderMonth", "end": "endOrderMonth", "format": "%Y%m"}},
+            id="业绩月份前缀",
+        ),
+        pytest.param(
+            ["starttime", "endtime", "ordermonth"],
+            {"startOrderMonth": "演示开始业绩月份yyyyMM"},
+            {},
+            id="单侧月份参数不配对",
+        ),
+        # start/end 前缀 + 业务词 + time 后缀形态：子串关键字不命中，形态判定过闸门
+        pytest.param(
+            ["starttime", "endtime"],
+            {
+                "startDemoApplyTime": "演示申请开始时间",
+                "endDemoApplyTime": "演示申请结束时间",
+                "startDemoSignTime": "演示签收开始时间",
+                "endDemoSignTime": "演示签收结束时间",
+                "cardNo": "演示卡号",
+            },
+            {
+                "DemoApplyTime": {"start": "startDemoApplyTime", "end": "endDemoApplyTime", "format": "%Y-%m-%d"},
+                "DemoSignTime": {"start": "startDemoSignTime", "end": "endDemoSignTime", "format": "%Y-%m-%d"},
+            },
+            id="前缀夹业务词形态",
+        ),
+        # begin 前缀与 start 同为开始语义，与 end 前缀同基础名配对
+        pytest.param(
+            ["starttime", "endtime"],
+            {
+                "beginDemoCheckTime": "演示盘点开始时间",
+                "endDemoCheckTime": "演示盘点结束时间",
+                "cardNo": "演示卡号",
+            },
+            {"DemoCheckTime": {"start": "beginDemoCheckTime", "end": "endDemoCheckTime", "format": "%Y-%m-%d"}},
+            id="begin_end前缀",
+        ),
+        # 词干 + Begin/End 后缀：名称不含任何关键字，备注时间语义放行；
+        # 同形态但备注无时间语义的金额/号码类参数不配对
+        pytest.param(
+            ["starttime", "endtime"],
+            {
+                "createBegin": "演示下单开始时间",
+                "createEnd": "演示下单结束时间",
+                "invoiceNoBegin": "演示发票起始号码",
+                "invoiceNoEnd": "演示发票结束号码",
+                "cardNo": "演示卡号",
+            },
+            {"create": {"start": "createBegin", "end": "createEnd", "format": "%Y-%m-%d"}},
+            id="Begin_End后缀备注语义",
+        ),
+        # Min/Max 后缀：名称含 createtime 关键字过闸门，Min 归 start 侧、
+        # Max 归 end 侧；同形态但无时间关键字的券号类参数不配对
+        pytest.param(
+            ["createtime"],
+            {
+                "createTimeMin": "创建时间小",
+                "createTimeMax": "创建时间大",
+                "couponNoMin": "券号起始",
+                "couponNoMax": "券号结束",
+                "cardNo": "演示卡号",
+            },
+            {"createTime": {"start": "createTimeMin", "end": "createTimeMax", "format": "%Y-%m-%d"}},
+            id="Min_Max后缀",
+        ),
+    ],
+)
+def test_build_time_pairs_forms(keywords, remarks, expected, monkeypatch):
     if utils_module.APIConfig._config is None:
         utils_module.APIConfig._config = utils_module.APIConfig._load_config()
+    monkeypatch.setitem(utils_module.APIConfig._config, "TIME_PARAMS", keywords)
+    # 整字典相等：同时核对配对集合与 start/end/format，并能抓住意外多配出的对
+    assert build_time_pairs(remarks) == expected
+
+
+def test_build_time_pairs_config_suffixes(monkeypatch):
+    """TIME_PAIR_SUFFIXES 配置可追加新后缀（low/high），合并在内置默认之上。"""
+    if utils_module.APIConfig._config is None:
+        utils_module.APIConfig._config = utils_module.APIConfig._load_config()
+    monkeypatch.setitem(utils_module.APIConfig._config, "TIME_PARAMS", ["demotime"])
     monkeypatch.setitem(
-        utils_module.APIConfig._config, "TIME_PARAMS", ["starttime", "endtime"]
+        utils_module.APIConfig._config,
+        "TIME_PAIR_SUFFIXES",
+        {"low": "start", "high": "end"},
     )
     remarks = {
-        "getTimeStartTime": "领取时间开始时间(yyyy-MM-dd)",
-        "getTimeEndTime": "领取时间结束时间(yyyy-MM-dd)",
-        "cardNo": "会员卡号",
+        "demoTimeLow": "演示时间下限",
+        "demoTimeHigh": "演示时间上限",
+        "cardNo": "演示卡号",
     }
-    result = build_time_pairs(remarks)
-    assert "getTime" in result
-    assert result["getTime"]["start"] == "getTimeStartTime"
-    assert result["getTime"]["end"] == "getTimeEndTime"
-    assert result["getTime"]["format"] == "%Y-%m-%d"
-
-
-@allure.feature("工具函数")
-@allure.story("时间参数对解析")
-@allure.title("测试 build_time_pairs 无配对时返回空")
-def test_build_time_pairs_no_pair(monkeypatch):
-    if utils_module.APIConfig._config is None:
-        utils_module.APIConfig._config = utils_module.APIConfig._load_config()
-    monkeypatch.setitem(
-        utils_module.APIConfig._config, "TIME_PARAMS", ["starttime", "endtime"]
-    )
-    # 只有 start 没有 end
-    remarks = {"getTimeStartTime": "开始时间(yyyy-MM-dd)"}
-    assert build_time_pairs(remarks) == {}
-
-
-@allure.feature("工具函数")
-@allure.story("时间参数对解析")
-@allure.title("测试 build_time_pairs 空备注时返回空")
-def test_build_time_pairs_empty_remarks(monkeypatch):
-    if utils_module.APIConfig._config is None:
-        utils_module.APIConfig._config = utils_module.APIConfig._load_config()
-    monkeypatch.setitem(
-        utils_module.APIConfig._config, "TIME_PARAMS", ["starttime", "endtime"]
-    )
-    assert build_time_pairs({}) == {}
+    assert build_time_pairs(remarks) == {
+        "demoTime": {"start": "demoTimeLow", "end": "demoTimeHigh", "format": "%Y-%m-%d"},
+    }
 
 
 # ==================== 服务包提取测试 ====================
@@ -718,9 +900,111 @@ def test_extract_service_package():
 @pytest.mark.parametrize("remark,expected", [
     ("领取时间开始时间(yyyy-MM-dd)", "%Y-%m-%d"),
     ("创建时间（yyyy-MM-dd HH:mm:ss）", "%Y-%m-%d %H:%M:%S"),
-    ("无格式备注", "%Y-%m-%d %H:%M:%S"),  # 未识别到格式 → 默认完整日期时间
+    ("无格式备注", "%Y-%m-%d"),  # 未识别到格式 → 默认纯日期
     ("时间(yyyy/MM/dd)", "%Y/%m/%d"),
-    ("开始时间(含)", "%Y-%m-%d %H:%M:%S"),  # 括号内容无日期 token → 默认完整日期时间
+    ("开始时间(含)", "%Y-%m-%d"),  # 括号内容无日期 token → 默认纯日期
+    # 裸格式 token（无括号包裹）：年份 token 必须存在，大小写变体归一
+    ("演示业绩月份yyyyMM 202104", "%Y%m"),
+    ("演示业绩月份YYYYMM", "%Y%m"),
+    ("演示开始时间,不传默认当月份,有传时精确到天,yyyy-MM-dd", "%Y-%m-%d"),
+    ("演示时间yyyyMMdd", "%Y%m%d"),
+    ("演示时间yyyy/MM/dd", "%Y/%m/%d"),
+    # 小写 mm 按位置消歧：HH 之前为月、之后为分钟
+    ("演示任务开始时间 yyyy-mm", "%Y-%m"),
+    ("演示时间yyyy-mm-dd hh:mm:ss", "%Y-%m-%d %H:%M:%S"),
+    # 括号无 token 时回落裸搜索（而非直接默认）
+    ("演示时间(含)yyyy-MM-dd", "%Y-%m-%d"),
+    # 防回归：示例值/散文偶合不得被当作格式 token
+    ("演示月份 202104", "%Y-%m-%d"),
 ])
 def test_extract_date_format_from_remark(remark, expected):
     assert _extract_date_format_from_remark(remark) == expected
+
+
+# ==================== 数据库参数示例值读取测试 ====================
+
+
+@allure.feature("工具函数")
+@allure.story("API 文件解析")
+@allure.title("测试 parse_api_file 读取 db_params 示例值")
+def test_parse_api_file_db_params(tmp_path):
+    clear_api_file_cache()
+    api_file = tmp_path / "demo_save.py"
+    api_file.write_text("def demo_save(data=data):\n    pass\n", encoding="utf-8")
+    api_file.with_suffix(".api.json").write_text(
+        json.dumps(
+            {
+                "url": "/demo/demoAction",
+                "db_params": {
+                    "table": "demo_db.demo_table",
+                    "values": {"id": {"value": 9001, "remark": "示例值"}},
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = parse_api_file(str(api_file))
+
+    assert result.db_params == {
+        "table": "demo_db.demo_table",
+        "values": {"id": {"value": 9001, "remark": "示例值"}},
+    }
+
+
+@allure.feature("工具函数")
+@allure.story("API 文件解析")
+@allure.title("测试元数据无 db_params 时缺省为空字典")
+def test_parse_api_file_without_db_params(tmp_path):
+    clear_api_file_cache()
+    api_file = tmp_path / "demo.py"
+    api_file.write_text("def demo(data=data):\n    pass\n", encoding="utf-8")
+    api_file.with_suffix(".api.json").write_text(
+        json.dumps({"url": "/demo"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    result = parse_api_file(str(api_file))
+
+    assert result.db_params == {}
+
+
+@allure.feature("工具函数")
+@allure.story("API 文件解析")
+@allure.title("测试 parse_api_file 读取 field_map 显式映射")
+def test_parse_api_file_field_map(tmp_path):
+    clear_api_file_cache()
+    api_file = tmp_path / "demo_sensitive.py"
+    api_file.write_text("def demo_sensitive(data=data):\n    pass\n", encoding="utf-8")
+    api_file.with_suffix(".api.json").write_text(
+        json.dumps(
+            {
+                "url": "/demo/sensitive",
+                "field_map": {"like": "invoiceSensitive"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = parse_api_file(str(api_file))
+
+    assert result.field_map == {"like": "invoiceSensitive"}
+
+
+@allure.feature("工具函数")
+@allure.story("API 文件解析")
+@allure.title("测试元数据无 field_map 时缺省为空字典")
+def test_parse_api_file_without_field_map(tmp_path):
+    clear_api_file_cache()
+    api_file = tmp_path / "demo_no_map.py"
+    api_file.write_text("def demo_no_map(data=data):\n    pass\n", encoding="utf-8")
+    api_file.with_suffix(".api.json").write_text(
+        json.dumps({"url": "/demo/no-map"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    result = parse_api_file(str(api_file))
+
+    assert result.field_map == {}

@@ -14,6 +14,7 @@ from typing import Any
 
 from .codegen import render_lines
 from .config import APIConfig
+from .db_probe import extract_db_values
 from .logger import logger
 from .models import APIFileInfo, ParsedRequestInfo
 from .step_values import (
@@ -38,6 +39,69 @@ from .utils import (
 )
 
 # ==================== 请求与信息提取 ====================
+
+# id 类参数库探测未命中时的兜底值（服务端普遍对主键/外键做非空校验）
+_ID_PARAM_FALLBACK = 1
+
+
+def _is_id_param(name: str) -> bool:
+    """参数名是否属于 id 类（主键/外键）：``id``、``xxx_id``、``xxxId``。
+
+    驼峰后缀按大小写敏感匹配 ``Id``，避免 paid/valid/grid 等以 id 结尾的
+    普通单词被误判。
+    """
+    lowered = name.lower()
+    if lowered == "id" or lowered.endswith("_id"):
+        return True
+    return len(name) > 2 and name.endswith("Id")
+
+
+def _fill_empty_id_params(payload: Any) -> None:
+    """就地给 payload 中取不到值的 id 类参数补兜底值。
+
+    id 类参数留空会被服务端非空校验拒绝（如「校验错误:文件素材ID不为空」
+    直接返回 code 500），库探测未命中时统一兜底为首条主键。兜底只针对
+    None 与空串，不影响其他空值参数（空容器等仍按原样输出）。
+    """
+    if not isinstance(payload, dict):
+        return
+    for key, value in payload.items():
+        if not _is_id_param(key):
+            continue
+        # 保持声明类型形态：数值声明默认 None 给 int，字符串声明默认空串给 str
+        if value is None:
+            payload[key] = _ID_PARAM_FALLBACK
+        elif value == "":
+            payload[key] = str(_ID_PARAM_FALLBACK)
+
+
+def _apply_db_example_values(api_info: APIFileInfo) -> tuple[dict[str, Any], Any]:
+    """把 db_params 的示例值覆盖到模拟请求的 params/data（仅覆盖同名键）。
+
+    无 HAR 时 complex_scenario 的传参来自 api.json 的类型默认值；若 api 生成
+    阶段探测过数据库（api.json 含 db_params），这里用示例值覆盖同名参数，
+    使场景用例拿到真实可用的传参（如写接口的主键 id）。只覆盖不改键集合：
+    未匹配的 DB 字段不会作为新参数塞进请求。
+
+    覆盖完成后对 id 类参数做一次空值兜底：库探测常常找不到 id 的真实来源表
+    （日志型接口的 id 指向被关联实体表，自动找表只会命中日志表或因并列候选放弃），
+    此时按 ``_ID_PARAM_FALLBACK`` 补值，避免生成的用例必然踩服务端非空校验。
+    """
+    db_values = extract_db_values(api_info.db_params)
+    query_params = dict(api_info.params) if isinstance(api_info.params, dict) else api_info.params
+    post_data = dict(api_info.data) if isinstance(api_info.data, dict) else api_info.data
+    if db_values:
+        if isinstance(query_params, dict):
+            for key, value in db_values.items():
+                if key in query_params:
+                    query_params[key] = value
+        if isinstance(post_data, dict):
+            for key, value in db_values.items():
+                if key in post_data:
+                    post_data[key] = value
+    _fill_empty_id_params(query_params)
+    _fill_empty_id_params(post_data)
+    return query_params, post_data
 
 
 def get_requests_from_source(
@@ -75,12 +139,14 @@ def get_requests_from_source(
             f"API文件 {target_api_file} 元数据缺少 url 字段，跳过构建模拟请求"
         )
         return requests
+    # 数据库示例值覆盖：无 HAR 时让模拟请求携带 db_params 的真实示例值
+    query_params, post_data = _apply_db_example_values(api_info)
     requests.append(
         ParsedRequestInfo(
             url=api_info.url,
             method="GET",
-            query_params=api_info.params,
-            post_data=api_info.data,
+            query_params=query_params,
+            post_data=post_data,
             headers=api_info.headers,
         )
     )
@@ -187,7 +253,7 @@ def match_scenario_steps(
             )
             continue
         api_info = parse_api_file(matched_api_file)
-        # 从 API 文件 URL 模板提取路径参数（如 /orderInfo/{orderNo} → orderNo），
+        # 从 API 文件 URL 模板提取路径参数（如 /demo/demoAction/{demoNo} → demoNo），
         # 使取值分析能把第一个步骤的路径参数提升为用例级 test_data 值
         if api_info.url:
             _, path_params = URLMatcher.match_url_pattern(request_info.url, api_info.url)

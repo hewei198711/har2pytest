@@ -25,13 +25,14 @@ from har2pytest.parametrized_codegen import (
     gen_test_method_definition,
 )
 from har2pytest.scenario_codegen import (
+    _apply_db_example_values,
     build_step_headers_arg,
     gen_scenario_test_method_definition,
     gen_step_function_body,
     gen_step_function_name,
 )
 from har2pytest.testcase_generator import TestCaseGenerator
-from har2pytest.utils import format_params_for_python, parse_api_file, parse_state_values
+from har2pytest.utils import MANUAL_KEEP_MARKER, format_params_for_python, parse_api_file, parse_state_values
 
 
 def _write_api_sidecar(
@@ -52,6 +53,7 @@ def _write_api_sidecar(
     har_time_pairs=None,
     constant_params=None,
     time_pairs=None,
+    field_map=None,
 ):
     """为手写的 API 模块写同名 ``.api.json`` 元数据。
 
@@ -63,7 +65,7 @@ def _write_api_sidecar(
     Returns:
         str: 写出的元数据文件路径。
     """
-    return write_api_metadata(
+    meta_file = write_api_metadata(
         str(api_file),
         function_name=function_name,
         url=url,
@@ -80,7 +82,9 @@ def _write_api_sidecar(
         har_time_pairs=har_time_pairs,
         constant_params=constant_params,
         time_pairs=time_pairs,
+        field_map=field_map,
     )
+    return meta_file
 
 
 def _make_har_entry(url, method="GET", headers=None, query_string=None, post_data=None, status=200, time_ms=100, response_text="{}"):
@@ -183,14 +187,14 @@ def test_normalize_params_for_parametrization():
     assert "TS002" in result[0]["keyword"]
 
     requests_params = [
-        {"startDate": "2026-01-01", "endDate": "2026-01-31"},
-        {"startDate": "2026-02-01", "endDate": "2026-02-28"},
+        {"startNum": "2026-01-01", "endNum": "2026-01-31"},
+        {"startNum": "2026-02-01", "endNum": "2026-02-28"},
     ]
     result = normalize_params_for_parametrization(requests_params)
     assert len(result) == 1
-    assert any("startDate" in key and "endDate" in key for key in result[0])
+    assert any("startNum" in key and "endNum" in key for key in result[0])
     for key in result[0]:
-        if "startDate" in key and "endDate" in key:
+        if "startNum" in key and "endNum" in key:
             assert len(result[0][key]) == 2
 
     requests_params = [
@@ -229,7 +233,9 @@ def test_normalize_params_for_parametrization():
         },
     ]
     result = normalize_params_for_parametrization(requests_params)
-    assert len(result) == 3
+    # commitDateBegin/End 命中 TIME_PARAMS 闸门（datebegin/dateend），归时间参数
+    # 不参与参数化，末条请求无有效参数被跳过，只剩 customerType/creatorCard 两项
+    assert len(result) == 2
 
     customer_type_item = next(
         (item for item in result if item["param_name"] == "customerType"), None
@@ -243,18 +249,10 @@ def test_normalize_params_for_parametrization():
     assert creator_card_item is not None
     assert len(creator_card_item["creatorCard"]) == 1
 
-    time_range_item = next(
-        (
-            item
-            for item in result
-            if "commitDateBegin" in item["param_name"] or "commitDateEnd" in item["param_name"]
-        ),
-        None,
+    # 时间参数不出现在任何参数化项的变量键中（动态值由 list_query_data datetime 提供）
+    assert all(
+        "commitDate" not in item["param_name"] for item in result
     )
-    assert time_range_item is not None
-    param_name = time_range_item["param_name"]
-    assert "commitDateBegin" in param_name and "commitDateEnd" in param_name
-    assert len(time_range_item[param_name]) == 1
 
 
 @allure.feature("测试用例生成器")
@@ -876,6 +874,46 @@ def test_api(headers=headers):
     # 误匹配防护：多位数、字母后数字
     ("手机号13812345678", []),
     ("支持H5、APP", []),
+    # 误匹配防护：括号内散文中粘连在单词里的数字（如 base64）不是枚举值
+    ("请求参数(base64转码后的path)", []),
+    ("内容(base64编码)", []),
+    # 误匹配防护：散文中引用其他参数取值的单个数字（后跟标点/英文）不是枚举值
+    ("标题，当生成短链类型为2.shortLink时可传(非必填)", []),
+    # 正向：括号内枚举与中文夹数字仍正常解析
+    ("状态(1:正常 0:禁用)", [1, 0]),
+    ("短链类型：1.schema 2.shortLink 3.UrlLink 不传默认为1", [1, 2, 3]),
+    # 正向：纯大写 token 顿号/逗号列表（≥2 分隔命中 + 末尾 token 补全）
+    ("演示平台 APP 、PC、DEMO_PROGRAM", ["APP", "PC", "DEMO_PROGRAM"]),
+    ("演示支付类型,PC、H5、APP等", ["PC", "H5", "APP"]),
+    ("演示产品，示例（AG,WP1022,LAM007）", ["AG", "WP1022", "LAM007"]),
+    # 正向：混排分隔符尾项（顿号后“数字+空白+中文”）与标点模式合并取数
+    ("演示购买类型 10、演示加购 20、演示立即购买、30 演示提交订单", [10, 20, 30]),
+    # 防回归：模式0 空命中时伴生合并不得阻断括号/单数字兜底（首项不丢）
+    ("演示冻结 0 否，1 是", [0, 1]),
+    ("状态(1 演示甲， 2 演示乙)", [1, 2]),
+    ("演示类型：1 演示甲、2 演示乙、3 演示丙", [1, 2, 3]),
+    # 防回归：str_list 不得劫持斜杠编号形态与中文/词字符粘连 token
+    ("演示客户端：1/PC，2/APP，3/小程序；多个用英文逗号分隔", [1, 2, 3]),
+    ("用户ID", []),
+    ("时间线JSON", []),
+    ("ID，主账号传演示ID，子账号传子演示ID", []),
+    # 正向：点号编号与连字符尾项混排（位置序并集，箭头预检查不再早返阻断前项）
+    ("演示来源：0. 演示甲；1. 演示乙;11-演示丙;12-演示丁", [0, 1, 11, 12]),
+    # 正向：纯连字符列表（模式0 空命中时维持旧箭头早返语义）
+    ("演示状态 1-演示甲 2-演示乙 3-演示丙", [1, 2, 3]),
+    # 正向：箭头与冒号混排按备注位置序取并集
+    ("演示开关 1->启用,0:禁用", [1, 0]),
+    # 防回归：箭头描述内含冒号数字不得劫持枚举前项
+    ("演示押货 1->1:3押货 2->85折押货", [1, 2]),
+    # 防回归：枚举描述以版本号数字开头不得被守卫误杀（冒号/点号后跟数字守卫已否决）
+    ("演示签约类型，1：2.0；2：3.0；3：4.0", [1, 2, 3, 4]),
+    # 正向：数字与小写英文缩写无分隔符粘连的紧凑枚举（chain_int 分支）
+    ("限制平台结果累加1app2pc4小程序", [1, 2, 4]),
+    ("限制平台1app2pc4小程序", [1, 2, 4]),
+    ("演示状态3d4e5f6结束", [3, 4, 5, 6]),
+    # 防误匹配：词内数字（前有字母且无“数字+字母组”前缀）不是枚举值
+    ("视频格式mp4文件", []),
+    ("编码base64转码", []),
 ])
 def test_parse_state_values(remark, expected):
     assert parse_state_values(remark) == expected
@@ -1147,6 +1185,9 @@ def test_generate_test_method_assertions(func_name, param_var, param_name, shoul
 @pytest.mark.parametrize("name,expected", [
     ("commitStartTime", True), ("endTime", True), ("getTimeStartTime", True), ("startTime", True),
     ("createDate", False), ("orderNo", False), ("pageNum", False), ("keyword", False),
+    # start/end/begin 前缀 + 业务词 + time/date 后缀形态（子串关键字不命中，形态判定命中）
+    ("startDemoAuditTime", True), ("endDemoSignTime", True), ("beginDemoCheckTime", True),
+    ("end_demo_time", True), ("startDemoExportDate", True),
 ])
 def test_is_time_param(name, expected):
     assert APIConfig.is_time_param(name) == expected
@@ -1575,6 +1616,22 @@ def test_generate_parametrize_decorator():
     assert "test2" in content
 
 
+@allure.feature("测试用例生成器")
+@allure.story("生成参数化装饰器")
+@allure.title("测试组合参数化装饰器逐组一行且末项带尾逗号")
+def test_generate_parametrize_decorator_combo_multiline():
+    result = gen_parametrize_decorator("auditStatus,demoTarget", [["1", 1], ["1", 2]], True)
+    content = "\n".join(result)
+    assert '"auditStatus, demoTarget"' in content
+    # 每组值独占一行，末项尾逗号（magic trailing comma）防止 ruff format 压回一行
+    assert '("1", 1),' in content
+    assert '("1", 2),' in content
+    assert content.splitlines()[-1].strip() == "])"
+    # 单参数枚举列表保持紧凑形态：末项不带尾逗号
+    single = gen_parametrize_decorator("keyword", ["test1", "test2"], False)
+    assert not any(line.rstrip().endswith('"test2",') for line in single)
+
+
 # ==================== _generate_test_method_body 测试 ====================
 
 
@@ -1762,13 +1819,20 @@ def test_generate_parametrized_content_test0_response_priority(tmp_path, paginat
     assert "collect_list_query_data(data, self.__class__.list_query_data)" in content
     assert "from har2pytest.pytest_utils import collect_list_query_data, extract_list_items" in content
     assert "items = extract_list_items(resp_data)" in content
+    # test_0 收集前断言响应列表非空：响应为空时收集不到参数值，后续查询
+    # 用例空转无意义，直接失败暴露问题（而非静默跑通无效用例）
+    assert 'assert extract_list_items(data.get("data")), "接口响应列表为空' in content
+    # 收集完整性检查：所有参数都必须收集到值，否则该参数查询用例空转；
+    # 恒空参数（如响应不回显的 from）报错暴露其无意义，手工删除该参数即可
+    assert "assert not empty_keys" in content
+    assert "empty_keys = [" in content
     # 旧“仅填空值”条件已移除（收集逻辑不再内联在产物中）
     assert "not self.list_query_data[param_name]" not in content
 
 
 @allure.feature("测试用例生成器")
 @allure.story("生成参数化测试内容")
-@allure.title("测试List后缀参数断言用列表期望值与removesuffix字段匹配")
+@allure.title("测试List后缀参数断言用列表期望值与单数字段匹配")
 def test_generate_parametrized_content_list_suffix_assert(tmp_path, pagination_config):
     api_dir = tmp_path / "apis"
     api_dir.mkdir(parents=True)
@@ -1789,14 +1853,159 @@ def test_generate_parametrized_content_list_suffix_assert(tmp_path, pagination_c
     assert content is not None
     # List 后缀参数：期望值是列表（收集时包装），断言逐元素比较
     assert 'any(str(v) == str(x) for x in self.list_query_data["demoCodeList"])' in content
-    # 字段匹配兼容去掉 list 后缀的响应字段名（demoCode ↔ demoCodeList）
+    # 字段匹配兼容去掉 list 后缀的响应字段名（demoCode ↔ demoCodeList，单数候选生成期预计算）
     assert (
-        'k.lower() == "democodelist" or k.lower() == "democodelist".removesuffix("list")'
+        'k.lower() == "democodelist" or k.lower() == "democode"'
         in content
     )
-    # 非 List 参数保持等值比较形态，不带 removesuffix 条件
+    # 非 List 参数保持等值比较形态，不带单数回退条件
     assert 'str(v) == str(self.list_query_data["demoShop"])' in content
-    assert '"demoshop".removesuffix("list")' not in content
+    assert 'k.lower() == "demoshop" or' not in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成参数化测试内容")
+@allure.title("测试 api.json field_map：收集与断言两侧对齐映射字段")
+def test_generate_parametrized_content_field_map(tmp_path, pagination_config):
+    api_dir = tmp_path / "apis"
+    api_dir.mkdir(parents=True)
+    api_file = api_dir / "demo_sensitive_list.py"
+    api_file.write_text(
+        "def demo_sensitive_list(data=data, headers=headers):\n    pass\n",
+        encoding="utf-8",
+    )
+    _write_api_sidecar(
+        api_file,
+        url="/mgmt/sensitive/list",
+        description="敏感词列表",
+        params={"like": "", "pageNum": 1, "pageSize": 10},
+        field_map={"like": "invoiceSensitive"},
+    )
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(tmp_path / "output"))
+    content = generator.generate_parametrized_test_content(str(api_file), "test_task")
+    assert content is not None
+    # 收集侧：field_map 传入 collect_list_query_data（三级自动匹配落空时靠它对齐）
+    assert "collect_list_query_data(data, self.__class__.list_query_data, field_map={'like': 'invoiceSensitive'})" in content
+    # 断言侧：字段匹配在参数名之外追加映射字段名（无子串关系的响应字段也验证到）
+    assert 'k.lower() == "like" or k.lower() == "invoicesensitive"' in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成测试方法断言")
+@allure.title("测试 field_map 映射字段名注入断言字段匹配")
+def test_generate_test_method_assertions_field_map():
+    render_ctx = build_render_ctx(False, "apis")
+    result = gen_test_method_assertions(
+        render_ctx, "sensitive_list", "data", "like", field_map={"like": "invoiceSensitive"}
+    )
+    content = "\n".join(result)
+    assert 'k.lower() == \'like\'' in content
+    assert 'k.lower() == \'invoicesensitive\'' in content
+    # 映射字段与参数名相同时不重复追加
+    result_same = gen_test_method_assertions(
+        render_ctx, "sensitive_list", "data", "keyword", field_map={"keyword": "keyword"}
+    )
+    content_same = "\n".join(result_same)
+    assert content_same.count("k.lower() ==") == 1
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成参数化测试内容")
+@allure.title("测试复数s后缀数组参数：运行时直传列表、any断言与单数字段回退")
+def test_generate_parametrized_content_plural_array_assert(tmp_path, pagination_config):
+    api_dir = tmp_path / "apis"
+    api_dir.mkdir(parents=True)
+    api_file = api_dir / "demo_return_audit.py"
+    api_file.write_text(
+        "def demo_return_audit(data=data, headers=headers):\n    pass\n",
+        encoding="utf-8",
+    )
+    _write_api_sidecar(
+        api_file,
+        url="/mgmt/demo-return/auditGoodsList",
+        description="退货验货列表",
+        params={"companyCodes": [], "goodsStatus": "", "pageNum": 1, "pageSize": 10},
+    )
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(tmp_path / "output"))
+    content = generator.generate_parametrized_test_content(str(api_file), "test_task")
+    assert content is not None
+    # 收集值已是列表（反向匹配 companyCode 包装），请求体直传不再包一层（嵌套数组致服务端 500）
+    assert '"companyCodes": self.list_query_data["companyCodes"],' in content
+    assert '[self.list_query_data["companyCodes"]]' not in content
+    # 数组期望值逐元素比较，字段匹配回退单数 companyCode（响应无复数字段，否则死断言）
+    assert 'any(str(v) == str(x) for x in self.list_query_data["companyCodes"])' in content
+    assert 'k.lower() == "companycodes" or k.lower() == "companycode"' in content
+    # 以 s 结尾的标量参数（goodsStatus）不被误判为数组：无 any 断言、无单数截断
+    assert 'str(v) == str(self.list_query_data["goodsStatus"])' in content
+    assert '"goodstatu"' not in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成参数化测试内容")
+@allure.title("测试枚举路径复数数组参数：[值]传参与单数响应字段匹配")
+def test_generate_parametrized_content_enum_plural_array_assert(tmp_path, pagination_config):
+    api_dir = tmp_path / "apis"
+    api_dir.mkdir(parents=True)
+    api_file = api_dir / "demo_order_page.py"
+    api_file.write_text(
+        "def demo_order_page(params=params, headers=headers):\n    pass\n",
+        encoding="utf-8",
+    )
+    _write_api_sidecar(
+        api_file,
+        url="/mgmt/demo-order/page",
+        description="订单分页",
+        params={"orderTypes": [], "pageNum": 1, "pageSize": 10},
+        param_values={"orderTypes": [1, 2]},
+    )
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(tmp_path / "output"))
+    content = generator.generate_parametrized_test_content(str(api_file), "test_task")
+    assert content is not None
+    # 枚举数组参数：parametrize 迭代标量，请求体包回单元素数组
+    assert '@pytest.mark.parametrize("orderTypes", list_query_data["orderTypes"])' in content
+    assert '"orderTypes": [orderTypes],' in content
+    # 断言对标量变量等值比较，字段匹配回退单数 orderType
+    assert "str(v) == str(orderTypes)" in content
+    assert "k.lower() == 'ordertypes' or k.lower() == 'ordertype'" in content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成参数化测试内容")
+@allure.title("测试数组参数名含时间关键字不被置空串：orderMonthList 保持 []")
+def test_generate_parametrized_content_time_keyword_array_kept(tmp_path, pagination_config):
+    # is_time_param 为关键字子串匹配，"ordermonth" 会命中 orderMonthList，
+    # 修复后数组类型参数（默认值 []）在 test_0 与方法体 other_params 中
+    # 均保持 [] 透传（置 "" 会造成服务端期待数组的类型错位）
+    api_dir = tmp_path / "apis"
+    api_dir.mkdir(parents=True)
+    api_file = api_dir / "demo_review_page.py"
+    api_file.write_text(
+        "def demo_review_page(data=data, headers=headers):\n    pass\n",
+        encoding="utf-8",
+    )
+    _write_api_sidecar(
+        api_file,
+        url="/mgmt/demo-review/page",
+        description="演示审批分页",
+        params={
+            "orderMonth": "",
+            "orderMonthList": [],
+            "orderNoList": [],
+            "pageNum": 1,
+            "pageSize": 10,
+        },
+    )
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(tmp_path / "output"))
+    content = generator.generate_parametrized_test_content(str(api_file), "test_task")
+    assert content is not None
+    # 标量时间参数 orderMonth 置 ""（期望行为）；数组参数 orderMonthList 保持 []
+    assert '"orderMonth": ""' in content
+    assert '"orderMonthList": []' in content
+    assert '"orderMonthList": ""' not in content
 
 
 @allure.feature("测试用例生成器")
@@ -2208,6 +2417,55 @@ def user_list(data=data, token=token):
     assert len(result3) == 1
 
 
+@allure.feature("测试用例生成器")
+@allure.story("生成参数化列表测试用例")
+@allure.title("测试带keep标记的文件overwrite也不覆盖")
+def test_generate_parametrized_list_testcases_keep_marker(tmp_path, write_har):
+    har_file = write_har([_make_har_entry(
+        "https://example.com/api/user/list",
+        headers=[{"name": "origin", "value": "https://example.com"}],
+        query_string=[{"name": "keyword", "value": "test_value"}],
+        time_ms=50,
+    )])
+
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+    api_file = api_dir / "user_list.py"
+    api_file.write_text(
+        '''
+data = {"keyword": ""}
+
+def user_list(data=data, token=token):
+    """
+    用户列表
+    /api/user/list
+    """
+    url = "/api/user/list"
+    return client.get(url=url, params=data)
+''',
+        encoding="utf-8",
+    )
+    _write_api_sidecar(
+        api_file,
+        url="/api/user/list",
+        description="用户列表",
+        data={"keyword": ""},
+    )
+
+    output_dir = tmp_path / "output"
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir), base_urls=[])
+    result1 = asyncio.run(generator.generate_parametrized_list_testcases(str(har_file), "test"))
+    assert len(result1) == 1
+
+    # 人工校验后加保护标记，overwrite 也不覆盖且内容不变
+    test_file = Path(result1[0])
+    kept_content = f"{MANUAL_KEEP_MARKER} 人工校验通过\n" + test_file.read_text(encoding="utf-8")
+    test_file.write_text(kept_content, encoding="utf-8")
+    result2 = asyncio.run(generator.generate_parametrized_list_testcases(str(har_file), "test", overwrite=True))
+    assert result2 == []
+    assert test_file.read_text(encoding="utf-8") == kept_content
+
+
 # ==================== generate_scenario_testcase 边缘测试 ====================
 
 
@@ -2271,6 +2529,37 @@ def test_generate_scenario_testcase_overwrite(tmp_path, write_har):
         generator.generate_scenario_testcase(str(har_file), "/api/user/login", "test", overwrite=True)
     )
     assert result3 is not None
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成场景测试用例")
+@allure.title("测试场景用例带keep标记时overwrite也不覆盖")
+def test_generate_scenario_testcase_keep_marker(tmp_path, write_har):
+    har_file = write_har([_make_har_entry(
+        "/api/user/login", "POST",
+        headers=[{"name": "Content-Type", "value": "application/json"}],
+        post_data={"mimeType": "application/json", "text": "{}"},
+    )])
+
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+    (api_dir / "user_login.py").write_text(_USER_LOGIN_PY, encoding="utf-8")
+    _write_api_sidecar(api_dir / "user_login.py", url="/api/user/login", description="用户登录")
+
+    output_dir = tmp_path / "output"
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir), base_urls=[])
+    result1 = asyncio.run(generator.generate_scenario_testcase(str(har_file), "/api/user/login", "test"))
+    assert result1 is not None
+
+    # 人工校验后加保护标记，overwrite 也不覆盖且内容不变
+    test_file = Path(result1)
+    kept_content = f"{MANUAL_KEEP_MARKER}\n" + test_file.read_text(encoding="utf-8")
+    test_file.write_text(kept_content, encoding="utf-8")
+    result2 = asyncio.run(
+        generator.generate_scenario_testcase(str(har_file), "/api/user/login", "test", overwrite=True)
+    )
+    assert result2 is None
+    assert test_file.read_text(encoding="utf-8") == kept_content
 
 
 @allure.feature("测试用例生成器")
@@ -2436,6 +2725,46 @@ def user_login(params=params):
 
 @allure.feature("测试用例生成器")
 @allure.story("批量生成")
+@allure.title("测试 batch 带keep标记的文件overwrite也计入skipped")
+def test_generate_batch_keep_marker_skipped(tmp_path):
+    api_dir = tmp_path / "apis"
+    api_dir.mkdir()
+    api_file = api_dir / "user_login.py"
+    api_file.write_text(
+        '''params = {"keyword": "test"}
+
+def user_login(params=params):
+    """
+    用户登录
+    /user/login
+    """
+''',
+        encoding="utf-8",
+    )
+    _write_api_sidecar(
+        api_file,
+        url="/user/login",
+        description="用户登录",
+        params={"keyword": "test"},
+    )
+
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    kept_content = f"{MANUAL_KEEP_MARKER} 人工校验通过\n# already exists"
+    (output_dir / "test_user_login.py").write_text(kept_content, encoding="utf-8")
+
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir))
+    result = asyncio.run(generator.generate_batch_testcases([str(api_file)], overwrite=True, har_file_path=None))
+
+    assert result["total"] == 1
+    assert result["skipped"] == 1
+    assert result["generated"] == 0
+    assert result["failed"] == 0
+    assert (output_dir / "test_user_login.py").read_text(encoding="utf-8") == kept_content
+
+
+@allure.feature("测试用例生成器")
+@allure.story("批量生成")
 @allure.title("测试 batch --only-mode 按识别模式过滤")
 @pytest.mark.parametrize(
     "only_mode,expected_gen",
@@ -2522,6 +2851,93 @@ def user_login(headers=headers):
     assert result["filtered"] == 1
     assert result["failed"] == 0
     assert [os.path.basename(f) for f in result["generated_files"]] == [expected_gen]
+
+
+def _write_array_body_api(api_dir):
+    """写一个描述含“列表”但请求体为 JSON 数组的 API（参数化产出必为空）。"""
+    (api_dir / "common_DemoBatchList.py").write_text(
+        '''
+import os
+
+from har2pytest.client import client
+
+headers = {
+    "authorization": f"test {os.environ['token']}",
+}
+
+data = [{"demoCode": ""}]
+
+
+def common_DemoBatchList(data=data, headers=headers):
+    """
+    演示批量列表操作
+    /common/DemoBatchList
+    """
+
+    url = "/common/DemoBatchList"
+    return client.post(url=url, json=data, headers=headers)
+''',
+        encoding="utf-8",
+    )
+    _write_api_sidecar(
+        api_dir / "common_DemoBatchList.py",
+        url="/common/DemoBatchList",
+        description="演示批量列表操作",
+        method="POST",
+        headers={"authorization": 'f"test {os.environ[\'token\']}"'},
+        params={},
+        data=[{"demoCode": ""}],
+    )
+
+
+@allure.feature("测试用例生成器")
+@allure.story("批量生成")
+@allure.title("测试 batch --only-mode 下参数化产出为空不回退场景形态")
+def test_generate_batch_only_mode_no_fallback_on_empty_parametrized(tmp_path):
+    api_dir = tmp_path / "apis"
+    api_dir.mkdir()
+    _write_array_body_api(api_dir)
+
+    output_dir = tmp_path / "output"
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir))
+    result = asyncio.run(
+        generator.generate_batch_testcases(
+            [str(api_dir)], task_id="test_task", overwrite=True, har_file_path=None, only_mode="list_query"
+        )
+    )
+
+    # 识别为 list_query 但数组请求体参数化产出为空：计跳过，不产出场景形态文件
+    assert result["total"] == 1
+    assert result["generated"] == 0
+    assert result["skipped"] == 1
+    assert result["filtered"] == 0
+    assert result["failed"] == 0
+    assert not os.path.exists(os.path.join(str(output_dir), "test_common_DemoBatchList.py"))
+
+
+@allure.feature("测试用例生成器")
+@allure.story("批量生成")
+@allure.title("测试 batch 无 --only-mode 时参数化产出为空仍回退场景形态")
+def test_generate_batch_no_only_mode_fallback_preserved(tmp_path):
+    api_dir = tmp_path / "apis"
+    api_dir.mkdir()
+    _write_array_body_api(api_dir)
+
+    output_dir = tmp_path / "output"
+    generator = TestCaseGenerator(api_dir=str(api_dir), output_dir=str(output_dir))
+    result = asyncio.run(
+        generator.generate_batch_testcases(
+            [str(api_dir)], task_id="test_task", overwrite=True, har_file_path=None
+        )
+    )
+
+    # 不指定 only_mode：内容级回退保留，产出场景形态单请求用例
+    assert result["generated"] == 1
+    test_file = output_dir / "test_common_DemoBatchList.py"
+    assert test_file.exists()
+    content = test_file.read_text(encoding="utf-8")
+    assert "test_data" in content
+    assert "list_query_data" not in content
 
 
 @allure.feature("测试用例生成器")
@@ -2762,3 +3178,112 @@ def test_imports_mode(async_mode, should_contain, should_not_contain):
         assert "client.set_client(async_client)" in content
     if should_not_contain:
         assert should_not_contain not in content
+
+
+# ==================== 数据库参数消费测试 ====================
+
+
+@pytest.mark.parametrize("params,data,db_params,expected_query,expected_post", [
+    # 同名键被示例值覆盖，未匹配的 DB 字段不新增，其余参数保持原值
+    pytest.param(
+        {"id": "", "pageNum": 1},
+        {"id": "", "demoVisitRemark": ""},
+        {"table": "demo_db.demo_table", "values": {
+            "id": {"value": 9001, "remark": "示例值"},
+            "demoVisitRemark": {"value": "顾客已回访", "remark": "示例值"},
+            "dbOnlyField": {"value": 1, "remark": "示例值"},
+        }},
+        {"id": 9001, "pageNum": 1},
+        {"id": 9001, "demoVisitRemark": "顾客已回访"},
+        id="仅覆盖同名键且不新增参数",
+    ),
+    # 非 id 类空值参数保持原样（id 类兜底由专门用例覆盖）
+    pytest.param(
+        {"demoVisitRemark": ""},
+        {"demoVisitRemark": ""},
+        None,
+        {"demoVisitRemark": ""},
+        {"demoVisitRemark": ""},
+        id="无db_params时原样返回",
+    ),
+    # None（数值声明）兜底为 int 1，空串（字符串声明）兜底为 "1"，保持声明类型形态；
+    # paid 仅因拼写结尾含 id 不算 id 类，name 非 id 类空值不动
+    pytest.param(
+        {"id": None, "row_id": None, "materialId": "", "paid": None, "name": ""},
+        {"id": ""},
+        None,
+        {"id": 1, "row_id": 1, "materialId": "1", "paid": None, "name": ""},
+        {"id": "1"},
+        id="id类参数无值时兜底为首条主键",
+    ),
+    pytest.param(
+        {"id": None},
+        {},
+        {"table": "demo_db.demo_table", "values": {"id": {"value": 9001, "remark": "示例值"}}},
+        {"id": 9001},
+        {},
+        id="db_params已给id示例值时不被兜底覆盖",
+    ),
+])
+@allure.feature("测试用例生成器")
+@allure.story("数据库参数消费")
+@allure.title("测试 _apply_db_example_values 各形态")
+def test_apply_db_example_values_forms(params, data, db_params, expected_query, expected_post):
+    api_info = APIFileInfo()
+    api_info.params = params
+    api_info.data = data
+    if db_params is not None:
+        api_info.db_params = db_params
+
+    query_params, post_data = _apply_db_example_values(api_info)
+
+    assert query_params == expected_query
+    assert post_data == expected_post
+
+
+@allure.feature("测试用例生成器")
+@allure.story("生成测试用例内容")
+@allure.title("无 HAR 且库探测未命中时 id 兜底渲染进用例参数")
+def test_generate_scenario_fallback_id_when_db_probe_misses(tmp_path):
+    api_dir = tmp_path / "apis" / "test_service"
+    api_dir.mkdir(parents=True)
+
+    api_file = api_dir / "demo_save_download_log.py"
+    api_file.write_text(
+        '''
+headers = {
+    "GW-Client": "test",
+}
+def demo_save_download_log(data=None, headers=headers):
+    """
+    保存下载日志
+    /api/demo/saveDownloadLog
+    """
+    url = "/api/demo/saveDownloadLog"
+    return client.post(url=url, headers=headers, json=data)
+''',
+        encoding="utf-8",
+    )
+
+    # 无 HAR 且无 db_params：模拟请求的 id 空值走兜底，channel 属非 id 类保持原样
+    _write_api_sidecar(
+        api_file,
+        url="/api/demo/saveDownloadLog",
+        description="保存下载日志",
+        data={"channel": None, "id": None},
+    )
+
+    generator = TestCaseGenerator(api_dir=str(api_dir))
+    content = generator.generate_scenario_test_content(
+        har_file_path=None,
+        api_files=[str(api_file)],
+        task_id=None,
+        target_api_file=str(api_file),
+    )
+
+    assert content is not None
+    # 兜底后的 id 不再是空值，按既有规则进入用例级 test_data 集中管理（引用为单引号形态）
+    assert "'id': 1," in content
+    assert "\"id\": test_data['id']," in content
+    # 非 id 类的空值参数仍按字面量输出
+    assert '"channel": None,' in content

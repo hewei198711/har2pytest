@@ -50,7 +50,8 @@
     ],
     "LIST_QUERY_EXCLUDE_KEYWORDS": [
         "详情",
-        "导出"
+        "导出",
+        "下载"
     ],
     "TESTCASE_PROFILES": [
         { "url": "/demo/order/List", "mode": "list_query" },
@@ -82,5 +83,50 @@
             "file_field": "file",
             "append_path": ["datas"]
         }
-    ]
+    ],
+    "DB_CONFIG": {
+        "host": "demo.mysql.example.com",
+        "port": 3306,
+        "user": "tester",
+        "password_env": "TEST_DB_PWD",
+        "databases": [
+            "demo_center_member",
+            "demo_center_store",
+            "demo_center_order",
+            "demo_center_promotion"
+        ],
+        "domain_schemas": {
+            "member": {
+                "schemas": ["demo_center_member"],
+                "url": ["member", "vip", "card"],
+                "cn": ["会员", "顾客", "客户"]
+            },
+            "store": {
+                "schemas": ["demo_center_store"],
+                "url": ["store"],
+                "cn": ["门店", "店铺", "服务中心"]
+            },
+            "order": {
+                "schemas": ["demo_center_order"],
+                "url": ["order", "refund", "return", "exchange"],
+                "cn": ["订单", "售后", "退货", "退款", "换货"]
+            },
+            "promotion": {
+                "schemas": ["demo_center_promotion"],
+                "url": ["promotion", "combine", "coupon", "activity"],
+                "cn": ["活动", "促销", "优惠券"]
+            }
+        },
+        "preferred_tables": [
+            "demo_center_order.demo_member",
+            "demo_center_order.demo_product"
+        ],
+        "api_table_map": {
+            "/demo/demoReview/demoAction": {
+                "table": "demo_center_order.demo_review_record",
+                "where": "demo_visit_status = 0"
+            },
+            "/demo/order/demoDetail": "demo_center_order.demo_order_info"
+        }
+    }
 }

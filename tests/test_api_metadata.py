@@ -16,6 +16,7 @@ import pytest
 
 from har2pytest.api_metadata import (
     CONSTANT_PARAMS_FIELD,
+    FIELD_MAP_FIELD,
     metadata_path,
     read_api_metadata,
     write_api_metadata,
@@ -112,25 +113,19 @@ def test_write_returns_none_on_os_error(tmp_path, monkeypatch):
     assert write_api_metadata(str(py_file), url="/demo", method="GET") is None
 
 
+@pytest.mark.parametrize("meta_content", [
+    pytest.param(None, id="元数据文件缺失"),
+    pytest.param("{broken json", id="元数据JSON损坏"),
+    pytest.param("[1, 2, 3]", id="元数据JSON为非dict"),
+])
 @allure.feature("API 元数据")
 @allure.story("API 元数据读取")
-@allure.title("测试缺失/损坏元数据返回 None")
-def test_metadata_read_missing_and_corrupt(tmp_path):
+@allure.title("测试缺失/损坏/非dict元数据返回 None")
+def test_metadata_read_invalid_forms(tmp_path, meta_content):
     py_file = tmp_path / "api_demo.py"
-    assert read_api_metadata(str(py_file)) is None
-
-    meta_file = tmp_path / "api_demo.api.json"
-    meta_file.write_text("{broken json", encoding="utf-8")
-    assert read_api_metadata(str(py_file)) is None
-
-
-@allure.feature("API 元数据")
-@allure.story("API 元数据读取")
-@allure.title("测试元数据 JSON 为非 dict 时返回 None")
-def test_read_returns_none_for_non_dict_json(tmp_path):
-    py_file = tmp_path / "demo.py"
-    meta_file = tmp_path / "demo.api.json"
-    meta_file.write_text("[1, 2, 3]", encoding="utf-8")
+    if meta_content is not None:
+        meta_file = tmp_path / "api_demo.api.json"
+        meta_file.write_text(meta_content, encoding="utf-8")
     assert read_api_metadata(str(py_file)) is None
 
 
@@ -251,34 +246,29 @@ def test_parse_non_dict_param_remarks_safe(tmp_path):
 # ==================== constant_params 读写测试 ====================
 
 
+@pytest.mark.parametrize("extra_kwargs,field,expected", [
+    pytest.param({"constant_params": {"header": "1", "isDisSelfStoreOrder": "0"}}, CONSTANT_PARAMS_FIELD, {"header": "1", "isDisSelfStoreOrder": "0"}, id="constant_params写入读取roundtrip"),
+    pytest.param({}, CONSTANT_PARAMS_FIELD, None, id="constant_params为None时不写入"),
+    pytest.param({"har_param_values": {"keyword": ["A", "B"], "pageNum": ["1", "2"]}}, "har_param_values", {"keyword": ["A", "B"], "pageNum": ["1", "2"]}, id="har_param_values写入读取roundtrip"),
+    pytest.param({"har_params": {"keyword": "A", "pageNum": "1"}}, "har_params", {"keyword": "A", "pageNum": "1"}, id="har_params写入读取roundtrip"),
+    pytest.param({"service_package": "demo_service_package"}, "service_package", "demo_service_package", id="service_package写入读取"),
+    pytest.param({"db_params": {"table": "demo_db.demo_table", "values": {"id": {"value": 9001, "remark": "示例值来自 demo_db.demo_table.id"}}}}, "db_params", {"table": "demo_db.demo_table", "values": {"id": {"value": 9001, "remark": "示例值来自 demo_db.demo_table.id"}}}, id="db_params写入读取roundtrip"),
+    pytest.param({"db_params": None}, "db_params", None, id="db_params为None时不写入"),
+    pytest.param({"field_map": {"like": "invoiceSensitive"}}, FIELD_MAP_FIELD, {"like": "invoiceSensitive"}, id="field_map写入读取roundtrip"),
+    pytest.param({}, FIELD_MAP_FIELD, {}, id="field_map不传时预置空对象"),
+])
 @allure.feature("API 元数据")
-@allure.story("constant_params 读写")
-@allure.title("测试 constant_params 写入与读取 roundtrip")
-def test_constant_params_roundtrip(tmp_path):
-    py_file = tmp_path / "order_list.py"
-    constant = {"header": "1", "isDisSelfStoreOrder": "0"}
-    write_api_metadata(
-        str(py_file),
-        function_name="order_list",
-        url="/order/list",
-        method="POST",
-        constant_params=constant,
-    )
-    data = read_api_metadata(str(py_file))
-    assert data is not None
-    assert CONSTANT_PARAMS_FIELD in data
-    assert data[CONSTANT_PARAMS_FIELD] == constant
-
-
-@allure.feature("API 元数据")
-@allure.story("constant_params 读写")
-@allure.title("测试 constant_params 为 None 时不写入")
-def test_constant_params_none_not_written(tmp_path):
+@allure.story("可选字段读写")
+@allure.title("测试可选字段写入读取与 None 不写入")
+def test_optional_field_roundtrip_forms(tmp_path, extra_kwargs, field, expected):
     py_file = tmp_path / "demo.py"
-    write_api_metadata(str(py_file), url="/demo", method="GET")
+    write_api_metadata(str(py_file), url="/demo", method="GET", **extra_kwargs)
     data = read_api_metadata(str(py_file))
     assert data is not None
-    assert CONSTANT_PARAMS_FIELD not in data
+    if expected is None:
+        assert field not in data
+    else:
+        assert data[field] == expected
 
 
 @allure.feature("API 元数据")
@@ -306,40 +296,6 @@ def test_parse_api_file_reads_constant_params(tmp_path):
 
 
 @allure.feature("API 元数据")
-@allure.story("HAR 派生字段读写")
-@allure.title("测试 har_param_values 写入与读取 roundtrip")
-def test_har_param_values_roundtrip(tmp_path):
-    py_file = tmp_path / "order_list.py"
-    values = {"keyword": ["A", "B"], "pageNum": ["1", "2"]}
-    write_api_metadata(
-        str(py_file),
-        url="/order/list",
-        method="POST",
-        har_param_values=values,
-    )
-    data = read_api_metadata(str(py_file))
-    assert data is not None
-    assert data["har_param_values"] == values
-
-
-@allure.feature("API 元数据")
-@allure.story("HAR 派生字段读写")
-@allure.title("测试 har_params 写入与读取 roundtrip")
-def test_har_params_roundtrip(tmp_path):
-    py_file = tmp_path / "order_list.py"
-    baseline = {"keyword": "A", "pageNum": "1"}
-    write_api_metadata(
-        str(py_file),
-        url="/order/list",
-        method="POST",
-        har_params=baseline,
-    )
-    data = read_api_metadata(str(py_file))
-    assert data is not None
-    assert data["har_params"] == baseline
-
-
-@allure.feature("API 元数据")
 @allure.story("API 元数据读写")
 @allure.title("测试当前值字段空 dict 时仍写入（只跳过 None）")
 def test_write_empty_dict_current_values_written(tmp_path):
@@ -361,17 +317,4 @@ def test_write_empty_dict_current_values_written(tmp_path):
     assert data["headers"] == {}
 
 
-@allure.feature("API 元数据")
-@allure.story("API 元数据读写")
-@allure.title("测试 service_package 写入与读取")
-def test_service_package_roundtrip(tmp_path):
-    py_file = tmp_path / "demo.py"
-    write_api_metadata(
-        str(py_file),
-        url="/demo",
-        method="GET",
-        service_package="demo_service_package",
-    )
-    data = read_api_metadata(str(py_file))
-    assert data is not None
-    assert data["service_package"] == "demo_service_package"
+# ==================== 数据库参数探测字段读写测试 ====================

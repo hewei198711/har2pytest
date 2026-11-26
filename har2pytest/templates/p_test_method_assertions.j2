@@ -13,6 +13,6 @@
             for item in items:
                 if isinstance(item, dict):
                     for k, v in item.items():
-                        if k.lower() == '{{ search_param }}'{% if list_suffix %} or k.lower() == '{{ search_param }}'.removesuffix('list'){% endif %}:
+                        if k.lower() == '{{ search_param }}'{% if list_suffix and singular_name != search_param %} or k.lower() == '{{ singular_name }}'{% endif %}{% if mapped_field %} or k.lower() == '{{ mapped_field }}'{% endif %}:
                             {{ verify_assert }}
 {% endif %}

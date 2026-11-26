@@ -55,8 +55,12 @@ har2pytest testcase [har_file] --pattern <模式> [options]
 | `--output` | `-o` | `testcases` | 测试用例输出目录 |
 | `--api-dir` | - | `apis` | API 文件目录（用于匹配 API 文件） |
 | `--api-files` | - | `api_request.har` | batch 模式专用：API 文件或 HAR 文件，多个用逗号分隔 |
-| `--overwrite` | - | `False` | 强制覆盖已存在的测试用例文件 |
+| `--overwrite` | - | `False` | 强制覆盖已存在的测试用例文件（带人工保护标记的文件除外） |
 | `--async` | - | `False` | 生成异步模式代码（async/await + async_client） |
+
+> **人工保护标记**：已人工校验的测试文件可在首行添加注释 `# har2pytest: keep`（标记后可附加说明文字）。
+> 带标记的文件即使加 `--overwrite` 也不会被覆盖，生成后的批量 ruff 格式化同样会跳过该文件。
+> 详见[测试用例生成模式详解](docs/testcase_generation_modes.md)。
 
 **示例：**
 

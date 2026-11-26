@@ -126,30 +126,86 @@ async def test_retry_step_default_counts():
 
 @allure.feature("pytest工具函数")
 @allure.story("响应收集函数")
-@allure.title("测试精确匹配优先于前缀模糊匹配")
-def test_collect_list_query_data_exact_match_priority():
-    list_query_data = {"operator": "", "ruleName": ""}
-    collect_list_query_data(
-        {"data": {"list": [{"operator": "OP-100", "operatorNo": "NO-1", "ruleName": "R1"}]}},
-        list_query_data,
-    )
-    # 响应同时存在同名与同前缀字段时，精确匹配值获胜
-    assert list_query_data["operator"] == "OP-100"
-    assert list_query_data["ruleName"] == "R1"
-
-
-@allure.feature("pytest工具函数")
-@allure.story("响应收集函数")
-@allure.title("测试无精确匹配时降级前缀模糊匹配且取第一个")
-def test_collect_list_query_data_fuzzy_fallback_first_match():
-    list_query_data = {"operator": "", "ruleName": ""}
-    collect_list_query_data(
-        {"data": {"list": [{"operatorNo": "NO-2", "operatorName": "张三", "ruleName": "R2"}]}},
-        list_query_data,
-    )
-    # 参数 operator 无同名字段，降级前缀匹配 operatorNo/operatorName，取遍历第一个
-    assert list_query_data["operator"] == "NO-2"
-    assert list_query_data["ruleName"] == "R2"
+@allure.title("测试单响应收集各匹配形态")
+@pytest.mark.parametrize(
+    "initial,response,expected",
+    [
+        # 响应同时存在同名与同前缀字段时，精确匹配值获胜
+        pytest.param(
+            {"operator": "", "ruleName": ""},
+            {"data": {"list": [{"operator": "OP-100", "operatorNo": "NO-1", "ruleName": "R1"}]}},
+            {"operator": "OP-100", "ruleName": "R1"},
+            id="精确优先于前缀模糊",
+        ),
+        # 参数 operator 无同名字段，降级前缀匹配 operatorNo/operatorName，取遍历第一个
+        pytest.param(
+            {"operator": "", "ruleName": ""},
+            {"data": {"list": [{"operatorNo": "NO-2", "operatorName": "张三", "ruleName": "R2"}]}},
+            {"operator": "NO-2", "ruleName": "R2"},
+            id="无精确降级前缀取第一个",
+        ),
+        pytest.param(
+            {"demoShop": "", "demoType": ""},
+            {"data": {"records": [{"demoShop": "SHOP01", "demoType": 0}]}},
+            {"demoShop": "SHOP01", "demoType": 0},
+            id="records键下收集",
+        ),
+        # 参数 demoCodeList 包含响应字段 demoCode，值包装为单元素列表
+        pytest.param(
+            {"demoCodeList": [], "demoShop": ""},
+            {"data": {"records": [{"demoCode": "00001", "demoShop": "SHOP01"}]}},
+            {"demoCodeList": ["00001"], "demoShop": "SHOP01"},
+            id="反向包含包装列表",
+        ),
+        # 参数 demoQueryType 包含响应字段 demoQuery，同样反向命中并包装为列表
+        pytest.param(
+            {"demoQueryType": [0, 1, 2, 3, 4], "client": ""},
+            {"data": {"records": [{"demoQuery": "演示查询文本", "client": "PC"}]}},
+            {"demoQueryType": ["演示查询文本"], "client": "PC"},
+            id="反向包含任意参数",
+        ),
+        # current 与 createdAt 无前缀包含关系，不收集
+        pytest.param(
+            {"current": 1, "client": ""},
+            {"data": {"records": [{"createdAt": "2026-01-01 00:00:00", "client": "PC"}]}},
+            {"current": 1, "client": "PC"},
+            id="无包含关系不互配",
+        ),
+        # 参数 companyList：响应 companyList 字段精确命中；无同名字段时反向命中 company
+        pytest.param(
+            {"companyList": [], "demoCodeList": []},
+            {"data": {"records": [{"companyList": "A", "demoCode": "00001"}]}},
+            {"companyList": "A", "demoCodeList": ["00001"]},
+            id="精确优先于反向包含",
+        ),
+        # 标量声明（数值基线）不参与反向匹配：响应只有汇总字段 yearReturnAmt/yearReturnCount，
+        # 不得反向命中 End/Start 把标量包成 [v]（两条记录各取一值还会拼出倒挂范围），基线保持
+        pytest.param(
+            {"yearReturnAmtEnd": 10000, "yearReturnAmtStart": 1000, "yearReturnCountEnd": 5, "yearReturnCountStart": 1},
+            {"data": {"records": [{"yearReturnAmt": 500, "yearReturnCount": 2}, {"yearReturnAmt": 800, "yearReturnCount": 9}]}},
+            {"yearReturnAmtEnd": 10000, "yearReturnAmtStart": 1000, "yearReturnCountEnd": 5, "yearReturnCountStart": 1},
+            id="标量声明不参与反向匹配",
+        ),
+        # api.json 声明 null（生成基线 None）同为标量：不被汇总字段反向收集，也不得包成 [v]
+        pytest.param(
+            {"yearReturnAmtEnd": None, "yearReturnAmtStart": None, "demoCodeList": []},
+            {"data": {"records": [{"yearReturnAmt": 500, "demoCode": "00001"}]}},
+            {"yearReturnAmtEnd": None, "yearReturnAmtStart": None, "demoCodeList": ["00001"]},
+            id="null声明不参与反向匹配而数组声明正常包装",
+        ),
+        # 标量声明仅排除反向匹配：响应存在同名字段时精确收集仍生效
+        pytest.param(
+            {"yearReturnAmtEnd": 10000, "yearReturnAmtStart": 1000},
+            {"data": {"records": [{"yearReturnAmtEnd": 600, "yearReturnAmtStart": 100}]}},
+            {"yearReturnAmtEnd": 600, "yearReturnAmtStart": 100},
+            id="标量声明精确匹配仍收集",
+        ),
+    ],
+)
+def test_collect_list_query_data_single_response_forms(initial, response, expected):
+    list_query_data = dict(initial)
+    collect_list_query_data(response, list_query_data)
+    assert list_query_data == expected
 
 
 @allure.feature("pytest工具函数")
@@ -190,19 +246,6 @@ def test_collect_list_query_data_empty_response_keeps_original():
 
 @allure.feature("pytest工具函数")
 @allure.story("响应收集函数")
-@allure.title("测试明细列表在records键下也能收集")
-def test_collect_list_query_data_records_key():
-    list_query_data = {"demoShop": "", "demoType": ""}
-    collect_list_query_data(
-        {"data": {"records": [{"demoShop": "SHOP01", "demoType": 0}]}},
-        list_query_data,
-    )
-    assert list_query_data["demoShop"] == "SHOP01"
-    assert list_query_data["demoType"] == 0
-
-
-@allure.feature("pytest工具函数")
-@allure.story("响应收集函数")
 @allure.title("测试时间参数不参与响应收集")
 def test_collect_list_query_data_skips_time_params(monkeypatch):
     if APIConfig._config is None:
@@ -237,58 +280,25 @@ def test_collect_list_query_data_skips_time_params(monkeypatch):
 
 @allure.feature("pytest工具函数")
 @allure.story("响应收集函数")
-@allure.title("测试参数名包含响应字段名时反向匹配并包装为列表")
-def test_collect_list_query_data_reverse_include_wrap():
-    list_query_data = {"demoCodeList": [], "demoShop": ""}
+@allure.title("测试显式字段映射优先于三级匹配")
+def test_collect_list_query_data_field_map():
+    # 参数名 like 与响应字段 invoiceSensitive 无任何子串包含关系，
+    # 三级匹配全部落空；field_map 显式映射后才能收集到值
+    list_query_data = {"like": "", "pageNum": 1}
     collect_list_query_data(
-        {"data": {"records": [{"demoCode": "00001", "demoShop": "SHOP01"}]}},
+        {"data": {"list": [{"id": "50", "invoiceSensitive": "决赛"}]}},
+        list_query_data,
+        field_map={"like": "invoiceSensitive"},
+    )
+    assert list_query_data["like"] == "决赛"
+    assert list_query_data["pageNum"] == 1
+    # 未传 field_map 时收集不到（无子串关系）
+    list_query_data = {"like": "", "pageNum": 1}
+    collect_list_query_data(
+        {"data": {"list": [{"id": "50", "invoiceSensitive": "决赛"}]}},
         list_query_data,
     )
-    # 参数 demoCodeList 包含响应字段 demoCode，值包装为单元素列表
-    assert list_query_data["demoCodeList"] == ["00001"]
-    assert list_query_data["demoShop"] == "SHOP01"
-
-
-@allure.feature("pytest工具函数")
-@allure.story("响应收集函数")
-@allure.title("测试参数名包含响应字段名时任意参数均反向匹配")
-def test_collect_list_query_data_reverse_include_generic():
-    # 参数 demoQueryType 包含响应字段 demoQuery，同样反向命中并包装为列表
-    list_query_data = {"demoQueryType": [0, 1, 2, 3, 4], "client": ""}
-    collect_list_query_data(
-        {"data": {"records": [{"demoQuery": "演示查询文本", "client": "PC"}]}},
-        list_query_data,
-    )
-    assert list_query_data["demoQueryType"] == ["演示查询文本"]
-    assert list_query_data["client"] == "PC"
-
-
-@allure.feature("pytest工具函数")
-@allure.story("响应收集函数")
-@allure.title("测试无包含关系的字段不互相匹配")
-def test_collect_list_query_data_no_prefix_relation():
-    # current 与 createdAt 无前缀包含关系，不收集
-    list_query_data = {"current": 1, "client": ""}
-    collect_list_query_data(
-        {"data": {"records": [{"createdAt": "2026-01-01 00:00:00", "client": "PC"}]}},
-        list_query_data,
-    )
-    assert list_query_data["current"] == 1
-    assert list_query_data["client"] == "PC"
-
-
-@allure.feature("pytest工具函数")
-@allure.story("响应收集函数")
-@allure.title("测试精确匹配优先于反向包含匹配")
-def test_collect_list_query_data_exact_before_reverse_include():
-    # 参数 companyList：响应 companyList 字段精确命中；无同名字段时反向命中 company
-    list_query_data = {"companyList": [], "demoCodeList": []}
-    collect_list_query_data(
-        {"data": {"records": [{"companyList": "A", "demoCode": "00001"}]}},
-        list_query_data,
-    )
-    assert list_query_data["companyList"] == "A"
-    assert list_query_data["demoCodeList"] == ["00001"]
+    assert list_query_data["like"] == ""
 
 
 # ==================== extract_list_items 明细提取函数测试 ====================
@@ -296,26 +306,32 @@ def test_collect_list_query_data_exact_before_reverse_include():
 
 @allure.feature("pytest工具函数")
 @allure.story("明细提取函数")
-@allure.title("测试lists/list键优先提取")
-def test_extract_list_items_list_key_priority():
-    # list/lists 键存在时直接返回，不做 records 兜底
-    assert extract_list_items({"lists": [{"a": 1}], "records": [{"b": 2}]}) == [{"a": 1}]
-    assert extract_list_items({"list": [1, 2], "records": [{"b": 2}]}) == [1, 2]
-
-
-@allure.feature("pytest工具函数")
-@allure.story("明细提取函数")
-@allure.title("测试无lists/list键时兜底提取records等命名")
-def test_extract_list_items_records_fallback():
-    assert extract_list_items({"records": [{"demoField": "V1"}]}) == [{"demoField": "V1"}]
-    assert extract_list_items({"rows": [{"a": 1}, {"a": 2}]}) == [{"a": 1}, {"a": 2}]
-
-
-@allure.feature("pytest工具函数")
-@allure.story("明细提取函数")
-@allure.title("测试非dict、无明细列表或仅非dict元素列表返回空")
-def test_extract_list_items_empty_fallback():
-    assert extract_list_items(None) == []
-    assert extract_list_items({"total": 1}) == []
-    assert extract_list_items({"ids": [1, 2]}) == []
-    assert extract_list_items({"records": []}) == []
+@allure.title("测试明细提取各形态")
+@pytest.mark.parametrize(
+    "resp_data,expected",
+    [
+        # list/lists 键存在时直接返回，不做 records 兜底
+        pytest.param({"lists": [{"a": 1}], "records": [{"b": 2}]}, [{"a": 1}], id="lists键优先"),
+        pytest.param({"list": [1, 2], "records": [{"b": 2}]}, [1, 2], id="list键优先"),
+        pytest.param({"records": [{"demoField": "V1"}]}, [{"demoField": "V1"}], id="records兜底"),
+        pytest.param({"rows": [{"a": 1}, {"a": 2}]}, [{"a": 1}, {"a": 2}], id="rows兜底"),
+        pytest.param(None, [], id="非dict返回空"),
+        pytest.param({"total": 1}, [], id="无明细列表返回空"),
+        pytest.param({"ids": [1, 2]}, [], id="仅非dict元素列表返回空"),
+        pytest.param({"records": []}, [], id="空明细列表返回空"),
+        # 列表嵌套在分页对象内（如 data.secondCouponInfos.list）时递归查找
+        pytest.param(
+            {"secondCouponInfos": {"pageNum": 1, "total": 237, "list": [{"orderNo": "A1"}]}},
+            [{"orderNo": "A1"}],
+            id="嵌套分页对象内list递归",
+        ),
+        pytest.param(
+            {"secondCouponInfos": {"total": 0, "list": []}},
+            [],
+            id="嵌套分页对象内空list返回空",
+        ),
+        pytest.param({"page": {"total": 0}}, [], id="嵌套对象无列表返回空"),
+    ],
+)
+def test_extract_list_items_forms(resp_data, expected):
+    assert extract_list_items(resp_data) == expected

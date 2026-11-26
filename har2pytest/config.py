@@ -11,6 +11,24 @@ from typing import Any
 
 from .logger import logger
 
+# "start/end/begin 前缀 + 业务词 + time/date 后缀"形态（如 startInvoiceTime、
+# endPayTime、beginFinishCheckTime）：子串关键字匹配不到的 start/end 时间区间命名
+_TIME_FORM_NAME_PATTERN = re.compile(r"^(?:start|end|begin).*(?:time|date)$")
+
+# 时间对后缀剥离的内置默认映射（后缀 -> 配对侧 "start"/"end"，字典保序）：
+# begin/min 与 start 同为开始语义，max 与 end 同为结束语义；用户可在配置文件
+# TIME_PAIR_SUFFIXES 中覆盖既有后缀侧别或追加新后缀（合并在内置默认之上）
+_DEFAULT_TIME_PAIR_SUFFIXES = {
+    "endtime": "end",
+    "starttime": "start",
+    "begintime": "start",
+    "end": "end",
+    "start": "start",
+    "begin": "start",
+    "min": "start",
+    "max": "end",
+}
+
 
 class APIConfig:
     """API 配置管理类。
@@ -36,6 +54,9 @@ class APIConfig:
         "PAGINATION_PARAMS": {},
         # 时间类参数关键字（包含匹配，不区分大小写），用于时间对组合传参
         "TIME_PARAMS": [],
+        # 时间对后缀剥离映射（后缀 -> 配对侧 start/end，JSON 对象保序）：
+        # 用户配置合并在内置默认之上，可覆盖既有后缀侧别或追加新后缀
+        "TIME_PAIR_SUFFIXES": {},
         # 测试用例目录 - 必需配置，必须在配置文件中指定
         "TESTCASE_DIR": "testcases",
         # 服务映射配置 - 必需配置，必须在配置文件中指定
@@ -51,7 +72,7 @@ class APIConfig:
         "LIST_QUERY_EXCLUDE_KEYWORDS": [],
         # 单接口测试模式配置（TESTCASE_PROFILES）：
         # 按 URL 显式指定生成模式，消除依赖中文关键字/命令行选项的脆弱判定。
-        # 每条: {"url": "/mgmt/order/orderList", "mode": "auto|list_query|complex_scenario",
+        # 每条: {"url": "/mgmt/order/demoList", "mode": "auto|list_query|complex_scenario",
         #        "keywords": [...], "exclude_keywords": [...]}
         #  - mode=auto（缺省）时回落关键字启发式；keywords/exclude_keywords 可覆盖全局默认
         #  - url 支持精确路径、{param} 模板或末尾通配 *（如 "/mgmt/order/*"）
@@ -77,6 +98,49 @@ class APIConfig:
         #  - file_field: 表单中文件字段名（默认 "file"），渲染为步骤函数形参
         #  - append_path: 响应 data 下追加到收集列表的路径（默认 ["datas"]）
         "COLLECT_RESPONSE_APIS": [],
+        # 数据库参数探测配置（api 生成阶段按 URL→表 映射查库，把参数示例值
+        # 写入 api.json 的 db_params 字段，供 complex_scenario 等消费端使用）：
+        # {
+        #   "host": "demo.mysql.example.com",
+        #   "port": 3306,
+        #   "user": "tester",
+        #   "password_env": "TEST_DB_PWD",  # 环境变量名（推荐，密码不落盘）；
+        #                                    # 也可直接填密码明文
+        #   "databases": ["demo_center_order"],  # 自动找表的库范围（可选，
+        #                                        # 缺省查全部可见库）
+        #   "domain_schemas": {           # 业务域→库映射（可选）：按接口语义
+        #       "member": {               # 优先在域库内找表，域内无唯一胜出
+        #           "schemas": ["demo_center_member"],  # 者再回退全库
+        #           "url": ["member", "vip", "card"],   # URL 词元命中即属该域
+        #           "cn": ["会员", "顾客", "客户"]       # 描述/备注中文命中即属该域
+        #       },
+        #       "promotion": {"schemas": ["demo_center_promotion"],
+        #                     "url": ["promotion", "combine"], "cn": ["活动"]}
+        #   },
+        #       # 多域取库并集，并与 databases 取交集（不越出全局可见库边界）；
+        #       # 未配置的域走全库查找。参数级独立找表按参数备注 + 参数名词元
+        #       # 定域（如 storeCode 备注“门店编码”→ 店铺库），不被接口主域带偏
+        #   "preferred_tables": ["demo_center_order.demo_member"],
+        #       # 主表清单（可选）：自动找表同分时的消歧键（排序次级），
+        #       # 不参与加分——人工先验只回答“旗鼓相当时选哪张”，不强制优先查表
+        #   "api_table_map": {
+        #     "/demo/demoReview/demoAction": {
+        #       "table": "demo_center_order.demo_review_record",
+        #       "where": "demo_visit_status = 0"   # 示例行过滤条件（可选）
+        #     }
+        #   }
+        # }
+        # api_table_map 值可简写为 "库.表" 字符串；键支持精确路径、
+        # {param} 模板或末尾 * 通配。未命中时先按语义推断业务域、在域库内
+        # 自动反查 information_schema（无结果再回退全库；三类元数据反查均
+        # 排除 mysql/sys 等系统库），候选集 = 参数列
+        # 反查 ∪ URL 词元表名匹配，按“非通用命中列数 + 表名与 URL 关键词
+        # 相似度 + 唯一索引加分 - 表名多余词段惩罚 - 备份表惩罚”打分，唯一
+        # 最高分才探测（复数参数自动去尾 s 匹配单数列，如 ids → id 列；
+        # 表名候选须至少含一个参数列才能入选）。新增/编辑类接口的探测值
+        # 生成与库中已有值不冲突的新值，其余接口取已有示例值；数组形声明的
+        # 参数自动包装为单元素列表。缺省 None 表示不启用探测。
+        "DB_CONFIG": None,
     }
 
     # 初始化配置
@@ -310,10 +374,24 @@ class APIConfig:
         return cls.get_config("TIME_PARAMS")
 
     @classmethod
+    def TIME_PAIR_SUFFIXES(cls) -> dict:
+        """时间对后缀剥离映射：配置项合并在内置默认之上（配置可覆盖侧别或追加后缀）。"""
+        return {**_DEFAULT_TIME_PAIR_SUFFIXES, **(cls.get_config("TIME_PAIR_SUFFIXES") or {})}
+
+    @classmethod
     def is_time_param(cls, param_name: str) -> bool:
-        """判断参数名是否包含任一时间参数关键字（不区分大小写）。"""
+        """判断参数名是否包含任一时间参数关键字（不区分大小写）。
+
+        关键字为子串匹配（TIME_PARAMS 配置）；另覆盖"start/end/begin 前缀 +
+        业务词 + time/date 后缀"形态（如 startInvoiceTime/endPayTime）：中间
+        夹业务词时子串关键字匹配不到，但语义同为时间区间参数。经全量语料
+        （10780 个 api.json）量化：该形态共 50 个参数名，备注全部为时间
+        语义（开始/结束时间、日期区间），零假阳性。
+        """
         name_lower = param_name.lower()
-        return any(p.lower() in name_lower for p in cls.TIME_PARAMS())
+        if any(p.lower() in name_lower for p in cls.TIME_PARAMS()):
+            return True
+        return bool(_TIME_FORM_NAME_PATTERN.match(name_lower))
 
     @classmethod
     def TESTCASE_DIR(cls) -> str:
@@ -366,6 +444,10 @@ class APIConfig:
     @classmethod
     def COLLECT_RESPONSE_APIS(cls) -> list[dict]:
         return cls.get_config("COLLECT_RESPONSE_APIS")
+
+    @classmethod
+    def DB_CONFIG(cls) -> dict | None:
+        return cls.get_config("DB_CONFIG")
 
     @classmethod
     def determine_service_package(cls, url: str | None) -> str:

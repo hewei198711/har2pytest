@@ -206,19 +206,23 @@ def test_default_list_query_and_state_patterns(tmp_config):
 
 @allure.feature("配置管理")
 @allure.story("服务包判断")
-@allure.title("测试根据URL判断服务包")
-def test_determine_service_package(test_config):
-    # 匹配 SERVICE_MAPPING 中的 mobile → mobile_application
-    assert APIConfig.determine_service_package("/mobile/demo/list") == "mobile_application"
-    # 匹配 SERVICE_MAPPING 中的 member → order_application
-    assert APIConfig.determine_service_package("/member/demo/detail") == "order_application"
-    # 大小写不敏感匹配
-    assert APIConfig.determine_service_package("/Mobile/Demo") == "mobile_application"
-    # 未匹配时回退到 DEFAULT_API_DIR
-    assert APIConfig.determine_service_package("/unknown/path") == "apis"
-    # 空字符串和 None 回退到 DEFAULT_API_DIR
-    assert APIConfig.determine_service_package("") == "apis"
-    assert APIConfig.determine_service_package(None) == "apis"
+@allure.title("测试根据URL判断服务包各形态")
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        # 匹配 SERVICE_MAPPING 中的 mobile → mobile_application
+        pytest.param("/mobile/demo/list", "mobile_application", id="mobile命中映射"),
+        # 匹配 SERVICE_MAPPING 中的 member → order_application
+        pytest.param("/member/demo/detail", "order_application", id="member命中映射"),
+        pytest.param("/Mobile/Demo", "mobile_application", id="大小写不敏感"),
+        pytest.param("/unknown/path", "apis", id="未匹配回退默认目录"),
+        pytest.param("", "apis", id="空串回退默认目录"),
+        pytest.param(None, "apis", id="None回退默认目录"),
+        pytest.param("/", "apis", id="根路径回退默认目录"),
+    ],
+)
+def test_determine_service_package(test_config, url, expected):
+    assert APIConfig.determine_service_package(url) == expected
 
 
 @allure.feature("配置管理")
@@ -340,7 +344,7 @@ def test_invalid_params_converted_to_set(tmp_config):
 
 @allure.feature("配置管理")
 @allure.story("时间参数")
-@allure.title("测试 TIME_PARAMS 为空时 is_time_param 始终返回 False")
+@allure.title("测试 TIME_PARAMS 为空时 is_time_param 仅形态判定生效")
 def test_is_time_param_empty_config(tmp_config):
     tmp_config({
         "BASE_URLS": ["https://test.example.com"],
@@ -349,7 +353,8 @@ def test_is_time_param_empty_config(tmp_config):
         "TIME_PARAMS": [],
     })
     APIConfig._load_config()
-    assert APIConfig.is_time_param("starttime") is False
+    # 关键字闸门为空，但 start/end/begin 前缀 + time/date 后缀的形态判定不依赖配置
+    assert APIConfig.is_time_param("starttime") is True
     assert APIConfig.is_time_param("anything") is False
 
 
@@ -371,8 +376,36 @@ def test_warn_missing_config_only_once():
     assert APIConfig._config_warned is True  # 仍然只警告一次
 
 
+# ==================== 数据库参数探测配置测试 ====================
+
+
 @allure.feature("配置管理")
-@allure.story("服务包判断")
-@allure.title("测试 determine_service_package 根路径回退到默认 API 目录")
-def test_determine_service_package_root_path(test_config):
-    assert APIConfig.determine_service_package("/") == "apis"
+@allure.story("数据库参数探测配置")
+@allure.title("测试 DB_CONFIG 默认关闭（None）")
+def test_db_config_default_none(test_config):
+    assert APIConfig.DB_CONFIG() is None
+
+
+@allure.feature("配置管理")
+@allure.story("数据库参数探测配置")
+@allure.title("测试 DB_CONFIG 自定义配置读取")
+def test_db_config_custom(tmp_config):
+    db_config = {
+        "host": "demo.mysql.example.com",
+        "port": 3306,
+        "user": "demo_tester",
+        "password_env": "DEMO_TEST_DB_PWD",
+        "api_table_map": {
+            "/demo/save": {
+                "table": "demo_db.demo_table",
+                "where": "status = 0",
+            }
+        },
+    }
+    tmp_config({
+        "BASE_URLS": ["https://test.example.com"],
+        "SERVICE_MAPPING": {"t": "t"},
+        "SWAGGER_DOC_URLS": {"t": "https://t.example.com/sw"},
+        "DB_CONFIG": db_config,
+    })
+    assert APIConfig.DB_CONFIG() == db_config

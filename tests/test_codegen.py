@@ -11,34 +11,23 @@ from har2pytest.codegen import render, render_lines, validate_python
 # ==================== render 模板渲染测试 ====================
 
 
+@pytest.mark.parametrize("param_name,is_array_param,expected", [
+    pytest.param("keyword", False, '"keyword": keyword,', id="普通参数渲染"),
+    pytest.param("manualInterventionReasons", True, '"manualInterventionReasons": [manualInterventionReasons],', id="数组类型参数渲染为列表"),
+])
 @allure.feature("代码生成")
 @allure.story("模板渲染")
-@allure.title("测试 render 渲染已有模板")
-def test_render_existing_template():
+@allure.title("测试 render 渲染参数字典模板各形态")
+def test_render_data_dict_forms(param_name, is_array_param, expected):
     text = render(
         "p_data_dict.j2",
         is_combination=False,
-        param_name="keyword",
-        param_safe="keyword",
+        param_name=param_name,
+        param_safe=param_name,
         other_items=[],
-        is_array_param=False,
+        is_array_param=is_array_param,
     )
-    assert '"keyword": keyword,' in text
-
-
-@allure.feature("代码生成")
-@allure.story("模板渲染")
-@allure.title("测试 render 数组类型参数渲染为 [值]")
-def test_render_array_param_wraps_in_list():
-    text = render(
-        "p_data_dict.j2",
-        is_combination=False,
-        param_name="manualInterventionReasons",
-        param_safe="manualInterventionReasons",
-        other_items=[],
-        is_array_param=True,
-    )
-    assert '"manualInterventionReasons": [manualInterventionReasons],' in text
+    assert expected in text
 
 
 @allure.feature("代码生成")
@@ -109,11 +98,15 @@ def test_render_lines_assertions_template():
 # ==================== validate_python 语法校验测试 ====================
 
 
+@pytest.mark.parametrize("code", [
+    pytest.param("def f():\n    return 1\n", id="合法Python不抛异常"),
+    pytest.param("", id="空字符串为合法Python"),
+])
 @allure.feature("代码生成")
 @allure.story("语法校验")
-@allure.title("测试 validate_python 校验合法 Python 不抛异常")
-def test_validate_python_valid():
-    validate_python("def f():\n    return 1\n")
+@allure.title("测试 validate_python 合法代码不抛异常")
+def test_validate_python_valid_forms(code):
+    validate_python(code)
 
 
 @allure.feature("代码生成")
@@ -123,12 +116,17 @@ def test_validate_python_valid():
     [
         ("bad", "bad"),
         ("my_module", "my_module"),
+        # 默认 label 出现在错误信息中
+        (None, "generated code"),
     ],
 )
 @allure.title("测试 validate_python 校验非法 Python 抛出 ValueError 且 label 出现在错误信息中")
 def test_validate_python_invalid_raises(label, match_text):
     with pytest.raises(ValueError, match=match_text):
-        validate_python("def f(:\n", label=label)
+        if label is None:
+            validate_python("def f(:\n")
+        else:
+            validate_python("def f(:\n", label=label)
 
 
 @allure.feature("代码生成")
@@ -139,21 +137,6 @@ def test_validate_python_exception_chain():
         validate_python("def f(:\n")
     assert exc_info.value.__cause__ is not None
     assert isinstance(exc_info.value.__cause__, SyntaxError)
-
-
-@allure.feature("代码生成")
-@allure.story("语法校验")
-@allure.title("测试 validate_python 默认 label 出现在错误信息中")
-def test_validate_python_default_label_in_error():
-    with pytest.raises(ValueError, match="generated code"):
-        validate_python("def f(:\n")
-
-
-@allure.feature("代码生成")
-@allure.story("语法校验")
-@allure.title("测试 validate_python 空字符串为合法 Python")
-def test_validate_python_empty_string():
-    validate_python("")
 
 
 @allure.feature("代码生成")

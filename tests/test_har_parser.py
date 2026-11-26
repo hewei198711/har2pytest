@@ -121,114 +121,46 @@ def test_filter_non_api_resource_type(write_har):
 
 @allure.feature("HAR解析器")
 @allure.story("过滤无效参数")
-@allure.title("测试过滤无效参数")
-def test_filter_invalid_params():
-
+@allure.title("测试无效参数过滤各形态")
+@pytest.mark.parametrize(
+    "invalid,data,expected",
+    [
+        pytest.param(
+            {"sign", "timestamp"},
+            {"username": "test", "password": "123456", "sign": "test_sign", "timestamp": "1234567890", "file": "test.txt"},
+            {"username": "test", "password": "123456", "file": "test.txt"},
+            id="dict逐键过滤",
+        ),
+        pytest.param(
+            {"sign", "timestamp"},
+            [{"productId": 1, "sign": "abc"}, {"productId": 2, "sign": "def", "timestamp": "123"}],
+            [{"productId": 1}, {"productId": 2}],
+            id="JSON数组body逐元素过滤",
+        ),
+        pytest.param({"sign", "timestamp"}, [], [], id="空列表"),
+        pytest.param(
+            {"sign"},
+            [{"id": 1, "sign": "x"}, "plain_string", 42, [{"inner": 1, "sign": "y"}]],
+            [{"id": 1}, "plain_string", 42, [{"inner": 1}]],
+            id="混合类型列表",
+        ),
+        pytest.param(
+            {"sign", "token"},
+            {"order": {"sign": "x", "items": [{"sku": "A", "token": "t1"}, {"sku": "B"}], "meta": {"token": "nested"}}},
+            {"order": {"items": [{"sku": "A"}, {"sku": "B"}], "meta": {}}},
+            id="嵌套dict递归过滤",
+        ),
+        # 标量（字符串/数字/None）原样保留
+        pytest.param({"sign", "timestamp"}, None, None, id="None标量"),
+        pytest.param({"sign", "timestamp"}, 0, 0, id="数字标量"),
+        pytest.param({"sign", "timestamp"}, "", "", id="空串标量"),
+    ],
+)
+def test_filter_invalid_params_forms(invalid, data, expected):
     assert APIConfig._config is not None
-    APIConfig._config["INVALID_PARAMS"] = {"sign", "timestamp"}
+    APIConfig._config["INVALID_PARAMS"] = invalid
     parser = HARParser()
-
-    test_data = {
-        "username": "test",
-        "password": "123456",
-        "sign": "test_sign",
-        "timestamp": "1234567890",
-        "file": "test.txt",
-    }
-
-    result = parser._filter_invalid_params(test_data)
-    assert "username" in result
-    assert "password" in result
-    assert "sign" not in result
-    assert "timestamp" not in result
-    assert "file" in result
-
-
-@allure.feature("HAR解析器")
-@allure.story("过滤无效参数")
-@allure.title("测试过滤JSON数组body中的无效参数")
-def test_filter_invalid_params_list():
-
-    assert APIConfig._config is not None
-    APIConfig._config["INVALID_PARAMS"] = {"sign", "timestamp"}
-    parser = HARParser()
-
-    test_data = [
-        {"productId": 1, "sign": "abc"},
-        {"productId": 2, "sign": "def", "timestamp": "123"},
-    ]
-
-    result = parser._filter_invalid_params(test_data)
-    assert isinstance(result, list)
-    assert len(result) == 2
-    assert result[0] == {"productId": 1}
-    assert result[1] == {"productId": 2}
-
-
-@allure.feature("HAR解析器")
-@allure.story("过滤无效参数")
-@allure.title("测试过滤空列表")
-def test_filter_invalid_params_empty_list():
-    parser = HARParser()
-    result = parser._filter_invalid_params([])
-    assert result == []
-
-
-@allure.feature("HAR解析器")
-@allure.story("过滤无效参数")
-@allure.title("测试过滤混合类型列表")
-def test_filter_invalid_params_mixed_list():
-
-    assert APIConfig._config is not None
-    APIConfig._config["INVALID_PARAMS"] = {"sign"}
-    parser = HARParser()
-
-    test_data = [
-        {"id": 1, "sign": "x"},
-        "plain_string",
-        42,
-        [{"inner": 1, "sign": "y"}],
-    ]
-
-    result = parser._filter_invalid_params(test_data)
-    assert isinstance(result, list)
-    assert len(result) == 4
-    assert result[0] == {"id": 1}
-    assert result[1] == "plain_string"
-    assert result[2] == 42
-    assert result[3] == [{"inner": 1}]
-
-
-@allure.feature("HAR解析器")
-@allure.story("过滤无效参数")
-@allure.title("测试过滤嵌套 dict 中的无效参数")
-def test_filter_invalid_params_nested_dict():
-
-    assert APIConfig._config is not None
-    APIConfig._config["INVALID_PARAMS"] = {"sign", "token"}
-    parser = HARParser()
-    test_data = {
-        "order": {
-            "sign": "x",
-            "items": [
-                {"sku": "A", "token": "t1"},
-                {"sku": "B"},
-            ],
-            "meta": {"token": "nested"},
-        }
-    }
-    result = parser._filter_invalid_params(test_data)
-    assert result == {"order": {"items": [{"sku": "A"}, {"sku": "B"}], "meta": {}}}
-
-
-@allure.feature("HAR解析器")
-@allure.story("过滤无效参数")
-@allure.title("测试非容器标量原样保留")
-def test_filter_invalid_params_scalar_preserved():
-    parser = HARParser()
-    assert parser._filter_invalid_params(None) is None
-    assert parser._filter_invalid_params(0) == 0
-    assert parser._filter_invalid_params("") == ""
+    assert parser._filter_invalid_params(data) == expected
 
 
 @allure.feature("HAR解析器")
@@ -372,110 +304,50 @@ def test_multipart_form_data(write_har):
 
 @allure.feature("HAR解析器")
 @allure.story("application/x-www-form-urlencoded处理")
-@allure.title("测试application/x-www-form-urlencoded类型的POST数据解析")
-def test_form_urlencoded_data(write_har):
+@allure.title("测试 urlencoded 各形态 POST 数据解析")
+@pytest.mark.parametrize(
+    "post_data,expected",
+    [
+        pytest.param(
+            {"mimeType": "application/x-www-form-urlencoded", "text": "username=testuser&password=123456&remember=true"},
+            {"username": "testuser", "password": "123456", "remember": "true"},
+            id="标准text解析",
+        ),
+        pytest.param(
+            {"mimeType": "application/x-www-form-urlencoded", "text": "keyword=%E6%B5%8B%E8%AF%95&page=1&size=10"},
+            {"keyword": "测试", "page": "1", "size": "10"},
+            id="URL编码字符解码",
+        ),
+        pytest.param({"mimeType": "application/x-www-form-urlencoded", "text": ""}, {}, id="空数据"),
+        # 部分 HAR 导出只提供 postData.params（无 text），应回退结构化解析而不丢参数
+        pytest.param(
+            {
+                "mimeType": "application/x-www-form-urlencoded",
+                "params": [{"name": "username", "value": "testuser"}, {"name": "password", "value": "123456"}],
+            },
+            {"username": "testuser", "password": "123456"},
+            id="仅params无text回退结构化",
+        ),
+    ],
+)
+def test_form_urlencoded_forms(write_har, post_data, expected):
     har_path = write_har([{
         "_resourceType": "xhr",
         "request": {
             "url": "https://example.com/api/login",
             "method": "POST",
             "headers": [{"name": "Content-Type", "value": "application/x-www-form-urlencoded"}],
-            "postData": {
-                "mimeType": "application/x-www-form-urlencoded",
-                "text": "username=testuser&password=123456&remember=true",
-            },
+            "postData": post_data,
         },
         "response": {"status": 200, "content": {"text": "{}"}},
         "time": 100,
-    }], filename="test_form_urlencoded.har")
+    }])
 
     parser = HARParser()
     requests = parser.extract_requests_from_har(str(har_path))
 
     assert len(requests) == 1
-    assert requests[0].post_data == {"username": "testuser", "password": "123456", "remember": "true"}
-
-
-@allure.feature("HAR解析器")
-@allure.story("application/x-www-form-urlencoded处理")
-@allure.title("测试urlencoded带URL编码字符的解析")
-def test_form_urlencoded_with_encoded_chars(write_har):
-    har_path = write_har([{
-        "_resourceType": "xhr",
-        "request": {
-            "url": "https://example.com/api/search",
-            "method": "POST",
-            "headers": [{"name": "Content-Type", "value": "application/x-www-form-urlencoded"}],
-            "postData": {
-                "mimeType": "application/x-www-form-urlencoded",
-                "text": "keyword=%E6%B5%8B%E8%AF%95&page=1&size=10",
-            },
-        },
-        "response": {"status": 200, "content": {"text": "{}"}},
-        "time": 50,
-    }], filename="test_form_urlencoded2.har")
-
-    parser = HARParser()
-    requests = parser.extract_requests_from_har(str(har_path))
-
-    assert len(requests) == 1
-    assert requests[0].post_data == {"keyword": "测试", "page": "1", "size": "10"}
-
-
-@allure.feature("HAR解析器")
-@allure.story("application/x-www-form-urlencoded处理")
-@allure.title("测试urlencoded空数据的解析")
-def test_form_urlencoded_empty(write_har):
-    har_path = write_har([{
-        "_resourceType": "xhr",
-        "request": {
-            "url": "https://example.com/api/submit",
-            "method": "POST",
-            "headers": [{"name": "Content-Type", "value": "application/x-www-form-urlencoded"}],
-            "postData": {
-                "mimeType": "application/x-www-form-urlencoded",
-                "text": "",
-            },
-        },
-        "response": {"status": 200, "content": {"text": "{}"}},
-        "time": 50,
-    }], filename="test_form_urlencoded3.har")
-
-    parser = HARParser()
-    requests = parser.extract_requests_from_har(str(har_path))
-
-    assert len(requests) == 1
-    assert requests[0].post_data == {}
-
-
-@allure.feature("HAR解析器")
-@allure.story("application/x-www-form-urlencoded处理")
-@allure.title("测试urlencoded仅有params无text时回退结构化解析")
-@allure.description("部分 HAR 导出只提供 postData.params（无 text），应回退结构化解析而不丢参数")
-def test_form_urlencoded_params_only(write_har):
-    har_path = write_har([{
-        "_resourceType": "xhr",
-        "request": {
-            "url": "https://example.com/api/form",
-            "method": "POST",
-            "headers": [{"name": "Content-Type", "value": "application/x-www-form-urlencoded"}],
-            "postData": {
-                "mimeType": "application/x-www-form-urlencoded",
-                "params": [
-                    {"name": "username", "value": "testuser"},
-                    {"name": "password", "value": "123456"},
-                ],
-            },
-        },
-        "response": {"status": 200, "content": {"text": "{}"}},
-        "time": 50,
-    }], filename="test_form_urlencoded_params_only.har")
-
-    parser = HARParser()
-    requests = parser.extract_requests_from_har(str(har_path))
-
-    assert len(requests) == 1
-    assert requests[0].post_data == {"username": "testuser", "password": "123456"}
+    assert requests[0].post_data == expected
 
 
 @allure.feature("HAR解析器")
@@ -702,33 +574,39 @@ def test_query_string_parsing_and_filtering(write_har):
 
 @allure.feature("HAR解析器")
 @allure.story("JSON解析工具")
-@allure.title("测试 _try_json_loads 有效JSON/无效JSON/空字符串")
-def test_try_json_loads_various_inputs():
+@allure.title("测试 _try_json_loads 各输入形态")
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        # 有效 JSON → 解析为 Python 对象
+        pytest.param('{"a": 1}', {"a": 1}, id="有效JSON对象"),
+        pytest.param("[1, 2]", [1, 2], id="有效JSON数组"),
+        # 无效 JSON → 原样返回文本
+        pytest.param("not json", "not json", id="无效JSON原样"),
+        # 空字符串 → 无效 JSON，原样返回
+        pytest.param("", "", id="空串原样"),
+    ],
+)
+def test_try_json_loads_various_inputs(text, expected):
     parser = HARParser()
-    # 有效 JSON → 解析为 Python 对象
-    assert parser._try_json_loads('{"a": 1}') == {"a": 1}
-    assert parser._try_json_loads('[1, 2]') == [1, 2]
-    # 无效 JSON → 原样返回文本
-    assert parser._try_json_loads("not json") == "not json"
-    # 空字符串 → 无效 JSON，原样返回
-    assert parser._try_json_loads("") == ""
+    assert parser._try_json_loads(text) == expected
 
 
 @allure.feature("HAR解析器")
 @allure.story("键值对转换")
-@allure.title("测试 _name_value_to_dict 空值与重复 name 覆盖")
-def test_name_value_to_dict_edge_cases():
-    # 空值保留为空字符串
-    result = HARParser._name_value_to_dict([{"name": "key", "value": ""}])
-    assert result == {"key": ""}
-    # 重复 name：后值覆盖前值
-    result = HARParser._name_value_to_dict([
-        {"name": "a", "value": "1"},
-        {"name": "a", "value": "2"},
-    ])
-    assert result == {"a": "2"}
-    # 空列表返回空字典
-    assert HARParser._name_value_to_dict([]) == {}
+@allure.title("测试 _name_value_to_dict 各形态")
+@pytest.mark.parametrize(
+    "pairs,expected",
+    [
+        # 空值保留为空字符串
+        pytest.param([{"name": "key", "value": ""}], {"key": ""}, id="空值保留"),
+        # 重复 name：后值覆盖前值
+        pytest.param([{"name": "a", "value": "1"}, {"name": "a", "value": "2"}], {"a": "2"}, id="重复name后值覆盖"),
+        pytest.param([], {}, id="空列表"),
+    ],
+)
+def test_name_value_to_dict_edge_cases(pairs, expected):
+    assert HARParser._name_value_to_dict(pairs) == expected
 
 
 @allure.feature("HAR解析器")

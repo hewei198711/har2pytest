@@ -35,8 +35,25 @@ HAR_PARAM_VALUES_FIELD = "har_param_values"
 # HAR 分析得出的参数基线值（常量参数 + 首条请求的所有参数值）
 HAR_PARAMS_FIELD = "har_params"
 
-# HAR 分析得出的时间参数对（从 HAR 参数基线自行配对，无 Swagger 备注时格式默认 %Y-%m-%d %H:%M:%S）
+# HAR 分析得出的时间参数对（从 HAR 参数基线自行配对，无 Swagger 备注时格式默认 %Y-%m-%d）
 HAR_TIME_PAIRS_FIELD = "har_time_pairs"
+
+# Swagger 备注双条件识别的单时间参数（一个参数自身承载时间，无 start/end 伴生；
+# 格式为 {参数名: {"format": strftime 格式, "range": 备注是否声明逗号分隔区间}}）
+SINGLE_TIME_PARAMS_FIELD = "single_time_params"
+
+# 数值范围对（非时间的 Start/End 配对，按参数声明类型识别；
+# 格式为 {词干: {"start": 参数名, "end": 参数名}}，基线由 test_0 收集响应 min/max 动态提供）
+VALUE_PAIRS_FIELD = "value_pairs"
+
+# 数据库探测得出的参数示例值（api 生成阶段按 DB_CONFIG.api_table_map 查库表匹配）
+DB_PARAMS_FIELD = "db_params"
+
+# 参数名到响应字段名的显式映射（如 {"like": "invoiceSensitive"}）：
+# 生成器写出的每个 .api.json 都预置该字段（空对象），用户手工往空对象里
+# 填映射，三级自动匹配落空时收集与断言两侧共用；只有内容非空时，
+# --overwrite 才不重新覆盖该元数据文件
+FIELD_MAP_FIELD = "field_map"
 
 
 def metadata_path(py_filepath: str) -> str:
@@ -55,6 +72,8 @@ def write_api_metadata(
     param_remarks: dict[str, Any] | None = None,
     param_values: dict[str, list[Any]] | None = None,
     time_pairs: dict[str, dict[str, str]] | None = None,
+    single_time_params: dict[str, dict[str, Any]] | None = None,
+    value_pairs: dict[str, dict[str, str]] | None = None,
     source: str | None = None,
     params: Any = None,
     data: Any = None,
@@ -64,6 +83,8 @@ def write_api_metadata(
     har_param_values: dict[str, list[Any]] | None = None,
     har_params: dict[str, Any] | None = None,
     har_time_pairs: dict[str, dict[str, str]] | None = None,
+    db_params: dict[str, Any] | None = None,
+    field_map: dict[str, str] | None = None,
 ) -> str | None:
     """为生成的 API 模块写入 API 元数据文件。
 
@@ -72,7 +93,8 @@ def write_api_metadata(
     缺失或没有 API 元数据时 parse_api_file 会报错提示补充。
 
     任何规范字段缺失/为空时该字段从结果中剔除，避免把生成器内部默认值
-    （如 "TODO: 添加接口描述"）误当成规范数据。
+    （如 "TODO: 添加接口描述"）误当成规范数据。例外：field_map 是手工语义
+    字段，始终预置（None/空 dict 也写为空对象），供用户发现并填充映射。
     """
     payload: dict[str, Any] = {}
     if source:
@@ -95,6 +117,10 @@ def write_api_metadata(
         payload["param_values"] = dict(param_values)
     if time_pairs:
         payload["time_pairs"] = dict(time_pairs)
+    if single_time_params:
+        payload[SINGLE_TIME_PARAMS_FIELD] = dict(single_time_params)
+    if value_pairs:
+        payload[VALUE_PAIRS_FIELD] = dict(value_pairs)
     if constant_params:
         payload[CONSTANT_PARAMS_FIELD] = dict(constant_params)
     if har_param_values:
@@ -103,6 +129,11 @@ def write_api_metadata(
         payload[HAR_PARAMS_FIELD] = dict(har_params)
     if har_time_pairs:
         payload[HAR_TIME_PAIRS_FIELD] = dict(har_time_pairs)
+    if db_params:
+        payload[DB_PARAMS_FIELD] = db_params
+    # 手工语义字段：始终预置空对象，用户往空对象里填映射即可；
+    # 只有内容非空时 api_generator 在 --overwrite 下才跳过覆盖该文件
+    payload[FIELD_MAP_FIELD] = dict(field_map or {})
     # 当前值字段：只跳过 None（允许空字典/空列表）
     current_values = {
         "params": params,

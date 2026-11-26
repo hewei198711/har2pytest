@@ -76,34 +76,23 @@ def test_async_client_http_methods_return_context(method_func, url, expected_met
 # ==================== 请求执行测试 ====================
 
 
+@pytest.mark.parametrize("method,url,kwargs", [
+    pytest.param("get", "/api/test", {"params": {"key": "value"}}, id="GET请求成功"),
+    pytest.param("post", "/api/create", {"json": {"name": "test"}}, id="POST请求JSON_body"),
+])
 @allure.feature("异步客户端")
 @allure.story("请求执行")
-@allure.title("测试 AsyncResponseContext 成功发起 GET 请求")
-async def test_async_response_context_get_success(async_client_with_mock):
+@allure.title("测试 AsyncResponseContext 成功发起请求")
+async def test_async_response_context_request_forms(async_client_with_mock, method, url, kwargs):
     ac, mock_resp = async_client_with_mock
-    ctx = ac.get("/api/test", params={"key": "value"})
+    ctx = getattr(ac, method)(url, **kwargs)
     response = await ctx.__aenter__()
 
     assert response is mock_resp
     ac._session.request.assert_called_once()
     call_args = ac._session.request.call_args
-    assert call_args[0][0] == "GET"
-    assert call_args[0][1] == "https://example.com/api/test"
-
-
-@allure.feature("异步客户端")
-@allure.story("请求执行")
-@allure.title("测试 AsyncResponseContext 成功发起 POST 请求（JSON body）")
-async def test_async_response_context_post_json(async_client_with_mock):
-    ac, mock_resp = async_client_with_mock
-    ctx = ac.post("/api/create", json={"name": "test"})
-    response = await ctx.__aenter__()
-
-    assert response is mock_resp
-    ac._session.request.assert_called_once()
-    call_args = ac._session.request.call_args
-    assert call_args[0][0] == "POST"
-    assert call_args[0][1] == "https://example.com/api/create"
+    assert call_args[0][0] == method.upper()
+    assert call_args[0][1] == f"https://example.com{url}"
 
 
 @allure.feature("异步客户端")
@@ -218,51 +207,30 @@ def test_async_client_global_instance():
 # ==================== 响应体解析测试 ====================
 
 
+@pytest.mark.parametrize("content_type,expected", [
+    pytest.param("application/json", {"key": "value"}, id="解析JSON响应"),
+    pytest.param("text/html", "<html>test</html>", id="解析HTML响应"),
+    pytest.param("image/png", b"\x89PNG\r\n", id="解析image响应"),
+    pytest.param("text/plain", "plain text response", id="未知Content_Type回退文本读取"),
+])
 @allure.feature("异步客户端")
 @allure.story("响应体解析")
-@allure.title("测试 _parse_response_body 解析 JSON 响应")
-async def test_parse_response_body_json():
-    mock_response = AsyncMock()
-    mock_response.headers = {"Content-Type": "application/json"}
-    mock_response.json = AsyncMock(return_value={"key": "value"})
-
-    client = AsyncClient(base_url="https://example.com")
-    ctx = client.get("/api/test")
-    ctx._response = mock_response
-
-    result = await ctx._parse_response_body(mock_response)
-    assert result == {"key": "value"}
-
-
-@allure.feature("异步客户端")
-@allure.story("响应体解析")
-@allure.title("测试 _parse_response_body 解析 HTML 响应")
-async def test_parse_response_body_html():
-    mock_response = AsyncMock()
-    mock_response.headers = {"Content-Type": "text/html"}
-    mock_response.text = AsyncMock(return_value="<html>test</html>")
-
-    client = AsyncClient(base_url="https://example.com")
-    ctx = client.get("/api/test")
-    ctx._response = mock_response
-
-    result = await ctx._parse_response_body(mock_response)
-    assert result == "<html>test</html>"
-
-
-@allure.feature("异步客户端")
-@allure.story("响应体解析")
-@allure.title("测试 _parse_response_body 解析 image 响应")
-async def test_parse_response_body_image():
+@allure.title("测试 _parse_response_body 按 Content-Type 解析各形态")
+async def test_parse_response_body_content_type_forms(content_type, expected):
     mock_resp = AsyncMock()
-    mock_resp.headers = {"Content-Type": "image/png"}
-    mock_resp.read = AsyncMock(return_value=b"\x89PNG\r\n")
+    mock_resp.headers = {"Content-Type": content_type}
+    if content_type == "application/json":
+        mock_resp.json = AsyncMock(return_value=expected)
+    elif content_type == "image/png":
+        mock_resp.read = AsyncMock(return_value=expected)
+    else:
+        mock_resp.text = AsyncMock(return_value=expected)
 
     client = AsyncClient(base_url="https://example.com")
-    ctx = client.get("/api/image")
+    ctx = client.get("/api/test")
 
     result = await ctx._parse_response_body(mock_resp)
-    assert result == b"\x89PNG\r\n"
+    assert result == expected
 
 
 @allure.feature("异步客户端")
@@ -284,30 +252,21 @@ async def test_parse_response_body_fallback():
 # ==================== 请求信息记录测试 ====================
 
 
+@pytest.mark.parametrize("method,kwargs,key,expected", [
+    pytest.param("get", {"params": {"pageNum": "1"}}, "params", {"pageNum": "1"}, id="请求信息包含params参数"),
+    pytest.param("post", {"json": {"name": "test"}}, "json", {"name": "test"}, id="请求信息包含json参数"),
+])
 @allure.feature("异步客户端")
 @allure.story("请求信息记录")
-@allure.title("测试请求信息包含 params 参数")
-async def test_async_response_context_request_info_params(async_client_with_mock):
+@allure.title("测试请求信息记录请求参数")
+async def test_async_response_context_request_info_forms(async_client_with_mock, method, kwargs, key, expected):
     ac, mock_resp = async_client_with_mock
-    ctx = ac.get("/api/test", params={"pageNum": "1"})
+    ctx = getattr(ac, method)("/api/test", **kwargs)
     await ctx.__aenter__()
 
     assert ctx._request_info is not None
-    assert "params" in ctx._request_info
-    assert ctx._request_info["params"] == {"pageNum": "1"}
-
-
-@allure.feature("异步客户端")
-@allure.story("请求信息记录")
-@allure.title("测试请求信息包含 json 参数")
-async def test_async_response_context_request_info_json(async_client_with_mock):
-    ac, mock_resp = async_client_with_mock
-    ctx = ac.post("/api/create", json={"name": "test"})
-    await ctx.__aenter__()
-
-    assert ctx._request_info is not None
-    assert "json" in ctx._request_info
-    assert ctx._request_info["json"] == {"name": "test"}
+    assert key in ctx._request_info
+    assert ctx._request_info[key] == expected
 
 
 @allure.feature("异步客户端")
@@ -395,21 +354,6 @@ def test_async_client_init_defaults():
     assert client.default_timeout == 30
     assert client.raise_for_status is False
     assert client.default_verify is False
-
-
-@allure.feature("异步客户端")
-@allure.story("响应体解析")
-@allure.title("测试 _parse_response_body 未知 Content-Type 回退文本读取")
-async def test_parse_response_body_unknown_content_type():
-    mock_resp = AsyncMock()
-    mock_resp.headers = {"Content-Type": "text/plain"}
-    mock_resp.text = AsyncMock(return_value="plain text response")
-
-    client = AsyncClient(base_url="https://example.com")
-    ctx = client.get("/api/test")
-
-    result = await ctx._parse_response_body(mock_resp)
-    assert result == "plain text response"
 
 
 @allure.feature("异步客户端")

@@ -58,25 +58,17 @@ def client_with_mock(mock_session):
 # ==================== Client 初始化测试 ====================
 
 
+@pytest.mark.parametrize("kwargs,expected", [
+    pytest.param({}, ("", 30, False), id="默认初始化"),
+    pytest.param({"base_url": "https://api.example.com", "default_timeout": 60, "default_verify": True}, ("https://api.example.com", 60, True), id="自定义参数初始化"),
+])
 @allure.feature("同步客户端")
 @allure.story("初始化")
-@allure.title("测试 Client 默认初始化")
-def test_client_init_default():
-    c = Client()
-    assert c.base_url == ""
-    assert c.default_timeout == 30
-    assert c.default_verify is False
+@allure.title("测试 Client 初始化各形态")
+def test_client_init_forms(kwargs, expected):
+    c = Client(**kwargs)
+    assert (c.base_url, c.default_timeout, c.default_verify) == expected
     assert isinstance(c.session, requests.Session)
-
-
-@allure.feature("同步客户端")
-@allure.story("初始化")
-@allure.title("测试 Client 自定义参数初始化")
-def test_client_init_custom():
-    c = Client(base_url="https://api.example.com", default_timeout=60, default_verify=True)
-    assert c.base_url == "https://api.example.com"
-    assert c.default_timeout == 60
-    assert c.default_verify is True
 
 
 # ==================== Client 请求方法测试 ====================
@@ -232,30 +224,21 @@ def test_response_context_exit_response_none(client_with_mock):
 # ==================== ResponseContext 请求信息测试 ====================
 
 
+@pytest.mark.parametrize("method,kwargs,key,expected", [
+    pytest.param("get", {"params": {"pageNum": "1"}}, "params", {"pageNum": "1"}, id="请求信息包含params参数"),
+    pytest.param("post", {"json": {"name": "test"}}, "json", {"name": "test"}, id="请求信息包含json参数"),
+])
 @allure.feature("同步客户端")
 @allure.story("ResponseContext")
-@allure.title("测试请求信息包含 params 参数")
-def test_response_context_request_info_params(client_with_mock):
+@allure.title("测试请求信息记录请求参数")
+def test_response_context_request_info_forms(client_with_mock, method, kwargs, key, expected):
     c, _ = client_with_mock
-    ctx = c.get("/api/test", params={"pageNum": "1"})
+    ctx = getattr(c, method)("/api/test", **kwargs)
     ctx.__enter__()
 
     assert ctx._request_info is not None
-    assert "params" in ctx._request_info
-    assert ctx._request_info["params"] == {"pageNum": "1"}
-
-
-@allure.feature("同步客户端")
-@allure.story("ResponseContext")
-@allure.title("测试请求信息包含 json 参数")
-def test_response_context_request_info_json(client_with_mock):
-    c, _ = client_with_mock
-    ctx = c.post("/api/create", json={"name": "test"})
-    ctx.__enter__()
-
-    assert ctx._request_info is not None
-    assert "json" in ctx._request_info
-    assert ctx._request_info["json"] == {"name": "test"}
+    assert key in ctx._request_info
+    assert ctx._request_info[key] == expected
 
 
 @allure.feature("同步客户端")
@@ -373,12 +356,21 @@ def test_parse_response_body_total_failure():
 # ==================== 工具函数测试 ====================
 
 
+@pytest.mark.parametrize("value,kwargs,expected", [
+    pytest.param("abc", {}, "abc", id="短值不截断"),
+    pytest.param("a" * 300, {}, "a" * 200 + "...", id="长值截断"),
+    # 恰好 200 字符不截断
+    pytest.param("a" * 200, {}, "a" * 200, id="恰好limit长度不截断"),
+    # 201 字符截断
+    pytest.param("a" * 201, {}, "a" * 200 + "...", id="超出limit一字符截断"),
+    # 自定义 limit
+    pytest.param("hello", {"limit": 3}, "hel...", id="自定义limit"),
+])
 @allure.feature("同步客户端")
 @allure.story("工具函数")
-@allure.title("测试 _shorten 截断长值")
-def test_shorten_truncation():
-    assert _shorten("abc") == "abc"
-    assert _shorten("a" * 300) == "a" * 200 + "..."
+@allure.title("测试 _shorten 截断各形态")
+def test_shorten_forms(value, kwargs, expected):
+    assert _shorten(value, **kwargs) == expected
 
 
 @allure.feature("同步客户端")
@@ -396,33 +388,28 @@ def test_json_default_bytes():
     assert result_long.endswith("...")
 
 
+@pytest.mark.parametrize("value,expected", [
+    pytest.param(42, "42", id="整数回退str"),
+    pytest.param(None, "None", id="None回退str"),
+])
 @allure.feature("同步客户端")
 @allure.story("工具函数")
 @allure.title("测试 _json_default 非 bytes 回退 str")
-def test_json_default_fallback():
-    assert _json_default(42) == "42"
-    assert _json_default(None) == "None"
+def test_json_default_fallback_forms(value, expected):
+    assert _json_default(value) == expected
 
 
+@pytest.mark.parametrize("filename,expected", [
+    pytest.param("photo.png", "image/png", id="png图片"),
+    pytest.param("doc.pdf", "application/pdf", id="pdf文档"),
+    pytest.param("unknown.xyz", "application/octet-stream", id="未知扩展名"),
+    pytest.param("noext", "application/octet-stream", id="无扩展名文件"),
+])
 @allure.feature("同步客户端")
 @allure.story("工具函数")
-@allure.title("测试 _guess_content_type 猜测 MIME 类型")
-def test_guess_content_type():
-    assert _guess_content_type("photo.png") == "image/png"
-    assert _guess_content_type("doc.pdf") == "application/pdf"
-    assert _guess_content_type("unknown.xyz") == "application/octet-stream"
-
-
-@allure.feature("同步客户端")
-@allure.story("工具函数")
-@allure.title("测试 _shorten 边界值（恰好 limit 长度）")
-def test_shorten_boundary():
-    # 恰好 200 字符不截断
-    assert _shorten("a" * 200) == "a" * 200
-    # 201 字符截断
-    assert _shorten("a" * 201) == "a" * 200 + "..."
-    # 自定义 limit
-    assert _shorten("hello", limit=3) == "hel..."
+@allure.title("测试 _guess_content_type 猜测 MIME 类型各形态")
+def test_guess_content_type_forms(filename, expected):
+    assert _guess_content_type(filename) == expected
 
 
 @allure.feature("同步客户端")
@@ -431,13 +418,6 @@ def test_shorten_boundary():
 def test_json_default_bytearray():
     result = _json_default(bytearray(b"\x89PNG"))
     assert result == base64.b64encode(b"\x89PNG").decode("ascii")
-
-
-@allure.feature("同步客户端")
-@allure.story("工具函数")
-@allure.title("测试 _guess_content_type 无扩展名文件")
-def test_guess_content_type_no_extension():
-    assert _guess_content_type("noext") == "application/octet-stream"
 
 
 @allure.feature("同步客户端")
@@ -694,7 +674,7 @@ async def test_build_form_data_async():
 
 @allure.feature("同步客户端")
 @allure.story("请求信息记录")
-@allure.title("测试 _build_request_info 无请求体时不含 data 键")
+@allure.title("测试 _build_request_info 无请求体时不含 data/params/json 键")
 def test_build_request_info_no_body():
     info = _build_request_info("GET", "https://example.com/api", {}, None, None, None)
     assert info == {
@@ -703,6 +683,8 @@ def test_build_request_info_no_body():
         "headers": {},
     }
     assert "data" not in info
+    assert "params" not in info
+    assert "json" not in info
 
 
 @allure.feature("同步客户端")
@@ -713,12 +695,3 @@ def test_build_request_info_data_str_fallback():
         "POST", "https://example.com/api", {}, None, None, "raw body data",
     )
     assert info["data"] == "raw body data"
-
-
-@allure.feature("同步客户端")
-@allure.story("请求信息记录")
-@allure.title("测试 _build_request_info params/json 为 None 时不包含在结果中")
-def test_build_request_info_params_json_none():
-    info = _build_request_info("GET", "https://example.com", {}, None, None, None)
-    assert "params" not in info
-    assert "json" not in info

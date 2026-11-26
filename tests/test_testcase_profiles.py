@@ -56,42 +56,43 @@ def {filename[:-3]}(params=params):
 @allure.story("URL匹配")
 @allure.title("测试精确 URL / 模板 / 通配匹配")
 @pytest.mark.parametrize("profile_url,api_url,expected", [
-    ("/mgmt/order/orderList", "/mgmt/order/orderList", True),   # 精确匹配
+    ("/mgmt/order/demoList", "/mgmt/order/demoList", True),   # 精确匹配
     ("/mgmt/order/{orderNo}", "/mgmt/order/1001", True),        # profile 模板 → 具体 URL
     ("/mgmt/order/1001", "/mgmt/order/{orderNo}", True),        # 具体 profile → 模板 URL（反向）
-    ("/mgmt/order/*", "/mgmt/order/orderList", True),           # 通配符
-    ("/mall/user/list", "/mgmt/order/orderList", False),        # 不匹配
+    ("/mgmt/order/*", "/mgmt/order/demoList", True),           # 通配符
+    ("/mall/user/list", "/mgmt/order/demoList", False),        # 不匹配
 ])
 def test_profile_matches(profile_url, api_url, expected):
     gen = TestCaseGenerator(api_dir="apis")
     assert gen._profile_matches(profile_url, api_url) == expected
 
 
-# ==================== 模式决策优先级测试 ====================
+# ==================== 模式决策测试 ====================
 
 
+@pytest.mark.parametrize("filename,description,url,profiles,keywords,exclude,expected", [
+    pytest.param("order_list.py", "订单查询", "/mgmt/order/demoList", [{"url": "/mgmt/order/demoList", "mode": "list_query"}], ["列表"], None, "parametrized", id="显式list_query覆盖描述无列表关键字"),
+    pytest.param("order_list.py", "订单列表查询", "/mgmt/order/demoList", [{"url": "/mgmt/order/demoList", "mode": "complex_scenario"}], ["列表"], None, "scenario", id="显式complex_scenario覆盖描述含列表关键字"),
+    pytest.param("order_list.py", "订单列表查询", "/mgmt/order/demoList", [], ["列表"], None, "parametrized", id="未配置时回落全局列表关键字"),
+    pytest.param("order_detail.py", "订单列表详情", "/mgmt/order/detail", [{"url": "/mgmt/order/detail", "mode": "auto"}], ["列表"], ["详情"], "scenario", id="模式auto且命中排除关键字时回落场景"),
+    # 全局关键字为 ["列表"]，描述 "订单详情" 不含 "列表"；即使 API 携带参数也应回落 scenario，
+    # 避免非列表接口（如“获取协议”）被渲染成 list_query 形态（test_0 收集语义不符）
+    pytest.param("order_detail.py", "订单详情", "/mgmt/order/detail", [], ["列表"], None, "scenario", id="描述不含列表关键字时即使带参数也回落场景"),
+    # profile 级 keywords 覆盖全局 LIST_QUERY_KEYWORDS（全局无"查询"，profile 有）
+    pytest.param("order_list.py", "订单查询", "/mgmt/order/demoList", [{"url": "/mgmt/order/demoList", "mode": "auto", "keywords": ["查询"]}], ["列表"], None, "parametrized", id="profile级keywords覆盖全局默认"),
+    # profile 级 exclude_keywords 覆盖全局 LIST_QUERY_EXCLUDE_KEYWORDS
+    pytest.param("order_detail.py", "订单列表详情", "/mgmt/order/detail", [{"url": "/mgmt/order/detail", "mode": "auto", "keywords": ["列表"], "exclude_keywords": ["详情"]}], ["列表"], [], "scenario", id="profile级exclude_keywords覆盖全局默认"),
+    pytest.param("order_list.py", "订单查询", "/mgmt/order/demoList", [{"url": "/mgmt/order/*", "mode": "list_query"}], [], None, "parametrized", id="profile通配符URL命中"),
+])
 @allure.feature("测试模式配置化")
-@allure.story("模式决策优先级")
-@allure.title("测试显式 list_query 覆盖描述无列表关键字")
-def test_profile_explicit_list_query(tmp_path):
+@allure.story("模式决策")
+@allure.title("测试模式决策各形态（显式覆盖/关键字回落/profile级覆盖/通配符）")
+def test_resolve_testcase_mode_forms(tmp_path, filename, description, url, profiles, keywords, exclude, expected):
     gen = TestCaseGenerator(api_dir=str(tmp_path / "apis"))
-    api_file = _write_api(tmp_path, "order_list.py", "订单查询", "/mgmt/order/orderList")
-    restore = _set_profiles([{"url": "/mgmt/order/orderList", "mode": "list_query"}], keywords=["列表"])
+    api_file = _write_api(tmp_path, filename, description, url)
+    restore = _set_profiles(profiles, keywords=keywords, exclude=exclude)
     try:
-        assert gen._resolve_testcase_mode(api_file) == "parametrized"
-    finally:
-        restore()
-
-
-@allure.feature("测试模式配置化")
-@allure.story("模式决策优先级")
-@allure.title("测试显式 complex_scenario 覆盖描述含列表关键字")
-def test_profile_explicit_scenario(tmp_path):
-    gen = TestCaseGenerator(api_dir=str(tmp_path / "apis"))
-    api_file = _write_api(tmp_path, "order_list.py", "订单列表查询", "/mgmt/order/orderList")
-    restore = _set_profiles([{"url": "/mgmt/order/orderList", "mode": "complex_scenario"}], keywords=["列表"])
-    try:
-        assert gen._resolve_testcase_mode(api_file) == "scenario"
+        assert gen._resolve_testcase_mode(api_file) == expected
     finally:
         restore()
 
@@ -108,104 +109,5 @@ def test_find_profile_empty_url(api_url):
     restore = _set_profiles([{"url": "/mgmt/order/*", "mode": "list_query"}])
     try:
         assert gen._find_profile(api_url) is None
-    finally:
-        restore()
-
-
-# ==================== 关键字回落测试 ====================
-
-
-@allure.feature("测试模式配置化")
-@allure.story("关键字回落")
-@allure.title("测试未配置时回落全局列表关键字")
-def test_profile_fallback_keywords(tmp_path):
-    gen = TestCaseGenerator(api_dir=str(tmp_path / "apis"))
-    api_file = _write_api(tmp_path, "order_list.py", "订单列表查询", "/mgmt/order/orderList")
-    restore = _set_profiles([], keywords=["列表"])
-    try:
-        assert gen._resolve_testcase_mode(api_file) == "parametrized"
-    finally:
-        restore()
-
-
-@allure.feature("测试模式配置化")
-@allure.story("关键字回落")
-@allure.title("测试模式 auto 且命中排除关键字时回落场景")
-def test_profile_auto_with_exclude(tmp_path):
-    gen = TestCaseGenerator(api_dir=str(tmp_path / "apis"))
-    api_file = _write_api(tmp_path, "order_detail.py", "订单列表详情", "/mgmt/order/detail")
-    restore = _set_profiles(
-        [{"url": "/mgmt/order/detail", "mode": "auto"}],
-        keywords=["列表"],
-        exclude=["详情"],
-    )
-    try:
-        assert gen._resolve_testcase_mode(api_file) == "scenario"
-    finally:
-        restore()
-
-
-@allure.feature("测试模式配置化")
-@allure.story("关键字回落")
-@allure.title("测试描述不含列表关键字时即使带参数也回落场景模式")
-def test_no_keyword_match_with_params_falls_back_to_scenario(tmp_path):
-    gen = TestCaseGenerator(api_dir=str(tmp_path / "apis"))
-    api_file = _write_api(tmp_path, "order_detail.py", "订单详情", "/mgmt/order/detail")
-    # 全局关键字为 ["列表"]，描述 "订单详情" 不含 "列表"；即使 API 携带参数也应回落 scenario，
-    # 避免非列表接口（如“获取协议”）被渲染成 list_query 形态（test_0 收集语义不符）
-    restore = _set_profiles([], keywords=["列表"])
-    try:
-        assert gen._resolve_testcase_mode(api_file) == "scenario"
-    finally:
-        restore()
-
-
-@allure.feature("测试模式配置化")
-@allure.story("profile级关键字覆盖")
-@allure.title("测试profile级keywords覆盖全局默认")
-def test_profile_level_keywords_override(tmp_path):
-    gen = TestCaseGenerator(api_dir=str(tmp_path / "apis"))
-    api_file = _write_api(tmp_path, "order_list.py", "订单查询", "/mgmt/order/orderList")
-    # profile 级 keywords 覆盖全局 LIST_QUERY_KEYWORDS（全局无"查询"，profile 有）
-    restore = _set_profiles(
-        [{"url": "/mgmt/order/orderList", "mode": "auto", "keywords": ["查询"]}],
-        keywords=["列表"],
-    )
-    try:
-        assert gen._resolve_testcase_mode(api_file) == "parametrized"
-    finally:
-        restore()
-
-
-@allure.feature("测试模式配置化")
-@allure.story("profile级关键字覆盖")
-@allure.title("测试profile级exclude_keywords覆盖全局默认")
-def test_profile_level_exclude_override(tmp_path):
-    gen = TestCaseGenerator(api_dir=str(tmp_path / "apis"))
-    api_file = _write_api(tmp_path, "order_detail.py", "订单列表详情", "/mgmt/order/detail")
-    # profile 级 exclude_keywords 覆盖全局 LIST_QUERY_EXCLUDE_KEYWORDS
-    restore = _set_profiles(
-        [{"url": "/mgmt/order/detail", "mode": "auto", "keywords": ["列表"], "exclude_keywords": ["详情"]}],
-        keywords=["列表"],
-        exclude=[],
-    )
-    try:
-        assert gen._resolve_testcase_mode(api_file) == "scenario"
-    finally:
-        restore()
-
-
-# ==================== 通配符匹配测试 ====================
-
-
-@allure.feature("测试模式配置化")
-@allure.story("模式决策")
-@allure.title("测试 profile 通配符 URL 命中")
-def test_profile_wildcard_url(tmp_path):
-    gen = TestCaseGenerator(api_dir=str(tmp_path / "apis"))
-    api_file = _write_api(tmp_path, "order_list.py", "订单查询", "/mgmt/order/orderList")
-    restore = _set_profiles([{"url": "/mgmt/order/*", "mode": "list_query"}], keywords=[])
-    try:
-        assert gen._resolve_testcase_mode(api_file) == "parametrized"
     finally:
         restore()

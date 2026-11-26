@@ -3,6 +3,7 @@
 import asyncio
 
 import allure
+import pytest
 
 from har2pytest.swagger_handler import SwaggerHandler
 
@@ -58,6 +59,31 @@ def test_find_api_info_header_param_excluded():
 
 @allure.feature("Swagger处理器")
 @allure.story("从Swagger查找API信息")
+@allure.title("测试formData文件参数进入参数说明与默认值")
+def test_find_api_info_form_data_param_included():
+    handler = SwaggerHandler()
+    swagger_data = {
+        "paths": {
+            "/api/demo/upload": {
+                "post": {
+                    "summary": "上传附件",
+                    "consumes": ["multipart/form-data"],
+                    "parameters": [
+                        {"name": "Authorization", "in": "header", "type": "string", "description": "令牌"},
+                        {"name": "file", "in": "formData", "type": "file", "description": "附件文件"},
+                    ],
+                }
+            }
+        }
+    }
+    result = handler.find_api_info_in_swagger(swagger_data, "/api/demo/upload", "POST")
+    # formData 参数的描述被收进 parameters，header 参数仍被忽略
+    assert result.parameters == {"file": "附件文件"}
+    assert result.param_defaults == {"file": "(binary)"}
+
+
+@allure.feature("Swagger处理器")
+@allure.story("从Swagger查找API信息")
 @allure.title("测试带BasePath查找API信息")
 def test_find_api_info_with_basepath():
     handler = SwaggerHandler()
@@ -100,19 +126,27 @@ def test_model_reference_handling():
 # ==================== 获取默认值测试 ====================
 
 
+@pytest.mark.parametrize("type_name,param_name,expected", [
+    pytest.param("string", None, "", id="string默认空串"),
+    pytest.param("integer", None, None, id="integer默认None"),
+    pytest.param("boolean", None, None, id="boolean默认None"),
+    pytest.param("array", None, [], id="array默认空列表"),
+    pytest.param("object", None, {}, id="object默认空字典"),
+    # 分页参数特殊默认值
+    pytest.param("integer", "pageNum", 1, id="分页pageNum默认1"),
+    pytest.param("integer", "pageSize", 10, id="分页pageSize默认10"),
+    pytest.param("unknown", None, "", id="未知类型默认空串"),
+    pytest.param("integer", "someField", None, id="非分页参数名integer返回None"),
+])
 @allure.feature("Swagger处理器")
 @allure.story("获取默认值")
 @allure.title("测试获取各类型默认值")
-def test_get_default_value():
+def test_get_default_value_forms(type_name, param_name, expected):
     handler = SwaggerHandler()
-    assert handler._get_default_value("string") == ""
-    assert handler._get_default_value("integer") is None
-    assert handler._get_default_value("boolean") is None
-    assert handler._get_default_value("array") == []
-    assert handler._get_default_value("object") == {}
-    # 分页参数特殊默认值
-    assert handler._get_default_value("integer", "pageNum") == 1
-    assert handler._get_default_value("integer", "pageSize") == 10
+    if param_name is None:
+        assert handler._get_default_value(type_name) == expected
+    else:
+        assert handler._get_default_value(type_name, param_name) == expected
 
 
 @allure.feature("Swagger处理器")
@@ -195,6 +229,28 @@ def test_extract_params_from_swagger_empty():
     query_params, post_data, has_query_param, has_body_param, path_params, param_descriptions = params
     assert query_params == {}
     assert post_data == {}
+
+
+@allure.feature("Swagger处理器")
+@allure.story("从Swagger提取参数")
+@allure.title("测试提取formData表单与文件参数")
+def test_extract_params_from_swagger_form_data():
+    handler = SwaggerHandler()
+    parameters = [
+        {"name": "file", "in": "formData", "type": "file", "description": "附件文件"},
+        {"name": "remark", "in": "formData", "type": "string", "description": "备注"},
+        {"name": "count", "in": "formData", "type": "integer", "description": "数量"},
+    ]
+    query_params, post_data, _, has_body_param, path_params, descriptions = handler._extract_params_from_swagger(
+        parameters, {}
+    )
+    # 表单参数归入请求体；file 类型填 (binary) 占位，与 HAR 路径
+    # _find_file_upload_key 的约定一致，其余类型走常规默认值
+    assert post_data == {"file": "(binary)", "remark": "", "count": None}
+    assert has_body_param is True
+    assert query_params == {}
+    assert path_params == {}
+    assert descriptions == {"file": "附件文件", "remark": "备注", "count": "数量"}
 
 
 @allure.feature("Swagger处理器")
@@ -300,65 +356,91 @@ def test_find_api_info_in_swagger_bare_type_body():
     assert result.param_defaults["remarks"] == ""
 
 
+@allure.feature("Swagger处理器")
+@allure.story("从Swagger查找API信息")
+@allure.title("测试顶层数组Body提取元素备注与类型感知默认值")
+def test_find_api_info_in_swagger_top_level_array_body():
+    handler = SwaggerHandler()
+    swagger_data = {
+        "definitions": {
+            "DemoItem": {
+                "type": "object",
+                "properties": {
+                    "demoCode": {"type": "string", "description": "演示编码"},
+                    "demoCount": {"type": "integer", "description": "演示数量"},
+                },
+            }
+        },
+        "paths": {
+            "/mgmt/demo/demoBatchAction": {
+                "post": {
+                    "summary": "演示批量操作",
+                    "parameters": [
+                        {
+                            "name": "itemList",
+                            "in": "body",
+                            "description": "itemList",
+                            "required": True,
+                            "schema": {"type": "array", "items": {"$ref": "#/definitions/DemoItem"}},
+                        }
+                    ],
+                }
+            }
+        },
+    }
+    result = handler.find_api_info_in_swagger(swagger_data, "/mgmt/demo/demoBatchAction", "POST")
+    # 元素字段备注展开为顶层键；参数名自身不再产生噪声备注
+    assert result.parameters == {"demoCode": "演示编码", "demoCount": "演示数量"}
+    # 类型感知默认值：字符串 ""、整型 None
+    assert result.param_defaults == {"demoCode": "", "demoCount": None}
+
+
+@allure.feature("Swagger处理器")
+@allure.story("从Swagger查找API信息")
+@allure.title("测试标量数组Body保留参数名兜底备注")
+def test_find_api_info_in_swagger_scalar_array_body_fallback():
+    handler = SwaggerHandler()
+    swagger_data = {
+        "paths": {
+            "/mgmt/demo/demoCodeList": {
+                "post": {
+                    "summary": "演示编码列表",
+                    "parameters": [
+                        {
+                            "name": "codeList",
+                            "in": "body",
+                            "description": "演示编码列表",
+                            "schema": {"type": "array", "items": {"type": "string"}},
+                        }
+                    ],
+                }
+            }
+        }
+    }
+    result = handler.find_api_info_in_swagger(swagger_data, "/mgmt/demo/demoCodeList", "POST")
+    # 无模型可展开的标量数组：兜底备注保留
+    assert result.parameters == {"codeList": "演示编码列表"}
+    assert "codeList" not in result.param_defaults
+
+
 # ==================== 提取Body参数测试 ====================
 
 
-@allure.feature("Swagger处理器")
-@allure.story("从Swagger查找API信息")
-@allure.title("测试路径不存在时查找API信息")
-def test_find_api_info_path_not_found():
-    handler = SwaggerHandler()
-    swagger_data = {"paths": {"/api/test": {"get": {}}}}
-    result = handler.find_api_info_in_swagger(swagger_data, "/api/notfound", "GET")
-    assert result.summary == ""
-
-
-@allure.feature("Swagger处理器")
-@allure.story("从Swagger查找API信息")
-@allure.title("测试方法未找到时返回空信息")
-def test_find_api_info_method_not_found():
-    handler = SwaggerHandler()
-    swagger_data = {"paths": {"/api/test": {"get": {"summary": "GET测试"}, "post": {"summary": "POST测试"}}}}
-    result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "PUT")
+@pytest.mark.parametrize("swagger_data,url,method", [
+    pytest.param({"paths": {"/api/test": {"get": {}}}}, "/api/notfound", "GET", id="路径不存在"),
     # 路径存在但方法缺失时：不抛错，返回空 SwaggerInfo（无 summary/description）
+    pytest.param({"paths": {"/api/test": {"get": {"summary": "GET测试"}, "post": {"summary": "POST测试"}}}}, "/api/test", "PUT", id="方法未找到"),
+    pytest.param({}, "/api/test", "GET", id="空Swagger数据"),
+    pytest.param({"paths": {}}, "/api/test", "GET", id="空路径"),
+])
+@allure.feature("Swagger处理器")
+@allure.story("从Swagger查找API信息")
+@allure.title("测试未命中时查找API信息返回空信息")
+def test_find_api_info_not_found_forms(swagger_data, url, method):
+    handler = SwaggerHandler()
+    result = handler.find_api_info_in_swagger(swagger_data, url, method)
     assert result.summary == ""
     assert result.description == ""
-
-
-@allure.feature("Swagger处理器")
-@allure.story("从Swagger查找API信息")
-@allure.title("测试空Swagger数据查找API信息")
-def test_find_api_info_empty_swagger_data():
-    handler = SwaggerHandler()
-    result = handler.find_api_info_in_swagger({}, "/api/test", "GET")
-    assert result.summary == ""
-
-
-@allure.feature("Swagger处理器")
-@allure.story("从Swagger查找API信息")
-@allure.title("测试空路径查找API信息")
-def test_find_api_info_empty_paths():
-    handler = SwaggerHandler()
-    swagger_data = {"paths": {}}
-    result = handler.find_api_info_in_swagger(swagger_data, "/api/test", "GET")
-    assert result.summary == ""
-
-
-@allure.feature("Swagger处理器")
-@allure.story("获取默认值")
-@allure.title("测试未知类型获取默认值")
-def test_get_default_value_unknown_type():
-    handler = SwaggerHandler()
-    result = handler._get_default_value("unknown")
-    assert result == ""
-
-
-@allure.feature("Swagger处理器")
-@allure.story("获取默认值")
-@allure.title("测试非分页参数名的integer类型返回None")
-def test_get_default_value_integer_non_pagination():
-    handler = SwaggerHandler()
-    assert handler._get_default_value("integer", "someField") is None
 
 
 # ==================== 初始化测试 ====================
@@ -645,123 +727,57 @@ def test_extract_param_value_nested_object():
     assert isinstance(value, dict)
 
 
+@pytest.mark.parametrize("schema,expected", [
+    pytest.param({"type": "object"}, {}, id="空对象参数值"),
+    pytest.param({"type": "array"}, [], id="空数组参数值"),
+])
 @allure.feature("Swagger处理器")
 @allure.story("提取参数值")
-@allure.title("测试提取空对象参数值")
-def test_extract_param_value_empty_object():
+@allure.title("测试提取空容器参数值")
+def test_extract_param_value_empty_container_forms(schema, expected):
     handler = SwaggerHandler()
-    param = {"name": "body", "in": "body", "schema": {"type": "object"}}
-    value = handler._extract_param_value(param["schema"], {})
-    assert value == {}
-
-
-@allure.feature("Swagger处理器")
-@allure.story("提取参数值")
-@allure.title("测试提取空数组参数值")
-def test_extract_param_value_empty_array():
-    handler = SwaggerHandler()
-    param = {"name": "items", "in": "body", "schema": {"type": "array"}}
-    value = handler._extract_param_value(param["schema"], {})
-    assert value == []
+    value = handler._extract_param_value(schema, {})
+    assert value == expected
 
 
 # ==================== 清洗Swagger URL测试 ====================
 
 
 class TestCleanSwaggerUrl:
+    @pytest.mark.parametrize("url,expected", [
+        pytest.param("https://example.com/doc.html", "https://example.com", id="移除doc_html后缀"),
+        pytest.param("https://example.com/index.html", "https://example.com", id="移除index_html后缀"),
+        pytest.param("https://example.com/swagger-ui.html", "https://example.com", id="移除swagger_ui_html后缀"),
+        pytest.param("https://example.com/doc.html#/user/getUserById", "https://example.com", id="移除URL_fragment"),
+        pytest.param("https://example.com/", "https://example.com", id="移除末尾斜杠"),
+        pytest.param("https://example.com/api", "https://example.com/api", id="干净的URL不变化"),
+        pytest.param("https://example.com/doc.html#/order/list", "https://example.com", id="带fragment和doc_html的URL"),
+    ])
     @allure.feature("Swagger处理器")
     @allure.story("清洗Swagger URL")
-    @allure.title("测试移除doc.html后缀")
-    def test_remove_doc_html(self):
-        result = SwaggerHandler._clean_swagger_url("https://example.com/doc.html")
-        assert result == "https://example.com"
-
-    @allure.feature("Swagger处理器")
-    @allure.story("清洗Swagger URL")
-    @allure.title("测试移除index.html后缀")
-    def test_remove_index_html(self):
-        result = SwaggerHandler._clean_swagger_url("https://example.com/index.html")
-        assert result == "https://example.com"
-
-    @allure.feature("Swagger处理器")
-    @allure.story("清洗Swagger URL")
-    @allure.title("测试移除swagger-ui.html后缀")
-    def test_remove_swagger_ui_html(self):
-        result = SwaggerHandler._clean_swagger_url("https://example.com/swagger-ui.html")
-        assert result == "https://example.com"
-
-    @allure.feature("Swagger处理器")
-    @allure.story("清洗Swagger URL")
-    @allure.title("测试移除URL fragment")
-    def test_remove_fragment(self):
-        result = SwaggerHandler._clean_swagger_url("https://example.com/doc.html#/user/getUserById")
-        assert result == "https://example.com"
-
-    @allure.feature("Swagger处理器")
-    @allure.story("清洗Swagger URL")
-    @allure.title("测试移除末尾斜杠")
-    def test_remove_trailing_slash(self):
-        result = SwaggerHandler._clean_swagger_url("https://example.com/")
-        assert result == "https://example.com"
-
-    @allure.feature("Swagger处理器")
-    @allure.story("清洗Swagger URL")
-    @allure.title("测试干净的URL不变化")
-    def test_clean_url_unchanged(self):
-        result = SwaggerHandler._clean_swagger_url("https://example.com/api")
-        assert result == "https://example.com/api"
-
-    @allure.feature("Swagger处理器")
-    @allure.story("清洗Swagger URL")
-    @allure.title("测试带fragment和doc.html的URL")
-    def test_combined_clean(self):
-        result = SwaggerHandler._clean_swagger_url("https://example.com/doc.html#/order/list")
-        assert result == "https://example.com"
+    @allure.title("测试清洗Swagger URL各形态")
+    def test_clean_swagger_url_forms(self, url, expected):
+        assert SwaggerHandler._clean_swagger_url(url) == expected
 
 
 # ==================== 提取参数值边缘测试 ====================
 
 
 class TestExtractParamValueEdge:
+    @pytest.mark.parametrize("schema,expected", [
+        pytest.param({}, "", id="无type的默认返回值"),
+        pytest.param({"type": "number"}, None, id="number类型"),
+        pytest.param({"type": "float"}, None, id="float类型"),
+        pytest.param({"type": "int"}, None, id="int类型"),
+        pytest.param({"type": "boolean"}, None, id="boolean类型"),
+    ])
     @allure.feature("Swagger处理器")
     @allure.story("提取参数值-边缘")
-    @allure.title("测试无type的默认返回值")
-    def test_no_type_default(self):
+    @allure.title("测试标量类型参数值各形态")
+    def test_scalar_type_forms(self, schema, expected):
         handler = SwaggerHandler()
-        value = handler._extract_param_value({}, {})
-        assert value == ""
-
-    @allure.feature("Swagger处理器")
-    @allure.story("提取参数值-边缘")
-    @allure.title("测试number类型")
-    def test_number_type(self):
-        handler = SwaggerHandler()
-        value = handler._extract_param_value({"type": "number"}, {})
-        assert value is None
-
-    @allure.feature("Swagger处理器")
-    @allure.story("提取参数值-边缘")
-    @allure.title("测试float类型")
-    def test_float_type(self):
-        handler = SwaggerHandler()
-        value = handler._extract_param_value({"type": "float"}, {})
-        assert value is None
-
-    @allure.feature("Swagger处理器")
-    @allure.story("提取参数值-边缘")
-    @allure.title("测试int类型")
-    def test_int_type(self):
-        handler = SwaggerHandler()
-        value = handler._extract_param_value({"type": "int"}, {})
-        assert value is None
-
-    @allure.feature("Swagger处理器")
-    @allure.story("提取参数值-边缘")
-    @allure.title("测试boolean类型")
-    def test_boolean_type(self):
-        handler = SwaggerHandler()
-        value = handler._extract_param_value({"type": "boolean"}, {})
-        assert value is None
+        value = handler._extract_param_value(schema, {})
+        assert value == expected
 
     @allure.feature("Swagger处理器")
     @allure.story("提取参数值-边缘")
@@ -777,24 +793,16 @@ class TestExtractParamValueEdge:
         assert isinstance(value, dict)
         assert "city" in value
 
+    @pytest.mark.parametrize("schema,swagger_data", [
+        pytest.param({"type": "array", "items": {"$ref": "#/definitions/Tag"}}, {"definitions": {"Tag": {"type": "object", "properties": {"name": {"type": "string"}}}}}, id="array类型带ref_items"),
+        pytest.param({"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}}}}, {}, id="array类型带properties_items"),
+    ])
     @allure.feature("Swagger处理器")
     @allure.story("提取参数值-边缘")
-    @allure.title("测试array类型带$ref items")
-    def test_array_with_ref_items(self):
+    @allure.title("测试array类型带items时提取单元素列表")
+    def test_array_with_items_forms(self, schema, swagger_data):
         handler = SwaggerHandler()
-        swagger_data = {"definitions": {"Tag": {"type": "object", "properties": {"name": {"type": "string"}}}}}
-        value = handler._extract_param_value({"type": "array", "items": {"$ref": "#/definitions/Tag"}}, swagger_data)
-        assert isinstance(value, list)
-        assert len(value) == 1
-
-    @allure.feature("Swagger处理器")
-    @allure.story("提取参数值-边缘")
-    @allure.title("测试array类型带properties items")
-    def test_array_with_properties_items(self):
-        handler = SwaggerHandler()
-        value = handler._extract_param_value(
-            {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}}}}, {}
-        )
+        value = handler._extract_param_value(schema, swagger_data)
         assert isinstance(value, list)
         assert len(value) == 1
 
@@ -880,6 +888,76 @@ class TestExtractNestedDescriptions:
         handler._extract_nested_descriptions(schema, {}, descriptions)
         assert "items.id" in descriptions
         assert descriptions["items.id"] == "项目ID"
+
+    @allure.feature("Swagger处理器")
+    @allure.story("提取嵌套描述")
+    @allure.title("测试顶层数组Body引用模型的元素描述提取")
+    def test_extract_nested_desc_top_level_array_with_ref(self):
+        handler = SwaggerHandler()
+        swagger_data = {
+            "definitions": {
+                "DemoItem": {
+                    "type": "object",
+                    "properties": {
+                        "demoCode": {"type": "string", "description": "演示编码"},
+                        "demoCount": {"type": "integer", "description": "演示数量"},
+                    },
+                }
+            }
+        }
+        descriptions = {}
+        handler._extract_nested_descriptions(
+            {"type": "array", "items": {"$ref": "#/definitions/DemoItem"}}, swagger_data, descriptions
+        )
+        assert descriptions == {"demoCode": "演示编码", "demoCount": "演示数量"}
+
+    @allure.feature("Swagger处理器")
+    @allure.story("提取嵌套描述")
+    @allure.title("测试顶层数组Body内联模型的元素描述提取")
+    def test_extract_nested_desc_top_level_array_inline_properties(self):
+        handler = SwaggerHandler()
+        schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"demoName": {"type": "string", "description": "演示名称"}},
+            },
+        }
+        descriptions = {}
+        handler._extract_nested_descriptions(schema, {}, descriptions)
+        assert descriptions == {"demoName": "演示名称"}
+
+    @allure.feature("Swagger处理器")
+    @allure.story("提取嵌套描述")
+    @allure.title("测试顶层标量数组无描述可提取")
+    def test_extract_nested_desc_top_level_scalar_array(self):
+        handler = SwaggerHandler()
+        descriptions = {}
+        handler._extract_nested_descriptions({"type": "array", "items": {"type": "string"}}, {}, descriptions)
+        assert descriptions == {}
+
+    @allure.feature("Swagger处理器")
+    @allure.story("提取嵌套描述")
+    @allure.title("测试顶层数组Body自引用模型防环")
+    def test_extract_nested_desc_top_level_array_self_ref(self):
+        handler = SwaggerHandler()
+        swagger_data = {
+            "definitions": {
+                "DemoNode": {
+                    "type": "object",
+                    "properties": {
+                        "demoName": {"type": "string", "description": "演示名称"},
+                        "children": {"type": "array", "items": {"$ref": "#/definitions/DemoNode"}},
+                    },
+                }
+            }
+        }
+        descriptions = {}
+        handler._extract_nested_descriptions(
+            {"type": "array", "items": {"$ref": "#/definitions/DemoNode"}}, swagger_data, descriptions
+        )
+        # 自引用环在 children 分支停止，首层字段正常提取
+        assert descriptions == {"demoName": "演示名称"}
 
     @allure.feature("Swagger处理器")
     @allure.story("提取嵌套描述")

@@ -5,16 +5,20 @@ import os
 import time
 from typing import Any
 
-from .api_metadata import write_api_metadata
+from .api_metadata import FIELD_MAP_FIELD, read_api_metadata, write_api_metadata
 from .codegen import render_lines, validate_python
 from .config import APIConfig
+from .db_probe import close_cached_connections, probe_db_params
 from .logger import logger
 from .models import ParsedRequestInfo, SwaggerInfo
 from .swagger_handler import SwaggerHandler
 from .url_matcher import URLMatcher
 from .utils import (
+    build_epoch_time_pairs,
     build_param_values,
+    build_single_time_params,
     build_time_pairs,
+    build_value_pairs,
     format_headers_for_python,
     format_parameter_value,
     format_params_for_python,
@@ -29,6 +33,14 @@ _BODY_METHODS = ("POST", "PUT", "PATCH", "DELETE")
 """按请求体携带方式处理的方法（GET 之外的常见写操作，client 均支持）。"""
 
 
+def _is_file_placeholder(value: Any) -> bool:
+    """值是否为文件上传占位形态（"(binary)" 或 "@路径"）。
+
+    与 ``_find_file_upload_key`` 共用同一判定，避免两处漂移。
+    """
+    return isinstance(value, str) and (value == "(binary)" or value.startswith("@"))
+
+
 def _find_file_upload_key(post_data: Any) -> str | None:
     """从 multipart post_data 中识别文件参数字典的键名（值为 "(binary)" 或以 "@" 开头）。
 
@@ -37,7 +49,7 @@ def _find_file_upload_key(post_data: Any) -> str | None:
     if not isinstance(post_data, dict):
         return None
     for key, value in post_data.items():
-        if isinstance(value, str) and (value == "(binary)" or value.startswith("@")):
+        if _is_file_placeholder(value):
             return key
     return None
 
@@ -136,6 +148,10 @@ class APIGenerator:
                     is_file_upload = _find_file_upload_key(post_data) is not None
             elif not content_type:
                 is_json_content = bool(post_data)
+        elif method == "GET" and isinstance(post_data, dict) and post_data:
+            # Swagger 可能给 GET 声明 in:body/formData 参数（如 ID 包装 DTO），
+            # 实测服务端按 JSON body 接收（query 通道返回 400），按 JSON 处理
+            is_json_content = True
 
         # 仅 POST 且无有效请求体时按 application/x-www-form-urlencoded 处理：
         # - content-length=0 的空 body POST（HAR 无参数），生成空 data 占位便于手动补充表单参数
@@ -204,9 +220,7 @@ class APIGenerator:
 
         # 预加载 Swagger 文档（必须在 _parse_request_info 之前，以便 URL 匹配能使用 Swagger 路径模板）
         if swagger_info is None and swagger_doc is None and service_package in APIConfig.SWAGGER_DOC_URLS():
-            swagger_doc = await self.swagger_handler.get_swagger_doc(
-                APIConfig.SWAGGER_DOC_URLS()[service_package]
-            )
+            swagger_doc = await self.swagger_handler.get_swagger_doc(APIConfig.SWAGGER_DOC_URLS()[service_package])
         self.url_matcher.swagger_data = swagger_doc
 
         # 解析请求信息（两条路径共用）- 此时 swagger_data 已设置，可正确匹配路径参数
@@ -224,19 +238,23 @@ class APIGenerator:
         # 检查文件是否存在（function_name_suffix 会改变目标文件名，需据此判断）
         if function_name_suffix:
             function_name = f"{function_name}_{function_name_suffix}"
-        if self.check_api_exists(url_pattern, service_package, function_name):
-            if not force_overwrite:
-                logger.info(f"接口已存在，跳过生成: {method} {url_pattern}")
-                return None
-            else:
-                logger.info(f"接口已存在，强制覆盖: {method} {url_pattern}")
-
-        # 生成文件路径
         filepath = os.path.join(
             self.output_dir,
             "" if service_package == APIConfig.DEFAULT_API_DIR() else service_package,
             f"{function_name}.py",
         )
+        if self.check_api_exists(url_pattern, service_package, function_name):
+            if not force_overwrite:
+                logger.info(f"接口已存在，跳过生成: {method} {url_pattern}")
+                return None
+            # 已存在元数据的 field_map 非空时视为人工校准过的接口语义，
+            # --overwrite 也不覆盖，避免重新生成把映射冲掉（生成器预置的
+            # 空对象不构成保护，正常覆盖）
+            existing_meta = read_api_metadata(filepath)
+            if isinstance(existing_meta, dict) and existing_meta.get(FIELD_MAP_FIELD):
+                logger.info(f"接口元数据 field_map 非空，跳过强制覆盖: {method} {url_pattern}")
+                return None
+            logger.info(f"接口已存在，强制覆盖: {method} {url_pattern}")
 
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
@@ -256,6 +274,9 @@ class APIGenerator:
         param_remarks_dict = dict(meta_swagger.parameters or {})
         param_values = build_param_values(param_remarks_dict)
         time_pairs = build_time_pairs(param_remarks_dict)
+        # 单时间参数（候选关键字 + 备注显式格式 token 双条件，排除已配对成员）；
+        # HAR 无 Swagger 备注时 param_remarks_dict 为空，天然不产出
+        single_time_params = build_single_time_params(param_remarks_dict, time_pairs)
         # HAR 场景：params 纯粹来自 Swagger 定义（类型感知默认值），
         # 实际请求值写入 har_params（与 Swagger 的 params 完全分离）
         is_har = constant_params is not None
@@ -279,19 +300,67 @@ class APIGenerator:
                     if "," not in pn and pn not in har_params:
                         har_params[pn] = ""
             # HAR 场景从参数基线自行配对时间对（无 Swagger 备注可提取格式，
-            # 默认 %Y-%m-%d %H:%M:%S），写入 har_time_pairs 供测试生成动态计算时间参数
+            # 默认 %Y-%m-%d），写入 har_time_pairs 供测试生成动态计算时间参数
             har_time_pairs = build_time_pairs({name: "" for name in har_params}) or None
         # 以 param_remarks 为基准（保证所有 Swagger 定义的参数都在），
         # 用类型感知默认值覆盖（缺失的参数字符串兜底）
         swagger_params: dict[str, Any] = {
-            name: meta_swagger.param_defaults.get(name, "")
-            for name in param_remarks_dict
+            name: meta_swagger.param_defaults.get(name, "") for name in param_remarks_dict
         }
         if not is_har:
             # 非 HAR 场景：params 包含请求实际值（无 har_params 字段）
             request_params = current_values.get("params") or {}
             if isinstance(request_params, dict):
                 swagger_params.update(request_params)
+        # 数值范围对（非时间的 Start/End 配对）：按参数声明类型识别，
+        # 时间对已配对成员排除；HAR 字符串基线无法判类型，不另派生
+        # har_value_pairs，无 Swagger 声明的接口不产出数值对
+        value_pairs = build_value_pairs(swagger_params, time_pairs) or None
+        # epoch 时间对迁移：数值对中 start 备注含时间语义的配对（integer
+        # 时间戳语义，如 createBegin/createEnd）迁入 time_pairs，走 datetime
+        # 动态取值链路而非数值对 min/max 聚合链路（基线 None 不生成时间参数值）
+        if value_pairs:
+            epoch_pairs = build_epoch_time_pairs(value_pairs, param_remarks_dict)
+            if epoch_pairs:
+                time_pairs = {**time_pairs, **epoch_pairs}
+                remaining = {k: v for k, v in value_pairs.items() if k not in epoch_pairs}
+                value_pairs = remaining or None
+        # 数据库参数探测（api 生成阶段按 DB_CONFIG.api_table_map 查库表，
+        # 参数名匹配表字段后取一条示例记录值写入 db_params，供
+        # complex_scenario 等消费端作为参数示例值；探测失败不阻断生成）。
+        # 同步 DB 查询放线程池执行，避免阻塞 asyncio 事件循环（batch 并发生成时）。
+        db_params = None
+        data_value = current_values.get("data")
+        # 探测参数基准：Swagger 声明 + 请求体/表单字段（上传接口的普通
+        # 表单字段如 bizType 同样可查库取示例值）
+        declared_values = dict(swagger_params)
+        for payload in (current_values.get("files"), data_value):
+            if isinstance(payload, dict):
+                declared_values.update(payload)
+            elif isinstance(payload, list):
+                # 顶层数组 body：元素字段并入探测基准（与备注/默认值侧对称）
+                for element in payload:
+                    if isinstance(element, dict):
+                        declared_values.update(element)
+        # 文件占位值不参与库探测：需要的是本地文件而非库中示例值
+        db_probe_names = [name for name, value in declared_values.items() if not _is_file_placeholder(value)]
+        if db_probe_names:
+            # 声明形态（declared_values）用于数组参数包装（ids: [] → db_params 值
+            # 包成单元素列表），描述用于识别新增/编辑语义（生成不冲突值）
+            # 与接口级业务域推断；参数备注用于跨域参数的参数级域推断；
+            # 有枚举的参数（如 platform 的 [1,2,3]）直接取首个枚举值，不查库
+            enum_values = {
+                name: values[0] for name, values in param_values.items() if isinstance(values, list) and values
+            }
+            db_params = await asyncio.to_thread(
+                probe_db_params,
+                parsed_info.url or url,
+                db_probe_names,
+                description=description,
+                declared_values=declared_values,
+                enum_values=enum_values,
+                param_remarks=param_remarks_dict,
+            )
         meta_file = write_api_metadata(
             filepath,
             function_name=function_name,
@@ -302,6 +371,8 @@ class APIGenerator:
             param_remarks=param_remarks_dict,
             param_values=param_values,
             time_pairs=time_pairs,
+            single_time_params=single_time_params,
+            value_pairs=value_pairs,
             params=swagger_params,
             data=current_values.get("data"),
             files=current_values.get("files"),
@@ -310,6 +381,7 @@ class APIGenerator:
             har_param_values=har_param_values,
             har_params=har_params,
             har_time_pairs=har_time_pairs,
+            db_params=db_params,
         )
         if meta_file:
             logger.debug(f"已写入 API 元数据: {meta_file}")
@@ -387,6 +459,7 @@ class APIGenerator:
 
         返回 ``(param_name, param_data)``：
         - GET：带 query/路径参数时合并进 ``params``（路径键供 URL f-string 引用）；
+          Swagger 声明的 body/formData 参数走 ``data``（实测服务端按 JSON body 接收）；
         - POST：优先按 payload（urlencode/body/query）返回 ``data``（或上传 ``files``），
           路径参数由模块级 ``params``（路径默认值）单独承载，避免 body/query 被丢弃；
         - POST 无 payload 但有路径参数：仅 ``params``（URL f-string 引用）。
@@ -399,6 +472,16 @@ class APIGenerator:
         is_need_urlencode = parsed_info.is_need_urlencode
 
         if method == "GET":
+            if isinstance(post_data, dict) and post_data:
+                # Swagger 可能给 GET 声明 in:body/formData 参数（如 ID 包装 DTO）。
+                # 实测服务端按 JSON body 接收（query 通道返回 400），故走 data 通道；
+                # 路径参数由模块级 params 单独承载（URL f-string 引用）。
+                # 同时带 query 时并入 data（body 覆盖同名 query），与 POST 合并策略一致，避免丢参
+                if query_params:
+                    merged_data = dict(query_params)
+                    merged_data.update(post_data)
+                    return "data", merged_data
+                return "data", dict(post_data)
             if not path_params and not query_params:
                 return None, None
             # GET + 路径参数 + query：合并进 params（URL f-string 引用路径键）
@@ -461,11 +544,7 @@ class APIGenerator:
 
         # 路径参数 + POST body/query（模块级 params 由路径默认值提供，供 URL f-string 引用；
         # 不并入 data，避免路径键泄漏进请求体）
-        if (
-            parsed_info.path_params
-            and param_name
-            and param_name != "params"
-        ):
+        if parsed_info.path_params and param_name and param_name != "params":
             formatted_path = self._generate_params_string(dict(parsed_info.path_params), swagger_info)
             params_section.insert(0, f"params = {formatted_path}")
             params_section.insert(1, "")
@@ -566,7 +645,8 @@ class APIGenerator:
             method=method,
             has_params=bool(query_params),
             has_path_params=bool(path_params),
-            # data 变量只存在于 POST 带请求体/表单数据（params 仅用于 URL f-string）
+            # data 变量存在于带请求体/表单数据的请求（含 GET 声明 body/formData 的
+            # 非标准场景，params 仅用于 URL f-string）
             has_data=params_var == "data",
             is_urlencode=is_need_urlencode,
             is_json_content=is_json_content,
@@ -939,6 +1019,18 @@ class APIGenerator:
                     request_info.post_data = post_data
                     request_info.path_params = path_params
 
+                    # Swagger 2.0 的表单/文件上传参数（in: formData）靠 consumes 识别：
+                    # 将其写成 mimeType 形态下传，让 _parse_request_info 复用已有的
+                    # multipart 判定分支置 is_multipart / is_file_upload
+                    consumes = [str(item).lower() for item in method_data.get("consumes") or []]
+                    has_file_param = any(
+                        param.get("in") == "formData" and param.get("type") == "file"
+                        for param in parameters
+                        if isinstance(param, dict)
+                    )
+                    if has_file_param or "multipart/form-data" in consumes:
+                        request_info.content_type = "multipart/form-data"
+
                     # 提取 API 信息（包括描述、参数说明和类型感知默认值）。
                     # param_defaults 与 find_api_info_in_swagger 保持同一填充顺序
                     # （query → path → body），保证 params 字段类型感知默认值不退化
@@ -951,6 +1043,9 @@ class APIGenerator:
                     swagger_info.param_defaults.update(path_params)
                     if isinstance(post_data, dict):
                         swagger_info.param_defaults.update(post_data)
+                    elif isinstance(post_data, list) and post_data and isinstance(post_data[0], dict):
+                        # 顶层数组 body：与 find_api_info_in_swagger 同步，取首元素合并类型感知默认值
+                        swagger_info.param_defaults.update(post_data[0])
 
                     # 判断是否需要urlencode
                     if method.upper() in _BODY_METHODS and has_query_param and not post_data and not has_body_param:
@@ -958,7 +1053,9 @@ class APIGenerator:
 
                     # 生成 API 文件
                     filepath = await self.generate_api_file(
-                        request_info, force_overwrite, swagger_info,
+                        request_info,
+                        force_overwrite,
+                        swagger_info,
                         function_name_suffix=function_name_suffix,
                         service_package=service_package,
                     )
@@ -1031,5 +1128,8 @@ class APIGenerator:
 
         except Exception as e:
             logger.error(f"❌ 从Swagger文档生成 API 文件失败: {str(e)}")
+        finally:
+            # 批量结束：统一关闭 db_probe 线程局部复用的缓存连接
+            close_cached_connections()
 
         return generated_files

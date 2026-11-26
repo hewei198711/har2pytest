@@ -11,6 +11,18 @@
 | **complex_scenario** | `generate_scenario_testcase()` | HAR 文件 | 多步骤业务流程的链路测试 |
 | **batch** | `generate_batch_testcases()` | API 文件 / HAR 文件 | 批量生成回归测试，逐接口自动决策模式 |
 
+### 人工保护标记（keep）
+
+已人工校验的测试文件可在文件内任意一行添加注释标记（约定放首行，标记后可附加说明文字）：
+
+```python
+# har2pytest: keep 人工校验通过，重新生成时不覆盖此文件
+```
+
+三种模式均生效：带标记的文件即使 `--overwrite` 也跳过覆盖（batch 模式计入 skipped）；
+生成后的 `format_directory()` 批量 ruff 格式化也会排除带标记的文件，避免 --fix/format 静默改动已校验内容。
+标记检测由 `utils.is_manually_kept()` 单点实现，常量为 `utils.MANUAL_KEEP_MARKER`。
+
 ---
 
 ## 模式一：parametrized_list（列表查询参数化模式）
@@ -26,9 +38,9 @@
 flowchart TD
     A[generate_parametrized_list_testcases<br/>har_file_path, task_id, target_url?, overwrite?] --> B[extract_requests_from_har + match_api_files_for_har]
     B --> C[遍历每个 api_file]
-    C --> D{overwrite? 或文件不存在?}
-    D -->|否 且文件已存在| E[跳过该文件]
-    D -->|是 或文件不存在| F[generate_parametrized_test_content<br/>api_file, task_id]
+    C --> D{文件不存在, 或 overwrite 且无 keep 标记?}
+    D -->|否| E[跳过该文件]
+    D -->|是| F[generate_parametrized_test_content<br/>api_file, task_id]
     F --> G{parametrized 内容为空?}
     G -->|是| H[generate_scenario_test_content 回退]
     G -->|否| I[write_test_file 写入]
@@ -45,11 +57,11 @@ flowchart TD
  └─ 解析 HAR → 匹配出对应 API 文件列表（未找到则返回空）
  └─ 遍历每个 api_file:
       ├─ target_url 指定时仅处理 URL 相等的接口
-      ├─ overwrite=False 且测试文件已存在 → 跳过
+      ├─ 测试文件已存在且（overwrite=False 或带 keep 标记）→ 跳过
       ├─ 调用 generate_parametrized_test_content() 生成内容
       │    └─ 内容为空 → 回退 generate_scenario_test_content()（场景模式）
       └─ write_test_file() 写入 f"test_{function_name}.py"
- └─ 有产出时 format_directory() 批量 ruff 格式化
+ └─ 有产出时 format_directory() 批量 ruff 格式化（排除带 keep 标记的文件）
 ```
 
 #### Step 2: `generate_parametrized_test_content()`
@@ -143,6 +155,15 @@ flowchart TD
 
 同一参数只取首条记录的值；响应值优先：收集到的值覆盖类属性已有值（含 HAR 录制值）。
 
+响应列表为空时 `test_0` 直接失败（`assert extract_list_items(data.get("data"))`）：
+此时收集不到任何参数值，后续查询用例的搜索条件会保持默认空值（等于没传参），
+用例空转无意义；直接失败暴露问题而非静默跑通无效用例。
+
+收集完成后还有一道完整性检查：`list_query_data` 所有参数都必须收集到值
+（`assert not empty_keys`，empty_keys 为“值仍为 `""` 或 `None`”的参数列表），
+否则该参数的查询用例同样会空转。响应不回显的查询参数（如 body 模型字段
+`from`）会在此报错——该报错正说明该参数无意义，手工删除该参数即可。
+
 #### 数组类型参数（多选）
 
 api.json 中默认值为 list 的参数（如 `reviewReasons: []`）是数组类型。
@@ -164,6 +185,36 @@ for item in items:
                     f"字段 {k} 值 {v} 与搜索条件 reviewReasons={reviewReasons} 不一致"
                 )
 ```
+
+#### `field_map` 显式字段映射（api.json 手工补充）
+
+当请求参数名与响应记录字段名无任何子串关系（如参数 `like` 对应响应字段
+`invoiceSensitive`）时，三级自动匹配全部落空：收集不到值、断言匹配不到
+字段，验证空转。此时往 `.api.json` 预置的 `field_map` 空对象里手工填映射：
+
+```json
+{
+  "field_map": {
+    "like": "invoiceSensitive"
+  }
+}
+```
+
+生成测试用例时该映射两侧生效：
+
+- **收集侧**：`collect_list_query_data(..., field_map={"like": "invoiceSensitive"})`
+  显式映射优先于三级自动匹配；
+- **断言侧**：字段匹配追加映射字段名
+  `if k.lower() == "like" or k.lower() == "invoicesensitive":`。
+
+数值范围对（`value_pairs`）成员同样受 `field_map` 覆盖：聚合通道与区间
+断言匹配响应字段时映射值优先于词干（如参数 `monthExchangeAmtStart` 对应
+响应字段 `monthReturnAmt`，配 `"monthExchangeAmtStart": "monthReturnAmt"`
+后 min/max 聚合与 `k.lower() == "monthreturnamt"` 断言均按映射字段匹配）。
+
+生成器写出的每个 `.api.json` 都预置 `field_map` 字段（空对象 `{}`）；
+只有内容**非空**时才视为人工校准过的接口语义，重新生成 API 文件时
+即使带 `--overwrite` 也不覆盖（空对象不构成保护，正常覆盖）。
 
 ### 生成的测试用例示例（异步模式，简化）
 
@@ -254,9 +305,9 @@ class TestClass:
 flowchart TD
     A[generate_scenario_testcase<br/>har_file_path, target_url, task_id, overwrite?] --> B[extract_requests_from_har + match_api_files_for_har]
     B --> C[URLMatcher.find_matching_api_file<br/>target_url 定位目标 API]
-    C --> D{overwrite? 或文件不存在?}
-    D -->|否 且文件已存在| E[返回 None 跳过]
-    D -->|是 或文件不存在| F[generate_scenario_test_content<br/>har_file_path, api_files, task_id, target_api_file, all_requests]
+    C --> D{文件不存在, 或 overwrite 且无 keep 标记?}
+    D -->|否| E[返回 None 跳过]
+    D -->|是| F[generate_scenario_test_content<br/>har_file_path, api_files, task_id, target_api_file, all_requests]
     F --> G[gen_test_case_imports 多函数按服务包分组]
     G --> H[extract_api_info_for_scenario + gen_test_case_description severity=CRITICAL]
     H --> I[gen_scenario_test_method_definition]
@@ -274,7 +325,7 @@ flowchart TD
 输入: har_file_path, target_url, task_id, overwrite=False
  └─ 校验 HAR 文件存在 → 解析 HAR → 匹配 API 文件列表
  └─ URLMatcher.find_matching_api_file(target_url) → 目标 API 文件
- └─ overwrite=False 且测试文件已存在 → 返回 None 跳过
+ └─ 测试文件已存在且（overwrite=False 或带 keep 标记）→ 返回 None 跳过
  └─ generate_scenario_test_content() → write_test_file() → format_directory()
 ```
 
@@ -479,7 +530,7 @@ flowchart TD
     C --> D["_resolve_testcase_mode<br/>TESTCASE_PROFILES / 关键字启发式"]
     D --> E{指定 --only-mode<br/>且识别模式不匹配?}
     E -->|是| F["跳过 filtered++"]
-    E -->|否| G{文件存在且未 overwrite?}
+    E -->|否| G{文件存在且<br/>未 overwrite 或带 keep 标记?}
     G -->|是| H["跳过 skipped++"]
     G -->|否| I{识别模式}
     I -->|parametrized| J["generate_parametrized_test_content<br/>api_file, task_id"]
@@ -506,13 +557,13 @@ flowchart TD
       ├─ _resolve_testcase_mode(api_file) 决策模式（parametrized / scenario）
       ├─ 指定 only_mode 时按识别结果过滤：list_query=parametrized、
       │    complex_scenario=scenario（含关键字未命中的回落接口），不匹配 → "filtered"
-      ├─ 测试文件已存在且未 overwrite → "skipped"
+      ├─ 测试文件已存在且（未 overwrite 或带 keep 标记）→ "skipped"
       ├─ parametrized → generate_parametrized_test_content()
       │    └─ scenario → generate_scenario_test_content()
       ├─ parametrized 内容为空 → 回退场景模式
       └─ write_test_file() 同步写入 → "generated"
  └─ 汇总 {total, skipped, generated, failed, filtered, generated_files}
- └─ 有产出时 format_directory() 批量 ruff 格式化
+ └─ 有产出时 format_directory() 批量 ruff 格式化（排除带 keep 标记的文件）
 ```
 
 > **异步并行说明**：所有 API 文件通过 `asyncio.gather` 并发处理；`write_test_file` 为同步写盘，

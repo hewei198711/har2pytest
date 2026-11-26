@@ -119,54 +119,23 @@ def test_make_step_key_exhausted_full_name():
 # ==================== flatten_data ====================
 
 
-@allure.feature("步骤取值处理")
-@allure.story("响应数据扁平化")
-@allure.title("测试嵌套字典展平为路径映射")
-def test_flatten_data_nested_dict():
-    data = {"a": {"b": 1, "c": "x"}}
-    assert flatten_data(data) == {("a", "b"): 1, ("a", "c"): "x"}
-
-
-@allure.feature("步骤取值处理")
-@allure.story("响应数据扁平化")
-@allure.title("测试列表元素按索引展平")
-def test_flatten_data_with_list():
-    data = {"list": [{"k": 1}, {"k": 2}]}
-    assert flatten_data(data) == {("list", 0, "k"): 1, ("list", 1, "k"): 2}
-
-
-@allure.feature("步骤取值处理")
-@allure.story("响应数据扁平化")
-@allure.title("测试深层结构按最大深度截断")
-def test_flatten_data_max_depth():
-    data = {"a": {"b": {"c": {"d": {"e": 1}}}}}
+@pytest.mark.parametrize("data,kwargs,expected", [
+    pytest.param({"a": {"b": 1, "c": "x"}}, {}, {("a", "b"): 1, ("a", "c"): "x"}, id="嵌套字典展平为路径映射"),
+    pytest.param({"list": [{"k": 1}, {"k": 2}]}, {}, {("list", 0, "k"): 1, ("list", 1, "k"): 2}, id="列表元素按索引展平"),
     # 默认深度 4：路径长度 4 的 dict（最内层 {"e": 1}）不再展开
-    assert flatten_data(data) == {}
+    pytest.param({"a": {"b": {"c": {"d": {"e": 1}}}}}, {}, {}, id="深层结构按默认深度截断"),
     # 深度 5 时最内层叶子可展开
-    assert flatten_data(data, max_depth=5) == {("a", "b", "c", "d", "e"): 1}
-
-
+    pytest.param({"a": {"b": {"c": {"d": {"e": 1}}}}}, {"max_depth": 5}, {("a", "b", "c", "d", "e"): 1}, id="深度5时最内层叶子可展开"),
+    pytest.param({"list": [1, 2, 3, 4, 5]}, {}, {("list", 0): 1, ("list", 1): 2, ("list", 2): 3}, id="列表元素数量截断"),
+    pytest.param(5, {}, {(): 5}, id="标量叶子直接记录"),
+    pytest.param(None, {}, {(): None}, id="None叶子直接记录"),
+    pytest.param({"a": {}, "b": []}, {}, {}, id="空容器不产生叶子"),
+])
 @allure.feature("步骤取值处理")
 @allure.story("响应数据扁平化")
-@allure.title("测试列表元素数量截断")
-def test_flatten_data_list_item_limit():
-    data = {"list": [1, 2, 3, 4, 5]}
-    assert flatten_data(data) == {("list", 0): 1, ("list", 1): 2, ("list", 2): 3}
-
-
-@allure.feature("步骤取值处理")
-@allure.story("响应数据扁平化")
-@allure.title("测试标量叶子直接记录")
-def test_flatten_data_scalar():
-    assert flatten_data(5) == {(): 5}
-    assert flatten_data(None) == {(): None}
-
-
-@allure.feature("步骤取值处理")
-@allure.story("响应数据扁平化")
-@allure.title("测试空容器不产生叶子")
-def test_flatten_data_empty_container():
-    assert flatten_data({"a": {}, "b": []}) == {}
+@allure.title("测试响应数据扁平化各形态")
+def test_flatten_data_forms(data, kwargs, expected):
+    assert flatten_data(data, **kwargs) == expected
 
 
 # ==================== _flatten_containers ====================
@@ -794,22 +763,16 @@ def test_render_collect_projection_code():
     assert "\"attachmentUrlList\": [i['fileUrlKey'] for i in test_data['upload']]," in code
 
 
+@pytest.mark.parametrize("cfg,expected_append,expected_field", [
+    pytest.param({"url": "/api//upload", "collect_key": "upload"}, ["datas"], "file", id="append与file字段默认值"),
+    pytest.param({"append_path": ["datas", "info"], "file_field": "fileList"}, ["datas", "info"], "fileList", id="自定义append与file字段生效"),
+])
 @allure.feature("步骤取值处理")
 @allure.story("响应收集接口")
-@allure.title("测试收集配置 append/file 字段默认值")
-def test_collect_config_defaults():
-    cfg = {"url": "/api//upload", "collect_key": "upload"}
-    assert collect_append_path(cfg) == ["datas"]
-    assert collect_file_field(cfg) == "file"
-
-
-@allure.feature("步骤取值处理")
-@allure.story("响应收集接口")
-@allure.title("测试收集配置自定义 append/file 字段生效")
-def test_collect_config_custom_fields():
-    cfg = {"append_path": ["datas", "info"], "file_field": "fileList"}
-    assert collect_append_path(cfg) == ["datas", "info"]
-    assert collect_file_field(cfg) == "fileList"
+@allure.title("测试收集配置 append/file 字段取值")
+def test_collect_config_field_forms(cfg, expected_append, expected_field):
+    assert collect_append_path(cfg) == expected_append
+    assert collect_file_field(cfg) == expected_field
 
 
 @allure.feature("步骤取值处理")
@@ -1199,28 +1162,28 @@ def test_build_plan_list_leaf_low_ratio_test_data(default_param_source_config):
 # ==================== source_expression ====================
 
 
+@pytest.mark.parametrize("source,expected", [
+    pytest.param(
+        ParamSource(kind="test_data", param_name="orderNo", value="SG001"),
+        "test_data['orderNo']",
+        id="用例级参数渲染为test_data引用",
+    ),
+    pytest.param(
+        ParamSource(
+            kind="step_response",
+            param_name="reason2",
+            step_key="step_reason",
+            path=(0, "reasonList", 0, "returnReason"),
+        ),
+        "test_data['step_reason'][0]['reasonList'][0]['returnReason']",
+        id="步骤响应渲染为含列表索引的引用",
+    ),
+])
 @allure.feature("步骤取值处理")
 @allure.story("取值表达式渲染")
-@allure.title("测试用例级参数渲染为 test_data 引用")
-def test_source_expression_test_data():
-    source = ParamSource(kind="test_data", param_name="orderNo", value="SG001")
-    assert source_expression(source) == "test_data['orderNo']"
-
-
-@allure.feature("步骤取值处理")
-@allure.story("取值表达式渲染")
-@allure.title("测试步骤响应渲染为含列表索引的引用")
-def test_source_expression_step_response():
-    source = ParamSource(
-        kind="step_response",
-        param_name="reason2",
-        step_key="step_reason",
-        path=(0, "reasonList", 0, "returnReason"),
-    )
-    assert (
-        source_expression(source)
-        == "test_data['step_reason'][0]['reasonList'][0]['returnReason']"
-    )
+@allure.title("测试引用型来源渲染表达式")
+def test_source_expression_reference_forms(source, expected):
+    assert source_expression(source) == expected
 
 
 @allure.feature("步骤取值处理")

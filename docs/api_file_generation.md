@@ -249,7 +249,7 @@ flowchart TD
     G --> I
     H --> I
     I[遍历每个 HTTP 方法<br/>GET/POST/PUT/PATCH/DELETE]
-    I --> K[_extract_params_from_swagger<br/>提取 query、body、path 参数]
+    I --> K[_extract_params_from_swagger<br/>提取 query、body、formData、path 参数]
     K --> L[并行生成 API 文件]
     L --> M{文件已存在?}
     M -->|是 & 非强制覆盖| N[跳过]
@@ -310,6 +310,12 @@ flowchart TD
  ├── in: body / $ref → post_data（body 参数）
  │   例: { name: "order", schema: { $ref: "#/definitions/Order" } }
  │   → 递归解析 $ref → 展开为完整数据结构
+ │
+ ├── in: formData → post_data（表单/文件上传参数，Swagger 2.0）
+ │   例: { name: "file", type: "file" } → file: "(binary)"
+ │   file 类型填 "(binary)" 占位（与 HAR 路径 _find_file_upload_key 同一约定），
+ │   其余表单类型走下方常规默认值。consumes 含 multipart/form-data 或存在
+ │   file 型 formData 时，接口按 multipart/文件上传生成（files + build_multipart_data）
  │
  └── 所有参数添加默认值:
        string → ""
@@ -373,7 +379,7 @@ def mgmt_user_list(params=params, headers=headers):
 | **参数说明** | 有 Swagger 时自动填充，无 Swagger 时为空 | 自动填充 description |
 | **请求类型覆盖** | 只包含抓包中实际出现的接口 | 文档中定义的所有接口 |
 | **路径参数** | 通过 URL 模式匹配识别 | 通过 in: path 精确识别 |
-| **文件上传** | 自动检测 multipart/form-data | 通过参数类型检测 |
+| **文件上传** | 自动检测 multipart/form-data | 识别 in: formData + type: file（或 consumes 声明） |
 | **建议使用场景** | 已有抓包数据快速生成 | 后端文档完备时批量生成 |
 
 ---

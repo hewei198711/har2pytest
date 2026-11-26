@@ -89,6 +89,8 @@ class APIFileInfo:
         param_remarks: 参数备注字典（支持 dotted key）
         param_values: 从备注中解析出的参数枚举值字典（如 {"getType": [1,2,3]}）
         time_pairs: 时间参数对元数据（如 {"getTime": {"start": "getTimeStartTime", "end": "getTimeEndTime", "format": "yyyy-MM-dd"}}）
+        single_time_params: 单时间参数元数据（如 {"orderDate": {"format": "%Y-%m-%d", "range": True}}，一个参数自身承载时间，无 start/end 伴生）
+        value_pairs: 数值范围对元数据（如 {"monthExchangeAmt": {"start": "monthExchangeAmtStart", "end": "monthExchangeAmtEnd"}}，非时间的 Start/End 配对）
         headers: 请求头字典
         params: 参数值字典
         data: data 参数值
@@ -96,6 +98,9 @@ class APIFileInfo:
         constant_params: 常量参数（在超过 50% 的 HAR 请求中值都相同的参数）
         har_param_values: HAR 参数枚举值字典（从所有 HAR 快照收集的去重值列表）
         har_params: HAR 参数基线值字典（常量参数 + 首条请求的所有参数值）
+        db_params: 数据库参数示例值元数据（{"table": ..., "values": {参数: {"value": ..., "remark": ...}}}）
+        field_map: 参数名到响应字段名的显式映射（如 {"like": "invoiceSensitive"}），
+            收集与断言两侧共用；三级自动匹配（精确/前缀/反向）落空时靠它对齐
     """
 
     function_name: str | None = None
@@ -104,6 +109,8 @@ class APIFileInfo:
     param_remarks: dict[str, str] = field(default_factory=dict)
     param_values: dict[str, list[Any]] = field(default_factory=dict)
     time_pairs: dict[str, dict[str, str]] = field(default_factory=dict)
+    single_time_params: dict[str, dict[str, Any]] = field(default_factory=dict)
+    value_pairs: dict[str, dict[str, str]] = field(default_factory=dict)
     headers: dict[str, str] = field(default_factory=dict)
     params: dict[str, Any] = field(default_factory=dict)
     data: Any = field(default_factory=dict)
@@ -111,4 +118,6 @@ class APIFileInfo:
     constant_params: dict[str, Any] = field(default_factory=dict)
     har_param_values: dict[str, list[Any]] = field(default_factory=dict)
     har_params: dict[str, Any] = field(default_factory=dict)
+    db_params: dict[str, Any] = field(default_factory=dict)
+    field_map: dict[str, str] = field(default_factory=dict)
  

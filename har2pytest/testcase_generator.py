@@ -46,10 +46,13 @@ from .swagger_handler import SwaggerHandler
 from .time_pair import TimePairContext
 from .url_matcher import URLMatcher
 from .utils import (
+    MANUAL_KEEP_MARKER,
     format_directory,
+    is_manually_kept,
     parse_api_file,
     write_test_file,
 )
+from .value_pair import ValuePairContext
 
 
 class TestCaseGenerator:
@@ -250,9 +253,14 @@ class TestCaseGenerator:
                     continue
                 test_filename = f"test_{api_info.function_name}.py"
                 test_filepath = os.path.join(self.output_dir, test_filename)
-                if not overwrite and os.path.exists(test_filepath):
-                    logger.info(f"跳过已存在的测试文件: {test_filepath}")
-                    continue
+                if os.path.exists(test_filepath):
+                    if not overwrite:
+                        logger.info(f"跳过已存在的测试文件: {test_filepath}")
+                        continue
+                    # 人工校验保护：带 keep 标记的文件即使 --overwrite 也不覆盖
+                    if is_manually_kept(test_filepath):
+                        logger.info(f"测试文件带人工保护标记（{MANUAL_KEEP_MARKER}），跳过覆盖: {test_filepath}")
+                        continue
 
                 test_content = self.generate_parametrized_test_content(api_file, task_id)
                 if not test_content:
@@ -298,9 +306,14 @@ class TestCaseGenerator:
             return None
         test_filename = f"test_{api_info.function_name}.py"
         test_filepath = os.path.join(self.output_dir, test_filename)
-        if not overwrite and os.path.exists(test_filepath):
-            logger.info(f"跳过已存在的测试文件: {test_filepath}")
-            return None
+        if os.path.exists(test_filepath):
+            if not overwrite:
+                logger.info(f"跳过已存在的测试文件: {test_filepath}")
+                return None
+            # 人工校验保护：带 keep 标记的文件即使 --overwrite 也不覆盖
+            if is_manually_kept(test_filepath):
+                logger.info(f"测试文件带人工保护标记（{MANUAL_KEEP_MARKER}），跳过覆盖: {test_filepath}")
+                return None
 
         test_content = self.generate_scenario_test_content(
             har_file_path, api_files, task_id, target_api_file, all_requests
@@ -326,6 +339,8 @@ class TestCaseGenerator:
             only_mode: 仅生成指定模式的用例（list_query/complex_scenario），None 表示不过滤。
                 按 _resolve_testcase_mode 识别结果过滤：list_query=参数化产物，
                 complex_scenario=场景产物（含描述无列表关键字回落 scenario 的接口）。
+                指定 only_mode 时禁用内容级回退：识别为 list_query 但参数化产出为空
+                （如 JSON 数组请求体）的接口计为跳过，不再回退 scenario 形态。
         """
         expanded_api_files: list[str] = []
         for api_path in api_files_list:
@@ -405,10 +420,27 @@ class TestCaseGenerator:
                         elapsed = time.time() - task_start
                         logger.debug(f"  [任务跳过] {api_basename} 测试文件已存在 (耗时 {elapsed:.2f}s)")
                         return "skipped", None
+                    # 人工校验保护：带 keep 标记的文件即使 --overwrite 也不覆盖
+                    if is_manually_kept(test_filepath):
+                        elapsed = time.time() - task_start
+                        logger.info(
+                            f"  [任务跳过] {api_basename} 测试文件带人工保护标记（{MANUAL_KEEP_MARKER}），"
+                            f"不覆盖 (耗时 {elapsed:.2f}s)"
+                        )
+                        return "skipped", None
 
                 test_content = None
                 if mode == "parametrized":
                     test_content = self.generate_parametrized_test_content(api_file, task_id)
+                    if not test_content and only_mode is not None:
+                        # --only-mode 契约：期望模式产出为空时跳过，不回退 scenario
+                        # 形态（避免 list_query 输出目录出现场景产物）
+                        elapsed = time.time() - task_start
+                        logger.info(
+                            f"  [任务跳过] {api_basename} 识别为 list_query 但参数化产出为空，"
+                            f"--only-mode {only_mode} 不回退 (耗时 {elapsed:.2f}s)"
+                        )
+                        return "skipped", None
                 if not test_content:
                     test_content = self.generate_scenario_test_content(
                         har_file_path, [api_file], task_id, api_file, cached_requests
@@ -513,7 +545,18 @@ class TestCaseGenerator:
         if not api_params:
             logger.info(f"API文件 {api_file} 无参数定义（params/data 均为空），跳过参数化模式")
             return None
+        # 时间参数统一上下文（前移到参数化构建之前：单时间参数不命中
+        # TIME_PARAMS 闸门，下游排除/置空需由 single_params 元数据驱动）
+        tp_ctx = TimePairContext.build(
+            api_info.time_pairs, api_params, single_time_params=api_info.single_time_params,
+        )
+        # 数值范围对统一上下文（非时间的 Start/End 配对，基线由 test_0
+        # 收集响应词干字段 min/max 动态提供）
+        vp_ctx = ValuePairContext.build(api_info.value_pairs, api_params)
         param_items = build_param_items_from_api(api_params, merged_pv, is_batch_mode=True)
+        # 单时间参数永不参数化（即使备注意外解析出枚举）：运行时从
+        # list_query_data 取 datetime 动态值，枚举迭代会把日期字符串拆成单字符
+        param_items = [it for it in param_items if it["param_name"] not in tp_ctx.single_params]
 
         if not param_items and api_params:
             param_items = build_pagination_only_items([api_params])
@@ -538,7 +581,7 @@ class TestCaseGenerator:
         for pn in single_value_params:
             if pn in existing_names:
                 continue
-            if APIConfig.is_pagination_param(pn) or APIConfig.is_time_param(pn):
+            if APIConfig.is_pagination_param(pn) or APIConfig.is_time_param(pn) or pn in tp_ctx.single_params or pn in vp_ctx.all_names:
                 continue
             param_items.append({"param_name": pn})
             existing_names.add(pn)
@@ -547,7 +590,7 @@ class TestCaseGenerator:
         for pn, values in merged_pv.items():
             if not values or len(values) < 2 or pn in existing_names:
                 continue
-            if APIConfig.is_pagination_param(pn) or APIConfig.is_time_param(pn):
+            if APIConfig.is_pagination_param(pn) or APIConfig.is_time_param(pn) or pn in tp_ctx.single_params or pn in vp_ctx.all_names:
                 continue
             param_items.append({"param_name": pn})
             existing_names.add(pn)
@@ -556,7 +599,7 @@ class TestCaseGenerator:
         for pn in api_params:
             if pn in existing_names:
                 continue
-            if APIConfig.is_pagination_param(pn) or APIConfig.is_time_param(pn):
+            if APIConfig.is_pagination_param(pn) or APIConfig.is_time_param(pn) or pn in tp_ctx.single_params or pn in vp_ctx.all_names:
                 continue
             if api_info.constant_params and pn in api_info.constant_params:
                 continue
@@ -564,12 +607,25 @@ class TestCaseGenerator:
             existing_names.add(pn)
 
         # 添加时间对 start 参数到 param_items，生成组合测试方法
-        tp_ctx = TimePairContext.build(api_info.time_pairs, api_params)
         for start_name in tp_ctx.start_to_end:
             if start_name in existing_names:
                 continue
             param_items.append({"param_name": start_name})
             existing_names.add(start_name)
+
+        # 添加数值对 start 参数到 param_items，生成区间组合测试方法
+        for start_name in vp_ctx.start_to_end:
+            if start_name in existing_names:
+                continue
+            param_items.append({"param_name": start_name})
+            existing_names.add(start_name)
+
+        # 添加单时间参数到 param_items，生成专门查询用例（非枚举运行时取值分支）
+        for pn in tp_ctx.single_params:
+            if pn in existing_names:
+                continue
+            param_items.append({"param_name": pn})
+            existing_names.add(pn)
 
         ctx = self.render_ctx
         content = gen_test_case_imports(
@@ -584,7 +640,7 @@ class TestCaseGenerator:
         )
 
         # 统一生成逻辑（无论有无 HAR 文件）
-        content.extend(gen_list_query_data_class_attr(api_params, merged_pv, tp_ctx))
+        content.extend(gen_list_query_data_class_attr(api_params, merged_pv, tp_ctx, vp_ctx))
         content.append("")
         # test_0 探测请求与参数化方法体取同一基准：api_params + constant_params 覆盖
         # （时间参数统一置 "" 不限时间，datetime 动态值仅由 list_query_data 提供，
@@ -593,11 +649,23 @@ class TestCaseGenerator:
         if api_info.constant_params:
             test0_params.update(api_info.constant_params)
         for pn in list(test0_params):
-            if APIConfig.is_time_param(pn):
+            if isinstance(test0_params[pn], list):
+                # 数组类型参数（默认值 []）保持原值透传：is_time_param 是关键字
+                # 子串匹配，orderMonthList 会被 "ordermonth" 误判为时间参数，
+                # 置 "" 造成类型错位（服务端期待数组）
+                continue
+            if APIConfig.is_time_param(pn) or pn in tp_ctx.single_params:
                 test0_params[pn] = ""
+            elif pn in vp_ctx.all_names:
+                test0_params[pn] = None
         content.extend(
             gen_test_0_collect_response_data(
                 ctx, api_info.description, function_name, param_var_name, test0_params,
+                extra_time_params=(
+                    sorted(tp_ctx.single_params) + sorted(tp_ctx.epoch_names)
+                ) or None,
+                value_pairs=vp_ctx.active_pairs or None,
+                field_map=api_info.field_map or None,
             )
         )
         # 测试方法体：统一以 api_params 为基准，覆盖 constant_params（如有）。
@@ -610,19 +678,26 @@ class TestCaseGenerator:
                 filled.update(api_info.constant_params)
             filled.pop(item["param_name"], None)
             for pn in list(filled):
-                if APIConfig.is_time_param(pn):
+                if isinstance(filled[pn], list):
+                    # 数组类型参数保持 [] 透传（is_time_param 子串匹配会把
+                    # orderMonthList 命中 "ordermonth" 误判为时间参数置 ""）
+                    continue
+                if APIConfig.is_time_param(pn) or pn in tp_ctx.single_params:
                     filled[pn] = ""
+                elif pn in vp_ctx.all_names:
+                    filled[pn] = None
             item["other_params"] = filled
             # 数组类型参数（params 默认值为 list）在方法体中以 [值] 形式传参
             item["is_array_param"] = isinstance(api_params.get(item["param_name"]), list)
         content.extend(
             gen_batch_parametrized_test_methods(
                 ctx, param_items, api_info.description, function_name, param_var_name,
-                {k: v for k, v in merged_pv.items() if k not in single_value_params},
-                api_info.param_remarks, time_pair_ctx=tp_ctx,
+                {k: v for k, v in merged_pv.items() if k not in single_value_params and k not in tp_ctx.single_params},
+                api_info.param_remarks, time_pair_ctx=tp_ctx, value_pair_ctx=vp_ctx,
+                field_map=api_info.field_map or None,
             )
         )
-        if tp_ctx.has_time_pairs:
+        if tp_ctx.has_dynamic_time:
             insert_datetime_import(content)
 
         rendered = "\n".join(content)

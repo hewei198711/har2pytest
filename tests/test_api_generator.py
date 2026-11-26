@@ -304,6 +304,75 @@ def test_parse_request_info_delete_query_only(generator):
 
 @allure.feature("API 生成器")
 @allure.story("处理参数")
+@allure.title("测试 GET 声明 body 参数时走 data/json 通道（回归：Swagger GET+body 丢参）")
+def test_parse_request_info_get_body_param(generator):
+    # Swagger 给 GET 声明 in:body（如 ID 包装 DTO），服务端实测按 JSON body 接收
+    request_info = ParsedRequestInfo(
+        method="GET",
+        url="/demo/selectData",
+        query_params={},
+        post_data={"id": None},
+        headers={},
+    )
+    parsed = generator._parse_request_info(request_info)
+    assert parsed.is_json_content is True
+
+    param_name, param_data = generator._determine_param_info(parsed)
+    assert param_name == "data"
+    assert param_data == {"id": None}
+
+    body = generator._handle_http_method("GET", "data", {}, {}, False, is_json_content=parsed.is_json_content)
+    assert any("client.get(url=url, json=data" in line for line in body)
+
+    # 元数据快照与函数签名同源：data 键承载 body 参数
+    snapshot = generator._module_value_snapshot(parsed)
+    assert snapshot["data"] == {"id": None}
+    assert "params" not in snapshot
+
+
+@allure.feature("API 生成器")
+@allure.story("处理参数")
+@allure.title("测试 GET body+query 并存时并入 data（body 覆盖同名 query，避免丢参）")
+def test_parse_request_info_get_body_with_query(generator):
+    request_info = ParsedRequestInfo(
+        method="GET",
+        url="/demo",
+        query_params={"id": "1", "page": "1"},
+        post_data={"id": 2},
+        headers={},
+    )
+    parsed = generator._parse_request_info(request_info)
+    param_name, param_data = generator._determine_param_info(parsed)
+    assert param_name == "data"
+    assert param_data == {"id": 2, "page": "1"}
+
+
+@allure.feature("API 生成器")
+@allure.story("处理参数")
+@allure.title("测试 GET 路径参数+body 并存时 params/data 分离（URL f-string 引用路径键）")
+def test_parse_request_info_get_path_and_body(generator):
+    # 路径参数由 Swagger 匹配提取后在 generate_api_file 中回填，
+    # 此处直接构造含 path_params 的解析结果验证决策与快照
+    parsed = ParsedRequestInfo(
+        method="GET",
+        url="/demo/{id}/detail",
+        query_params={},
+        post_data={"type": 1},
+        headers={},
+        path_params={"id": "1"},
+        url_pattern="/demo/{id}/detail",
+    )
+    param_name, param_data = generator._determine_param_info(parsed)
+    assert param_name == "data"
+    assert param_data == {"type": 1}
+
+    snapshot = generator._module_value_snapshot(parsed)
+    assert snapshot["data"] == {"type": 1}
+    assert snapshot["params"] == {"id": "1"}
+
+
+@allure.feature("API 生成器")
+@allure.story("处理参数")
 @allure.title("测试 REQUIRED_HEADERS 大小写不敏感覆盖，不产生重复头")
 def test_parse_request_info_required_headers_case_insensitive(monkeypatch):
     # 临时替换 REQUIRED_HEADERS 为测试值，避免直接访问 _config 私有属性
@@ -397,61 +466,24 @@ def test_process_parameters_path_params(generator):
 # ==================== 处理 HTTP 方法测试 ====================
 
 
+@pytest.mark.parametrize("method,param_var,path_params,post_data,urlencoded,is_json,expected,forbidden", [
+    pytest.param("GET", "params", {}, {"id": 1}, False, False, "client.get", None, id="GET方法"),
+    pytest.param("GET", None, {}, {}, False, False, "client.get", None, id="无参数GET方法"),
+    pytest.param("POST", "data", {}, {}, False, True, "json=data", None, id="POST_JSON方法"),
+    pytest.param("POST", "data", {}, {}, True, False, "urlencode", None, id="POST_urlencoded方法"),
+    pytest.param("POST", "data", {}, {}, False, False, "data=data", "json=data", id="POST_data方法非JSON非urlencode"),
+    pytest.param("POST", None, {}, {}, False, False, "client.post", None, id="无参数POST方法"),
+    pytest.param("POST", "params", {"id": "1"}, {}, False, False, "client.post", None, id="带路径参数的POST方法"),
+    pytest.param("DELETE", None, {}, {}, False, False, "client.delete(url=url, headers=headers)", None, id="DELETE无请求体只传url"),
+])
 @allure.feature("API 生成器")
 @allure.story("处理HTTP方法")
-@allure.title("测试处理GET方法")
-def test_handle_http_method_get(generator):
-    result = generator._handle_http_method("GET", "params", {}, {"id": 1}, False)
-    assert any("client.get" in line for line in result)
-
-
-@allure.feature("API 生成器")
-@allure.story("处理HTTP方法")
-@allure.title("测试处理无参数GET方法")
-def test_handle_http_method_get_no_params(generator):
-    result = generator._handle_http_method("GET", None, {}, {}, False)
-    assert any("client.get" in line for line in result)
-
-
-@allure.feature("API 生成器")
-@allure.story("处理HTTP方法")
-@allure.title("测试处理POST JSON方法")
-def test_handle_http_method_post_json(generator):
-    result = generator._handle_http_method("POST", "data", {}, {}, False, is_json_content=True)
-    assert any("json=data" in line for line in result)
-
-
-@allure.feature("API 生成器")
-@allure.story("处理HTTP方法")
-@allure.title("测试处理POST urlencoded方法")
-def test_handle_http_method_post_urlencoded(generator):
-    result = generator._handle_http_method("POST", "data", {}, {}, True)
-    assert any("urlencode" in line for line in result)
-
-
-@allure.feature("API 生成器")
-@allure.story("处理HTTP方法")
-@allure.title("测试处理POST data方法（非JSON非urlencode）")
-def test_handle_http_method_post_data(generator):
-    result = generator._handle_http_method("POST", "data", {}, {}, False, is_json_content=False)
-    assert any("data=data" in line for line in result)
-    assert not any("json=data" in line for line in result)
-
-
-@allure.feature("API 生成器")
-@allure.story("处理HTTP方法")
-@allure.title("测试处理无参数POST方法")
-def test_handle_http_method_post_no_params(generator):
-    result = generator._handle_http_method("POST", None, {}, {}, False)
-    assert any("client.post" in line for line in result)
-
-
-@allure.feature("API 生成器")
-@allure.story("处理HTTP方法")
-@allure.title("测试处理带路径参数的POST方法")
-def test_handle_http_method_post_path_params(generator):
-    result = generator._handle_http_method("POST", "params", {"id": "1"}, {}, False)
-    assert any("client.post" in line for line in result)
+@allure.title("测试处理各 HTTP 方法形态")
+def test_handle_http_method_forms(generator, method, param_var, path_params, post_data, urlencoded, is_json, expected, forbidden):
+    result = generator._handle_http_method(method, param_var, path_params, post_data, urlencoded, is_json_content=is_json)
+    assert any(expected in line for line in result)
+    if forbidden is not None:
+        assert not any(forbidden in line for line in result)
 
 
 @allure.feature("API 生成器")
@@ -471,31 +503,19 @@ def test_handle_http_method_body_methods(generator, method, expected):
     assert any(f"{expected}(url=url, json=data" in line for line in result)
 
 
-@allure.feature("API 生成器")
-@allure.story("处理HTTP方法")
-@allure.title("测试 DELETE 无请求体时只传 url")
-def test_handle_http_method_delete_without_body(generator):
-    result = generator._handle_http_method("DELETE", None, {}, {}, False)
-    assert any("client.delete(url=url, headers=headers)" in line for line in result)
-
-
 # ==================== 处理文件上传测试 ====================
 
 
+@pytest.mark.parametrize("data,match_text", [
+    pytest.param({"name": "test"}, "未找到文件参数", id="缺少file字段"),
+    pytest.param("not a dict", "文件上传参数格式错误", id="参数非字典"),
+])
 @allure.feature("API 生成器")
 @allure.story("处理文件上传")
-@allure.title("测试文件上传缺少file字段")
-def test_handle_file_upload_no_file_key(generator):
-    with pytest.raises(ValueError, match="未找到文件参数"):
-        generator._handle_file_upload({"name": "test"})
-
-
-@allure.feature("API 生成器")
-@allure.story("处理文件上传")
-@allure.title("测试文件上传参数非字典")
-def test_handle_file_upload_not_dict(generator):
-    with pytest.raises(ValueError, match="文件上传参数格式错误"):
-        generator._handle_file_upload("not a dict")
+@allure.title("测试文件上传非法入参报错")
+def test_handle_file_upload_invalid_forms(generator, data, match_text):
+    with pytest.raises(ValueError, match=match_text):
+        generator._handle_file_upload(data)
 
 
 # ==================== 生成函数定义测试 ====================
@@ -972,6 +992,87 @@ def test_generate_api_file_writes_sidecar(tmp_path):
 
 @allure.feature("API 生成器")
 @allure.story("端到端生成")
+@allure.title("测试元数据含手工 field_map 时 --overwrite 也不覆盖")
+def test_generate_api_file_skips_overwrite_with_field_map(tmp_path, caplog):
+    generator = APIGenerator(output_dir=str(tmp_path / "apis"))
+    request_info = ParsedRequestInfo(
+        method="GET",
+        url="/api/hello",
+        query_params={"id": 1},
+        post_data={},
+        headers={},
+    )
+
+    filepath = asyncio.run(generator.generate_api_file(request_info))
+    assert filepath is not None
+
+    # 生成器预置的 field_map 是空对象（手工字段，供用户填充）
+    sidecar = filepath[: -len(".py")] + ".api.json"
+    with open(sidecar, encoding="utf-8") as f:
+        payload = json.load(f)
+    assert payload["field_map"] == {}
+
+    # 手工往空对象里填映射（人工校准过的接口语义）
+    payload["field_map"] = {"like": "invoiceSensitive"}
+    with open(sidecar, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    # 参数已变（换新值）以便与“覆盖”对比：即使 force_overwrite=True 也应跳过
+    request_info = ParsedRequestInfo(
+        method="GET",
+        url="/api/hello",
+        query_params={"id": 999},
+        post_data={},
+        headers={},
+    )
+    with caplog.at_level(logging.INFO):
+        result = asyncio.run(generator.generate_api_file(request_info, force_overwrite=True))
+
+    assert result is None
+    assert "field_map" in caplog.text
+    # 元数据未被覆盖：field_map 仍在，params 仍是首次生成的值
+    with open(sidecar, encoding="utf-8") as f:
+        payload_after = json.load(f)
+    assert payload_after["field_map"] == {"like": "invoiceSensitive"}
+    assert payload_after["params"] == {"id": 1}
+
+
+@allure.feature("API 生成器")
+@allure.story("端到端生成")
+@allure.title("测试 field_map 为空对象时 --overwrite 正常覆盖")
+def test_generate_api_file_overwrites_when_field_map_empty(tmp_path):
+    generator = APIGenerator(output_dir=str(tmp_path / "apis"))
+    request_info = ParsedRequestInfo(
+        method="GET",
+        url="/api/hello",
+        query_params={"id": 1},
+        post_data={},
+        headers={},
+    )
+
+    filepath = asyncio.run(generator.generate_api_file(request_info))
+    assert filepath is not None
+    sidecar = filepath[: -len(".py")] + ".api.json"
+
+    # 生成器预置的空对象不构成保护：--overwrite 正常覆盖
+    request_info = ParsedRequestInfo(
+        method="GET",
+        url="/api/hello",
+        query_params={"id": 999},
+        post_data={},
+        headers={},
+    )
+    result = asyncio.run(generator.generate_api_file(request_info, force_overwrite=True))
+
+    assert result == filepath
+    with open(sidecar, encoding="utf-8") as f:
+        payload = json.load(f)
+    assert payload["params"] == {"id": 999}
+    assert payload["field_map"] == {}
+
+
+@allure.feature("API 生成器")
+@allure.story("端到端生成")
 @allure.title("测试同路径多方法按方法后缀生成不同文件（首个用原名，其余加后缀并告警）")
 def test_generate_apis_from_swagger_same_path_multi_method(tmp_path, monkeypatch, caplog, use_test_config):
     output_dir = tmp_path / "apis"
@@ -1183,7 +1284,7 @@ def test_generate_api_file_har_params_backfill_missing_keys(tmp_path):
     generator = APIGenerator(output_dir=str(tmp_path / "apis"))
     request_info = ParsedRequestInfo(
         method="GET",
-        url="/mgmt/order/orderList",
+        url="/mgmt/order/demoList",
         query_params={"header": "1", "pageNum": "1"},
     )
     swagger_info = SwaggerInfo(
@@ -1214,7 +1315,7 @@ def test_generate_api_file_har_time_pairs(tmp_path):
     generator = APIGenerator(output_dir=str(tmp_path / "apis"))
     request_info = ParsedRequestInfo(
         method="GET",
-        url="/mgmt/order/orderList",
+        url="/mgmt/order/demoList",
         query_params={"pageNum": "1", "commitStartTime": "2026-06-01", "commitEndTime": "2026-06-30"},
     )
     swagger_info = SwaggerInfo(
@@ -1233,9 +1334,9 @@ def test_generate_api_file_har_time_pairs(tmp_path):
     assert filepath is not None
     with open(filepath[: -len(".py")] + ".api.json", encoding="utf-8") as f:
         meta = json.load(f)
-    # 无 Swagger 备注可提取格式，默认 %Y-%m-%d %H:%M:%S；按基础名 commit 配对 start/end
+    # 无 Swagger 备注可提取格式，默认 %Y-%m-%d；按基础名 commit 配对 start/end
     assert meta["har_time_pairs"] == {
-        "commit": {"start": "commitStartTime", "end": "commitEndTime", "format": "%Y-%m-%d %H:%M:%S"},
+        "commit": {"start": "commitStartTime", "end": "commitEndTime", "format": "%Y-%m-%d"},
     }
 
 
@@ -1246,7 +1347,7 @@ def test_generate_api_file_non_har_no_har_params(tmp_path):
     generator = APIGenerator(output_dir=str(tmp_path / "apis"))
     request_info = ParsedRequestInfo(
         method="GET",
-        url="/mgmt/order/orderList",
+        url="/mgmt/order/demoList",
         query_params={"pageNum": 1},
     )
 
@@ -1465,3 +1566,60 @@ def test_docstring_first_line_default(generator):
     swagger_info = SwaggerInfo()
     result = generator._docstring_first_line(swagger_info)
     assert result == "TODO: 添加接口描述"
+
+
+@allure.feature("API 生成器")
+@allure.story("从Swagger批量生成")
+@allure.title("测试Swagger表单文件参数生成上传API文件")
+def test_generate_apis_from_swagger_form_data_file(tmp_path, monkeypatch):
+    """Swagger 2.0 的 in: formData 文件参数（doc.html 上可见的 file）需被
+    提取并根据 consumes 下传 multipart 标记，生成 files + build_multipart_data
+    的上传函数；此前该参数被静默丢弃，生成的接口只能发空 body。"""
+    monkeypatch.setattr(APIConfig, "REQUIRED_HEADERS", classmethod(lambda cls: {}))
+    # 数据库探测只捕捉入参，不连真实库
+    captured: dict = {}
+
+    def fake_probe(api_url, param_names, **kwargs):
+        captured["param_names"] = list(param_names)
+        return None
+
+    monkeypatch.setattr("har2pytest.api_generator.probe_db_params", fake_probe)
+
+    doc = {
+        "basePath": "/",
+        "paths": {
+            "/api/demo/upload": {
+                "post": {
+                    "summary": "上传附件",
+                    "consumes": ["multipart/form-data"],
+                    "parameters": [
+                        {"name": "Authorization", "in": "header", "type": "string", "description": "令牌"},
+                        {"name": "file", "in": "formData", "type": "file", "description": "附件文件"},
+                        {"name": "remark", "in": "formData", "type": "string", "description": "备注"},
+                    ],
+                }
+            }
+        },
+    }
+
+    generator = APIGenerator(output_dir=str(tmp_path))
+
+    async def fake_get_swagger_doc(url):
+        return doc
+
+    monkeypatch.setattr(generator.swagger_handler, "get_swagger_doc", fake_get_swagger_doc)
+
+    files = asyncio.run(
+        generator.generate_apis_from_swagger("https://demo.example.com/doc.html", True, service_package="demo_service")
+    )
+    assert len(files) == 1
+    with open(files[0], encoding="utf-8") as f:
+        content = f.read()
+    # 文件参数走 files 渠道 + multipart 封装，普通表单字段一并保留
+    assert "files = {" in content
+    assert "(binary)" in content
+    assert "build_multipart_data" in content
+    assert "remark" in content
+    assert "Authorization" not in content
+    # 库探测参数：普通表单字段参与，文件占位参数不参与
+    assert captured["param_names"] == ["remark"]

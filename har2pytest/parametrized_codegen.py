@@ -17,6 +17,8 @@ from .codegen import render_lines
 from .config import APIConfig
 from .time_pair import TimePairContext
 from .utils import (
+    EPOCH_MS_FORMAT,
+    EPOCH_S_FORMAT,
     extract_service_package,
     format_parameter_value,
     header_value_formatter,
@@ -24,6 +26,7 @@ from .utils import (
     sanitize_param_name,
     sanitize_remark,
 )
+from .value_pair import ValuePairContext
 
 # ==================== render_ctx 构建 ====================
 
@@ -249,21 +252,26 @@ def gen_list_query_data_class_attr(
     api_params: dict[str, Any],
     param_values: dict[str, list[Any]],
     tp_ctx: TimePairContext,
+    vp_ctx: ValuePairContext | None = None,
 ) -> list[str]:
     """生成 list_query_data 类属性。
 
     分页参数从配置获取默认值。时间对参数用 datetime 动态计算：
-    start 取当年1月1日，end 取当前时间。
+    start 取当年1月1日，end 取当前时间。单时间参数按 range 标记：
+    True 注入"当年起点,今天"逗号区间，False 注入当前单值。
+    数值对参数基线置 None，由 test_0 收集响应 min/max 动态提供。
 
     Args:
         api_params: API 文件中的所有参数
         param_values: 参数枚举值字典
         tp_ctx: 时间对统一上下文
+        vp_ctx: 数值对统一上下文（可选）
 
     Returns:
         list_query_data 类属性代码行列表
     """
     data_items: list[tuple[str, str]] = []
+    vp_ctx = vp_ctx or ValuePairContext()
 
     for param_name, param_value in api_params.items():
         if APIConfig.is_pagination_param(param_name):
@@ -272,18 +280,41 @@ def gen_list_query_data_class_attr(
                 data_items.append((param_name, str(pagination_default)))
             continue
 
+        if param_name in vp_ctx.all_names:
+            # 数值对基线不写死：test_0 收集响应词干字段 min/max 后覆盖，
+            # 未收集到时保持 None（消费侧降级跳过验证）
+            data_items.append((param_name, "None"))
+            continue
+
         if param_name in tp_ctx.param_role:
             role, fmt = tp_ctx.param_role[param_name]
-            if role == "start":
-                data_items.append((
-                    param_name,
-                    f'datetime(datetime.now().year, 1, 1).strftime("{fmt}")',
-                ))
+            if fmt in (EPOCH_MS_FORMAT, EPOCH_S_FORMAT):
+                # epoch 时间戳对（integer 数值声明）：start 取当年 1 月 1 日
+                # 0 点、end 取当前时间，转时间戳取整；毫秒乘 1000。绝不渲染
+                # 日期字符串（数值参数会被服务端拒绝）
+                scale = " * 1000" if fmt == EPOCH_MS_FORMAT else ""
+                if role == "start":
+                    expr = f"int(datetime(datetime.now().year, 1, 1).timestamp(){scale})"
+                else:
+                    expr = f"int(datetime.now().timestamp(){scale})"
+            elif role == "start":
+                expr = f'datetime(datetime.now().year, 1, 1).strftime("{fmt}")'
             else:
-                data_items.append((
-                    param_name,
-                    f'datetime.now().strftime("{fmt}")',
-                ))
+                expr = f'datetime.now().strftime("{fmt}")'
+            data_items.append((param_name, expr))
+            continue
+
+        if param_name in tp_ctx.single_params:
+            # 单时间参数：备注声明逗号分隔区间时取"当年起点,今天"，否则取当前单值
+            fmt, is_range = tp_ctx.single_params[param_name]
+            if is_range:
+                expr = (
+                    f'datetime(datetime.now().year, 1, 1).strftime("{fmt}")'
+                    f' + "," + datetime.now().strftime("{fmt}")'
+                )
+            else:
+                expr = f'datetime.now().strftime("{fmt}")'
+            data_items.append((param_name, expr))
             continue
 
         if param_name in param_values and param_values[param_name]:
@@ -308,6 +339,9 @@ def gen_test_0_collect_response_data(
     function_name: str,
     param_var_name: str,
     api_params: dict[str, Any],
+    extra_time_params: list[str] | None = None,
+    value_pairs: dict[str, dict[str, str]] | None = None,
+    field_map: dict[str, str] | None = None,
 ) -> list[str]:
     """生成 test_0 "获取响应数据" 用例。
 
@@ -322,6 +356,12 @@ def gen_test_0_collect_response_data(
         function_name: API 函数名称
         param_var_name: 调用参数名（data 或 params）
         api_params: API 文件中的所有参数（已含 constant_params 覆盖值）
+        extra_time_params: 单时间参数名列表（可选，TIME_PARAMS 闸门未命中，
+            需额外传入 collect_list_query_data 豁免响应收集）
+        value_pairs: 数值对元数据（可选，传入 collect_list_query_data
+            按词干字段聚合响应 min/max 作为 Start/End 基线）
+        field_map: 参数名到响应字段名的显式映射（可选，来自 api.json 手工
+            补充；三级自动匹配落空时 collect_list_query_data 靠它对齐）
 
     Returns:
         test_0 用例代码行列表
@@ -351,6 +391,9 @@ def gen_test_0_collect_response_data(
         status_attr=render_ctx["status_attr"],
         json_call=render_ctx["json_call"],
         with_keyword=render_ctx["with_keyword"],
+        extra_time_params_repr=repr(sorted(extra_time_params)) if extra_time_params else "",
+        value_pairs_repr=repr(value_pairs) if value_pairs else "",
+        field_map_repr=repr(field_map) if field_map else "",
     )
 
 
@@ -366,11 +409,14 @@ def gen_batch_parametrized_test_methods(
     param_values: dict[str, list[Any]],
     param_remarks: dict[str, Any] | None = None,
     time_pair_ctx: TimePairContext | None = None,
+    value_pair_ctx: ValuePairContext | None = None,
+    field_map: dict[str, str] | None = None,
 ) -> list[str]:
     """生成 batch 模式下的参数化测试方法。
 
     枚举参数用 parametrize，非枚举参数用运行时取值（从 list_query_data）。
     时间对参数合并为单个测试方法，同时传 start 和 end 参数。
+    数值对参数同样合并为区间组合方法，断言响应值落在搜索区间内。
 
     Args:
         render_ctx: 模板渲染上下文
@@ -381,25 +427,92 @@ def gen_batch_parametrized_test_methods(
         param_values: 参数枚举值字典
         param_remarks: 参数备注字典（可选）
         time_pair_ctx: 时间对统一上下文（可选）
+        value_pair_ctx: 数值对统一上下文（可选）
+        field_map: 参数名到响应字段名的显式映射（可选，断言侧字段匹配
+            优先用它对齐响应记录字段）
 
     Returns:
         测试方法代码行列表
     """
     content: list[str] = []
     tp_ctx = time_pair_ctx or TimePairContext()
+    vp_ctx = value_pair_ctx or ValuePairContext()
     remarks = param_remarks or {}
+    field_map = field_map or {}
     idx = 1
 
     for item in param_items:
         param_name = item["param_name"]
-        if param_name in tp_ctx.end_names:
+        if param_name in tp_ctx.end_names or param_name in vp_ctx.end_names:
             continue
 
         other_params = item["other_params"]
         is_enum_param = param_name in param_values and bool(param_values[param_name])
         is_time_pair_start = param_name in tp_ctx.start_to_end
+        is_value_pair_start = param_name in vp_ctx.start_to_end
 
-        if is_time_pair_start:
+        if is_value_pair_start:
+            # 数值对区间组合用例：Start/End 同传（基线由 test_0 收集 min/max），
+            # 断言按词干匹配响应字段并验证落在区间内
+            end_param = vp_ctx.start_to_end[param_name]
+            vp_data_items: list[tuple[str, str]] = []
+            for k, v in other_params.items():
+                if k == end_param:
+                    continue
+                vp_data_items.append((k, format_parameter_value(v)))
+            vp_data_items.insert(0, (param_name, f'self.list_query_data["{param_name}"]'))
+            vp_data_items.insert(1, (end_param, f'self.list_query_data["{end_param}"]'))
+
+            # 标题去掉备注末尾的"起/止"方向标记，避免"金额-起-金额-止"冗余
+            vp_title = sanitize_remark(remarks.get(param_name, param_name))
+            if " " in vp_title:
+                vp_title = vp_title.split(" ")[0]
+            for suffix in ("-起", "起", "-止", "止"):
+                if vp_title.endswith(suffix):
+                    vp_title = vp_title[: -len(suffix)]
+                    break
+
+            start_ref = f'self.list_query_data["{param_name}"]'
+            end_ref = f'self.list_query_data["{end_param}"]'
+            range_assert = (
+                f"assert v is None or float({start_ref}) <= float(v) <= float({end_ref}), "
+                f"f'字段 {{k}} 值 {{v}} 不在搜索区间 {param_name}={{{start_ref}}} ~ {end_param}={{{end_ref}}}'"
+            )
+            content.extend(
+                render_lines(
+                    "p_runtime_value_method.j2",
+                    api_description=sanitize_remark(api_description),
+                    title_param=vp_title,
+                    def_prefix=render_ctx["def_prefix"],
+                    idx=idx,
+                    function_name=function_name,
+                    body_indent=render_ctx["body_indent"],
+                    param_var_name=param_var_name,
+                    data_items=vp_data_items,
+                    status_attr=render_ctx["status_attr"],
+                    json_call=render_ctx["json_call"],
+                    search_enabled=False,
+                    param_name=param_name,
+                    param_name_lower=param_name.lower(),
+                    verify_assert="",
+                    with_keyword=render_ctx["with_keyword"],
+                    range_check={
+                        "start": param_name,
+                        "end": end_param,
+                        # field_map 映射优先：参数名与响应字段名不同名时（如
+                        # monthExchangeAmtStart 对应 monthReturnAmt），区间断言
+                        # 按映射值匹配响应字段，否则回退词干匹配
+                        "field": (
+                            field_map.get(param_name)
+                            or field_map.get(end_param)
+                            or vp_ctx.start_to_base[param_name]
+                        ).lower(),
+                        "assert_line": range_assert,
+                    },
+                )
+            )
+
+        elif is_time_pair_start:
             end_param = tp_ctx.start_to_end[param_name]
             tp_data_items: list[tuple[str, str]] = []
             for k, v in other_params.items():
@@ -435,6 +548,7 @@ def gen_batch_parametrized_test_methods(
                     param_name_lower=param_name.lower(),
                     verify_assert="",
                     with_keyword=render_ctx["with_keyword"],
+                    range_check=None,
                 )
             )
 
@@ -469,7 +583,11 @@ def gen_batch_parametrized_test_methods(
                 )
             )
             content.extend(
-                gen_test_method_assertions(render_ctx, function_name, param_var_name, param_name)
+                gen_test_method_assertions(
+                    render_ctx, function_name, param_var_name, param_name,
+                    is_array_param=item.get("is_array_param", False),
+                    field_map=field_map,
+                )
             )
         else:
             data_items: list[tuple[str, str]] = []
@@ -482,7 +600,9 @@ def gen_batch_parametrized_test_methods(
                 title_param = title_param.split(" ")[0]
 
             search_enabled = "," not in param_name
-            is_list_param = param_name.lower().endswith("list")
+            # 数组判定以 Swagger 默认值形态（is_array_param）为准，兼容旧 List 后缀启发式；
+            # 复数 s 后缀参数（companyCodes/orderTypes）不能靠 endswith("s") 猜（误伤 status）
+            is_list_param = item.get("is_array_param", False) or param_name.lower().endswith("list")
             verify_assert = ""
             if search_enabled:
                 if is_list_param:
@@ -496,6 +616,12 @@ def gen_batch_parametrized_test_methods(
                         f'assert v is None or str(v) == str(self.list_query_data["{param_name}"]), '
                         f"f'字段 {{k}} 值 {{v}} 与搜索条件 {param_name}={{self.list_query_data[\"{param_name}\"]}} 不一致'"
                     )
+
+            # field_map 映射字段名与参数名/singular_name 不同时才有额外匹配价值
+            mapped_field = ""
+            candidate = field_map.get(param_name, "").lower()
+            if candidate and candidate not in {param_name.lower(), _array_singular_field(param_name)}:
+                mapped_field = candidate
 
             content.extend(
                 render_lines(
@@ -516,6 +642,9 @@ def gen_batch_parametrized_test_methods(
                     verify_assert=verify_assert,
                     with_keyword=render_ctx["with_keyword"],
                     list_suffix=is_list_param,
+                    singular_name=_array_singular_field(param_name) if is_list_param else "",
+                    mapped_field=mapped_field,
+                    range_check=None,
                 )
             )
 
@@ -542,6 +671,10 @@ def gen_parametrize_decorator(
         "p_parametrize_decorator.j2",
         arg_names=arg_names,
         values=parametrize_values,
+        # 组合参数末项保留尾逗号（ruff magic trailing comma）：否则 format_directory
+        # 的 ruff format 会把能容纳进行宽的多行值列表压回一行，丢失逐组一行的可读形态；
+        # 单参数枚举列表保持紧凑形态不加尾逗号
+        trailing_comma=is_combination,
     )
 
 
@@ -596,6 +729,19 @@ def gen_test_method_definition(
     )
 
 
+def _array_singular_field(param_name: str) -> str:
+    """数组参数的单数响应字段候选名（小写）。
+
+    响应记录字段通常用单数命名（companyCodes ↔ companyCode、
+    demoCodeList ↔ demoCode）：优先去 list 后缀，再去复数 s 后缀。
+    仅对数组参数调用，避免 status 这类以 s 结尾的标量词被误截。
+    """
+    lower = param_name.lower()
+    if lower.endswith("list"):
+        return lower.removesuffix("list")
+    return lower.removesuffix("s")
+
+
 def gen_test_method_body(
     render_ctx: dict[str, Any],
     param_var_name: str,
@@ -638,8 +784,15 @@ def gen_test_method_assertions(
     function_name: str,
     param_var_name: str,
     param_name: str = "",
+    is_array_param: bool = False,
+    field_map: dict[str, str] | None = None,
 ) -> list[str]:
-    """生成测试方法断言部分。"""
+    """生成测试方法断言部分。
+
+    field_map 中有该参数的映射时（如 {"like": "invoiceSensitive"}），断言
+    侧字段匹配在参数名/singular_name 之外追加映射字段名，保证与响应记录
+    字段名无子串关系时验证不落空。
+    """
     search_enabled = bool(param_name) and not APIConfig.is_time_param(param_name) and "," not in param_name
     safe_name = sanitize_param_name(param_name) if param_name else ""
     verify_assert = ""
@@ -648,6 +801,15 @@ def gen_test_method_assertions(
             f"assert v is None or str(v) == str({safe_name}), "
             f"f'字段 {{k}} 值 {{v}} 与搜索条件 {safe_name}={{{safe_name}}} 不一致'"
         )
+    # 数组判定与运行时路径同契约：Swagger 形态优先，兼容旧 List 后缀启发式
+    list_suffix = search_enabled and (is_array_param or param_name.lower().endswith("list"))
+    singular_name = _array_singular_field(param_name) if list_suffix else ""
+    # field_map 映射字段名与参数名/singular_name 不同时才有额外匹配价值
+    mapped_field = ""
+    if param_name and field_map:
+        candidate = field_map.get(param_name, "").lower()
+        if candidate and candidate not in {param_name.lower(), singular_name}:
+            mapped_field = candidate
     content = render_lines(
         "p_test_method_assertions.j2",
         async_mode=render_ctx["async_mode"],
@@ -656,7 +818,9 @@ def gen_test_method_assertions(
         search_enabled=search_enabled,
         search_param=param_name.lower() if search_enabled else "",
         verify_assert=verify_assert,
-        list_suffix=search_enabled and param_name.lower().endswith("list"),
+        list_suffix=list_suffix,
+        singular_name=singular_name,
+        mapped_field=mapped_field,
     )
     content.append("")
     return content
